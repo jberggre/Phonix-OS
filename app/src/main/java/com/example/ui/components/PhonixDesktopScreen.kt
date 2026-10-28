@@ -5,12 +5,27 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.hypot
+import kotlin.math.roundToInt
+import androidx.compose.ui.platform.LocalContext
+import com.example.model.ShortcutShape
+import com.example.model.ShortcutBgStyle
+import com.example.model.DesktopContextMenuData
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,6 +116,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -167,24 +184,16 @@ fun PhonixDesktopScreen(
         val isHardwareLandscape = screenWidth > screenHeight
         val isWidescreenMonitor = isHardwareLandscape || customization.displayMode.isWidescreen
 
-        // Desktop horizontal width: if widescreen monitor mode is forced on narrow screen, enable horizontal panning
-        val desktopWidth = if (customization.displayMode.isWidescreen && !isHardwareLandscape) 880.dp else screenWidth
-        val desktopHorizontalScrollState = rememberScrollState()
+        val desktopWidth = screenWidth
 
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(
-                    if (customization.displayMode.isWidescreen && !isHardwareLandscape)
-                        Modifier.horizontalScroll(desktopHorizontalScrollState)
-                    else Modifier
-                )
+            modifier = Modifier.fillMaxSize()
         ) {
             Box(
-                modifier = Modifier
-                    .width(desktopWidth)
-                    .fillMaxHeight()
+                modifier = Modifier.fillMaxSize()
             ) {
+                val desktopContext = LocalContext.current
+
                 // 1. Customizable Desktop Background with Phoenix Emblem as default
                 DesktopWallpaperBackground(
                     wallpaper = customization.wallpaper,
@@ -193,11 +202,10 @@ fun PhonixDesktopScreen(
                     lockToGrid = customization.lockIconsToGrid,
                     onDesktopClicked = {
                         viewModel.closeStartMenu()
-                        showContextMenu = false
+                        viewModel.closeContextMenu()
                     },
                     onDesktopLongPressed = { x, y ->
-                        contextMenuPos = Pair(x, y)
-                        showContextMenu = true
+                        viewModel.openWallpaperContextMenu(x, y)
                     }
                 )
 
@@ -216,7 +224,7 @@ fun PhonixDesktopScreen(
                         )
                 )
 
-                // 3. Desktop Shortcuts Layer (Draggable and Locked to 84dp Grid)
+                // 3. Desktop Shortcuts Layer (Freeform / Grid Draggable & Right-Click Customization)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -227,34 +235,92 @@ fun PhonixDesktopScreen(
                             end = 12.dp
                         )
                 ) {
-                    // Draggable icons
+                    // Draggable icons with per-shortcut shape, size, color, background & context menu
                     customization.shortcuts.forEach { shortcut ->
+                        val appIcon = uiState.installedApps.find { it.packageName == shortcut.launchPackage }?.iconDrawable
                         DraggableDesktopShortcut(
                             shortcut = shortcut,
                             iconSize = customization.iconSize,
                             showLabel = customization.showDesktopLabels,
                             accentColor = customization.accentColor.color,
+                            appIconDrawable = appIcon,
                             onMove = { dx, dy -> viewModel.moveShortcut(shortcut.id, dx, dy) },
                             onDrop = { x, y -> viewModel.dropShortcut(shortcut.id, x, y) },
-                            onClick = { viewModel.toggleWindow(shortcut.windowType) }
+                            onClick = {
+                                val density = desktopContext.resources.displayMetrics.density
+                                val bounds = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                                    android.graphics.Rect(
+                                        (shortcut.posX * density).toInt(),
+                                        (shortcut.posY * density).toInt(),
+                                        ((shortcut.posX + 380f) * density).toInt(),
+                                        ((shortcut.posY + 320f) * density).toInt()
+                                    )
+                                } else null
+                                viewModel.launchShortcutOrHostApp(desktopContext, shortcut, bounds)
+                            },
+                            onRightClick = { x, y -> viewModel.openShortcutContextMenu(shortcut.id, x, y) }
                         )
                     }
 
-                    // Desktop Widgets (Docked on Right Side in Widescreen Monitor Mode)
-                    if (customization.showQuickDistroWidget || customization.showSystemMonitorWidget) {
-                        Column(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .widthIn(max = if (isWidescreenMonitor) 260.dp else 220.dp)
-                                .padding(end = 4.dp, top = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            if (customization.showQuickDistroWidget) {
-                                DesktopQuickDistroWidget(uiState, viewModel)
+                    // Desktop Widgets & Quick Reopen Controls (Docked on Right Side)
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .widthIn(max = if (isWidescreenMonitor) 260.dp else 220.dp)
+                            .padding(end = 6.dp, top = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        // Quick Re-open pill buttons if one or both widgets are closed
+                        if (!customization.showQuickDistroWidget || !customization.showSystemMonitorWidget) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (!customization.showQuickDistroWidget) {
+                                    Surface(
+                                        onClick = { viewModel.toggleDesktopWidget("distro", true) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Slate900.copy(alpha = 0.90f),
+                                        border = BorderStroke(1.dp, PhonixAmber.copy(alpha = 0.7f)),
+                                        shadowElevation = 4.dp
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Apps, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("+ OS Card", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                                if (!customization.showSystemMonitorWidget) {
+                                    Surface(
+                                        onClick = { viewModel.toggleDesktopWidget("system", true) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Slate900.copy(alpha = 0.90f),
+                                        border = BorderStroke(1.dp, PhonixCyan.copy(alpha = 0.7f)),
+                                        shadowElevation = 4.dp
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Speed, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("+ Vitals", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
                             }
-                            if (customization.showSystemMonitorWidget) {
-                                DesktopSystemWidget(uiState)
-                            }
+                        }
+
+                        if (customization.showQuickDistroWidget) {
+                            DesktopQuickDistroWidget(uiState, viewModel)
+                        }
+                        if (customization.showSystemMonitorWidget) {
+                            DesktopSystemWidget(uiState, viewModel)
                         }
                     }
                 }
@@ -270,78 +336,40 @@ fun PhonixDesktopScreen(
                     )
                 }
 
-                // 5. Desktop Right-Click / Long-Press Context Menu
-                if (showContextMenu) {
+                // 5. Windows 11 Desktop Context Menu (Shortcut & Wallpaper)
+                uiState.activeContextMenu?.let { menuData ->
                     DesktopContextMenu(
-                        posX = contextMenuPos.first,
-                        posY = contextMenuPos.second,
-                        lockToGrid = customization.lockIconsToGrid,
-                        areWindowsHidden = customization.areAllWindowsHidden,
-                        onDismiss = { showContextMenu = false },
-                        onToggleLockGrid = {
-                            viewModel.toggleLockIconsToGrid(!customization.lockIconsToGrid)
-                            showContextMenu = false
-                        },
-                        onResetGrid = {
-                            viewModel.resetShortcutGrid()
-                            showContextMenu = false
-                        },
-                        onToggleAllWindows = {
-                            viewModel.toggleAllWindowVisibility()
-                            showContextMenu = false
-                        },
-                        onCloseAllWindows = {
-                            viewModel.closeAllWindows()
-                            showContextMenu = false
-                        },
-                        onToggleMonitorMode = {
-                            val newMode = if (customization.displayMode == MonitorDisplayMode.PHONE_PORTRAIT)
-                                MonitorDisplayMode.MONITOR_FHD_16_9 else MonitorDisplayMode.PHONE_PORTRAIT
-                            viewModel.updateDisplayMode(newMode)
-                            showContextMenu = false
-                        },
-                        onPersonalize = {
-                            showContextMenu = false
-                            viewModel.openWindow(WindowType.PERSONALIZE)
-                        },
-                        onOpenBrowser = {
-                            showContextMenu = false
-                            viewModel.openWindow(WindowType.BROWSER)
-                        },
-                        onOpenDistroStore = {
-                            showContextMenu = false
-                            viewModel.openWindow(WindowType.DISTRO_STORE)
-                        },
-                        onOpenTerminal = {
-                            showContextMenu = false
-                            viewModel.openWindow(WindowType.TERMINAL)
-                        }
+                        menuData = menuData,
+                        uiState = uiState,
+                        viewModel = viewModel
                     )
                 }
 
-                // 6. Start Menu
+                // 5.5 Add App to Desktop Dialog (Installed Phone Apps Picker)
+                if (uiState.isAddAppDialogOpen) {
+                    DesktopAppPickerDialog(
+                        uiState = uiState,
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.closeAddAppDialog() }
+                    )
+                }
+
+                // 6. Windows 11 Fluent Acrylic Start Menu (Centered Floating Card)
                 if (uiState.isStartMenuOpen) {
-                    PhonixStartMenu(
+                    Windows11StartMenu(
                         uiState = uiState,
                         viewModel = viewModel,
                         modifier = Modifier
-                            .align(if (customization.taskbarPosition == TaskbarPosition.BOTTOM) Alignment.BottomStart else Alignment.TopStart)
-                            .offset(
-                                x = 8.dp,
-                                y = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) (-52).dp else 52.dp
-                            )
+                            .align(Alignment.BottomCenter)
+                            .offset(y = (-56).dp)
                     )
                 }
 
-                // 7. Full PC Taskbar (with Show Desktop Peek button & Window On/Off toggling)
-                PhonixTaskbar(
+                // 7. Windows 11 Centered Taskbar (App Pointers, System Tray & Show Desktop)
+                Windows11Taskbar(
                     uiState = uiState,
                     viewModel = viewModel,
-                    isWidescreen = isWidescreenMonitor,
-                    modifier = Modifier.align(
-                        if (customization.taskbarPosition == TaskbarPosition.BOTTOM) Alignment.BottomCenter
-                        else Alignment.TopCenter
-                    )
+                    modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }
         }
@@ -368,14 +396,15 @@ fun MonitorStatusBar(
             Icon(
                 imageVector = Icons.Default.Tv,
                 contentDescription = null,
-                tint = if (customization.displayMode.isWidescreen || isHardwareLandscape) PhonixGreen else PhonixCyan,
+                tint = PhonixGreen,
                 modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = if (isHardwareLandscape || customization.displayMode.isWidescreen)
-                    "External Display: 1080p 60Hz HDMI (USB-C Dock Connected)"
-                else "Handheld Mode (Plug in USB-C dock for external monitor)",
+                text = if (isHardwareLandscape)
+                    "External Monitor: 1080p 60Hz FHD (USB-C Dock Connected)"
+                else
+                    "Monitor Output: 16:9 Landscape Desktop Mode",
                 color = Slate300,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
@@ -383,35 +412,93 @@ fun MonitorStatusBar(
             )
         }
 
-        // Quick Display Mode Toggle Pill
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(if (customization.displayMode.isWidescreen) PhonixBlue else Slate800)
-                .clickable {
-                    val next = when (customization.displayMode) {
-                        MonitorDisplayMode.PHONE_PORTRAIT -> MonitorDisplayMode.MONITOR_FHD_16_9
-                        MonitorDisplayMode.MONITOR_FHD_16_9 -> MonitorDisplayMode.ULTRAWIDE_21_9
-                        MonitorDisplayMode.ULTRAWIDE_21_9 -> MonitorDisplayMode.PHONE_PORTRAIT
-                    }
-                    viewModel.updateDisplayMode(next)
-                }
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+        // Homescreen Widget & Display Controls
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.AspectRatio,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(10.dp)
-                )
-                Spacer(modifier = Modifier.width(3.dp))
-                Text(
-                    text = customization.displayMode.title,
-                    color = Color.White,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            // OS Distro Card Toggle Pill
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (customization.showQuickDistroWidget) PhonixAmber.copy(alpha = 0.25f) else Slate800)
+                    .border(1.dp, if (customization.showQuickDistroWidget) PhonixAmber else Slate700, RoundedCornerShape(4.dp))
+                    .clickable { viewModel.toggleDesktopWidget("distro", !customization.showQuickDistroWidget) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Apps,
+                        contentDescription = "Toggle Active Linux Distro Card",
+                        tint = if (customization.showQuickDistroWidget) PhonixAmber else Slate400,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = if (customization.showQuickDistroWidget) "OS Card: ON" else "OS Card: OFF",
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // System Vitals Toggle Pill
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (customization.showSystemMonitorWidget) PhonixCyan.copy(alpha = 0.25f) else Slate800)
+                    .border(1.dp, if (customization.showSystemMonitorWidget) PhonixCyan else Slate700, RoundedCornerShape(4.dp))
+                    .clickable { viewModel.toggleDesktopWidget("system", !customization.showSystemMonitorWidget) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Speed,
+                        contentDescription = "Toggle System Vitals Card",
+                        tint = if (customization.showSystemMonitorWidget) PhonixCyan else Slate400,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = if (customization.showSystemMonitorWidget) "Vitals: ON" else "Vitals: OFF",
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Quick Display Mode Toggle Pill
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (customization.displayMode.isWidescreen) PhonixBlue else Slate800)
+                    .clickable {
+                        val next = when (customization.displayMode) {
+                            MonitorDisplayMode.PHONE_PORTRAIT -> MonitorDisplayMode.MONITOR_FHD_16_9
+                            MonitorDisplayMode.MONITOR_FHD_16_9 -> MonitorDisplayMode.ULTRAWIDE_21_9
+                            MonitorDisplayMode.ULTRAWIDE_21_9 -> MonitorDisplayMode.PHONE_PORTRAIT
+                        }
+                        viewModel.updateDisplayMode(next)
+                    }
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.AspectRatio,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = customization.displayMode.title,
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
@@ -426,77 +513,40 @@ fun DesktopWallpaperBackground(
     onDesktopClicked: () -> Unit,
     onDesktopLongPressed: (Float, Float) -> Unit
 ) {
+    val density = LocalDensity.current.density
     Box(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { _ -> onDesktopClicked() },
-                    onDrag = { _, _ -> }
+                detectTapGestures(
+                    onTap = { onDesktopClicked() },
+                    onLongPress = { offset ->
+                        onDesktopLongPressed(offset.x / density, offset.y / density)
+                    }
                 )
             }
-            .clickable { onDesktopClicked() }
     ) {
         when (wallpaper) {
             DesktopWallpaper.PHOENIX_CYBER_DEFAULT -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color(0xFF040711), Color(0xFF070E1E), Color(0xFF0A1428), Color(0xFF040711))
-                            )
-                        )
-                ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Image(
+                        painter = painterResource(id = R.drawable.img_phoenix_wallpaper),
+                        contentDescription = "Official Phoenix OS Cyber Wallpaper",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                    // Ambient gradient overlay for enhanced readability
                     Box(
                         modifier = Modifier
-                            .size(340.dp)
-                            .align(Alignment.Center)
-                            .clip(CircleShape)
+                            .fillMaxWidth()
+                            .height(90.dp)
+                            .align(Alignment.BottomCenter)
                             .background(
-                                Brush.radialGradient(
-                                    listOf(accentColor.copy(alpha = 0.18f), Color(0xFF0284C7).copy(alpha = 0.08f), Color.Transparent)
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color(0xAA040711))
                                 )
                             )
                     )
-
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.img_phoenix_logo),
-                            contentDescription = "Phoenix OS Emblem",
-                            modifier = Modifier
-                                .size(170.dp)
-                                .shadow(24.dp, shape = CircleShape, spotColor = accentColor)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "PHONIX",
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 3.sp,
-                                fontFamily = FontFamily.SansSerif
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "OS",
-                                color = PhonixAmber,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 2.sp
-                            )
-                        }
-                        Text(
-                            text = "ARM64 Linux Workstation • VirGL Hardware Accelerated",
-                            color = Slate400.copy(alpha = 0.7f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
                 }
             }
 
@@ -575,9 +625,13 @@ fun DraggableDesktopShortcut(
     accentColor: Color,
     onMove: (Float, Float) -> Unit,
     onDrop: (Float, Float) -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onRightClick: (Float, Float) -> Unit
 ) {
-    val sizeDp = iconSize.sizeDp.dp
+    val effectiveSize = shortcut.customSize ?: iconSize
+    val sizeDp = effectiveSize.sizeDp.dp
+    val shapeRadius = shortcut.customShape.cornerRadiusDp.dp
+
     val icon = when (shortcut.windowType) {
         WindowType.BROWSER -> Icons.Default.Language
         WindowType.DISTRO_STORE -> Icons.Default.Apps
@@ -591,8 +645,8 @@ fun DraggableDesktopShortcut(
         else -> Icons.Default.Computer
     }
 
-    val iconTint = when (shortcut.windowType) {
-        WindowType.BROWSER -> PhonixBlueLight
+    val defaultIconTint = when (shortcut.windowType) {
+        WindowType.BROWSER -> PhonixCyan
         WindowType.DISTRO_STORE -> PhonixAmber
         WindowType.PERSONALIZE -> Color(0xFFA855F7)
         WindowType.TERMINAL -> TerminalGreen
@@ -600,38 +654,144 @@ fun DraggableDesktopShortcut(
         WindowType.RESOURCE_MONITOR -> Color(0xFF34D399)
         WindowType.FILE_EXPLORER -> Color(0xFFFBBF24)
         WindowType.BENCHMARK -> Color(0xFFF43F5E)
-        else -> Color.White
+        else -> PhonixBlueLight
     }
 
-    val containerColor = when (shortcut.windowType) {
-        WindowType.BROWSER -> Color(0xFF0C2A4D)
-        WindowType.DISTRO_STORE -> Color(0xFF3B2A12)
-        WindowType.PERSONALIZE -> Color(0xFF28143F)
-        WindowType.TERMINAL -> Color(0xFF0D2818)
-        WindowType.SERVER_MANAGER -> Color(0xFF0A2E3D)
-        WindowType.RESOURCE_MONITOR -> Color(0xFF0E3022)
-        WindowType.FILE_EXPLORER -> Color(0xFF332A15)
-        else -> Slate850
-    }
+    val iconTint = shortcut.customColor?.color ?: defaultIconTint
+
+    val density = LocalDensity.current.density
+    var isDragging by remember(shortcut.id) { mutableStateOf(false) }
+    var dragOffsetX by remember(shortcut.id) { mutableFloatStateOf(0f) }
+    var dragOffsetY by remember(shortcut.id) { mutableFloatStateOf(0f) }
+
+    val shortcutWidth = (sizeDp + 26.dp).coerceAtLeast(76.dp)
 
     Box(
         modifier = Modifier
-            .offset { IntOffset(shortcut.posX.toInt(), shortcut.posY.toInt()) }
-            .pointerInput(shortcut.id) {
-                detectDragGestures(
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        onMove(dragAmount.x, dragAmount.y)
-                    },
-                    onDragEnd = {
-                        onDrop(shortcut.posX, shortcut.posY)
-                    }
+            .offset {
+                IntOffset(
+                    x = ((shortcut.posX * density) + dragOffsetX).roundToInt(),
+                    y = ((shortcut.posY * density) + dragOffsetY).roundToInt()
                 )
             }
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { onClick() }
-            .padding(4.dp)
-            .widthIn(max = 76.dp)
+            .zIndex(if (isDragging) 100f else 1f)
+            .shadow(
+                elevation = if (isDragging) 14.dp else 2.dp,
+                shape = RoundedCornerShape(shapeRadius),
+                spotColor = if (isDragging) PhonixCyan else iconTint.copy(alpha = 0.5f)
+            )
+            .clip(RoundedCornerShape(shapeRadius))
+            .background(
+                when (shortcut.customBackground) {
+                    ShortcutBgStyle.FROSTED_GLASS -> Slate900.copy(alpha = if (isDragging) 0.95f else 0.76f)
+                    ShortcutBgStyle.NEON_RIM -> Slate950.copy(alpha = 0.94f)
+                    ShortcutBgStyle.SOLID_DARK -> Color(0xFF070B14)
+                    ShortcutBgStyle.TRANSPARENT -> Color.Transparent
+                }
+            )
+            .border(
+                width = if (shortcut.customBackground == ShortcutBgStyle.NEON_RIM) 2.dp else 1.dp,
+                color = if (isDragging) PhonixCyan else iconTint.copy(
+                    alpha = if (shortcut.customBackground == ShortcutBgStyle.NEON_RIM) 0.85f else 0.40f
+                ),
+                shape = RoundedCornerShape(shapeRadius)
+            )
+            .pointerInput(shortcut.id, shortcut.posX, shortcut.posY) {
+                try {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val startX = down.position.x
+                        val startY = down.position.y
+                        val isMouseSecondary = down.type == PointerType.Mouse &&
+                                currentEvent.buttons.isSecondaryPressed
+
+                        if (isMouseSecondary) {
+                            down.consume()
+                            onRightClick(
+                                shortcut.posX + (startX / density),
+                                shortcut.posY + (startY / density)
+                            )
+                            return@awaitEachGesture
+                        }
+
+                        var dragStarted = false
+                        val touchSlop = viewConfiguration.touchSlop
+                        val longPressTimeout = viewConfiguration.longPressTimeoutMillis
+                        val startTime = System.currentTimeMillis()
+
+                        while (true) {
+                            val elapsed = System.currentTimeMillis() - startTime
+                            val remainingTime = if (!dragStarted) {
+                                (longPressTimeout - elapsed).coerceAtLeast(1L)
+                            } else {
+                                30000L
+                            }
+
+                            val event = withTimeoutOrNull(remainingTime) {
+                                awaitPointerEvent(PointerEventPass.Main)
+                            }
+
+                            if (event == null && !dragStarted) {
+                                // Long-press context menu triggered
+                                onRightClick(
+                                    shortcut.posX + (startX / density),
+                                    shortcut.posY + (startY / density)
+                                )
+                                while (true) {
+                                    val nextEvent = awaitPointerEvent(PointerEventPass.Main)
+                                    if (nextEvent.changes.all { !it.pressed }) break
+                                }
+                                break
+                            }
+
+                            if (event == null) break
+
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
+                            if (change == null || !change.pressed) {
+                                // Pointer lifted/released
+                                if (dragStarted) {
+                                    val finalX = (shortcut.posX + (dragOffsetX / density)).coerceAtLeast(0f)
+                                    val finalY = (shortcut.posY + (dragOffsetY / density)).coerceAtLeast(0f)
+                                    dragOffsetX = 0f
+                                    dragOffsetY = 0f
+                                    isDragging = false
+                                    onDrop(finalX, finalY)
+                                } else {
+                                    onClick()
+                                }
+                                break
+                            }
+
+                            val currentDist = hypot(change.position.x - startX, change.position.y - startY)
+                            if (!dragStarted) {
+                                if (currentDist > touchSlop) {
+                                    dragStarted = true
+                                    isDragging = true
+                                    change.consume()
+                                    dragOffsetX = change.position.x - startX
+                                    dragOffsetY = change.position.y - startY
+                                }
+                            } else {
+                                change.consume()
+                                dragOffsetX = change.position.x - startX
+                                dragOffsetY = change.position.y - startY
+                            }
+                        }
+                    }
+                } finally {
+                    if (isDragging) {
+                        val finalX = (shortcut.posX + (dragOffsetX / density)).coerceAtLeast(0f)
+                        val finalY = (shortcut.posY + (dragOffsetY / density)).coerceAtLeast(0f)
+                        dragOffsetX = 0f
+                        dragOffsetY = 0f
+                        isDragging = false
+                        onDrop(finalX, finalY)
+                    }
+                }
+            }
+            .padding(horizontal = 6.dp, vertical = 6.dp)
+            .width(shortcutWidth)
+            .testTag("shortcut_${shortcut.id}")
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -640,9 +800,9 @@ fun DraggableDesktopShortcut(
             Box(
                 modifier = Modifier
                     .size(sizeDp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(containerColor)
-                    .border(1.dp, iconTint.copy(alpha = 0.45f), RoundedCornerShape(10.dp)),
+                    .clip(RoundedCornerShape(shapeRadius))
+                    .background(iconTint.copy(alpha = 0.16f))
+                    .border(1.dp, iconTint.copy(alpha = 0.55f), RoundedCornerShape(shapeRadius)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -653,12 +813,12 @@ fun DraggableDesktopShortcut(
                 )
             }
             if (showLabel) {
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = shortcut.title,
                     color = Color.White,
                     fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -676,7 +836,7 @@ fun DesktopQuickDistroWidget(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.88f)),
+        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.90f)),
         border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(PhonixBlue, Slate800)))
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
@@ -690,7 +850,16 @@ fun DesktopQuickDistroWidget(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = "Active Linux OS", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
-                Text(text = "8 Available", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "8 Available", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(
+                        onClick = { viewModel.toggleDesktopWidget("distro", false) },
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close Distro Card", tint = Slate400, modifier = Modifier.size(14.dp))
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -714,12 +883,15 @@ fun DesktopQuickDistroWidget(
 }
 
 @Composable
-fun DesktopSystemWidget(uiState: PhonixUiState) {
+fun DesktopSystemWidget(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.88f)),
+        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.90f)),
         border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(Slate800, PhonixCyan)))
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
@@ -728,13 +900,26 @@ fun DesktopSystemWidget(uiState: PhonixUiState) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(text = "System Vitals", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    text = "${uiState.telemetry.batteryTempC.toInt()}°C",
-                    color = if (uiState.telemetry.batteryTempC > 40f) PhonixRed else PhonixGreen,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Speed, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "System Vitals", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${uiState.telemetry.batteryTempC.toInt()}°C",
+                        color = if (uiState.telemetry.batteryTempC > 40f) PhonixRed else PhonixGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(
+                        onClick = { viewModel.toggleDesktopWidget("system", false) },
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close System Vitals", tint = Slate400, modifier = Modifier.size(14.dp))
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -770,9 +955,13 @@ fun DesktopContextMenu(
     posY: Float,
     lockToGrid: Boolean,
     areWindowsHidden: Boolean,
+    showQuickDistroWidget: Boolean,
+    showSystemMonitorWidget: Boolean,
     onDismiss: () -> Unit,
     onToggleLockGrid: () -> Unit,
     onResetGrid: () -> Unit,
+    onToggleDistroWidget: () -> Unit,
+    onToggleSystemWidget: () -> Unit,
     onToggleAllWindows: () -> Unit,
     onCloseAllWindows: () -> Unit,
     onToggleMonitorMode: () -> Unit,
@@ -784,7 +973,7 @@ fun DesktopContextMenu(
     Card(
         modifier = Modifier
             .offset { IntOffset(posX.toInt().coerceAtMost(300), posY.toInt().coerceAtMost(380)) }
-            .width(240.dp)
+            .width(250.dp)
             .shadow(16.dp, RoundedCornerShape(8.dp)),
         colors = CardDefaults.cardColors(containerColor = Slate900),
         border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(PhonixBlue, Slate700)))
@@ -795,6 +984,17 @@ fun DesktopContextMenu(
                 icon = if (areWindowsHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                 onClick = onToggleAllWindows
             )
+            ContextMenuItem(
+                title = if (showQuickDistroWidget) "Close Active Distro Card" else "Open Active Distro Card",
+                icon = Icons.Default.Apps,
+                onClick = onToggleDistroWidget
+            )
+            ContextMenuItem(
+                title = if (showSystemMonitorWidget) "Close System Vitals Card" else "Open System Vitals Card",
+                icon = Icons.Default.Speed,
+                onClick = onToggleSystemWidget
+            )
+            HorizontalDivider(color = Slate800, modifier = Modifier.padding(vertical = 3.dp))
             ContextMenuItem(
                 title = if (lockToGrid) "✓ Lock Shortcuts to Grid" else "Lock Shortcuts to Grid",
                 icon = Icons.Default.GridView,
@@ -879,22 +1079,29 @@ fun DesktopWindowFrame(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(34.dp)
+                    .height(36.dp)
                     .background(
                         if (isActive) Brush.horizontalGradient(listOf(Slate900, accentColor.copy(alpha = 0.4f)))
                         else Brush.horizontalGradient(listOf(Slate900, Slate850))
                     )
-                    .pointerInput(window.id) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            viewModel.moveWindow(window.id, dragAmount.x, dragAmount.y)
-                        }
-                    }
-                    .padding(horizontal = 10.dp),
+                    .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // 1. Draggable Window Header (Separated from buttons so dragging never swallows clicks)
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .pointerInput(window.id) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                viewModel.moveWindow(window.id, dragAmount.x, dragAmount.y)
+                            }
+                        }
+                        .clickable { viewModel.focusWindow(window.id) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     val windowIcon = when (window.type) {
                         WindowType.BROWSER -> Icons.Default.Language
                         WindowType.DISTRO_STORE -> Icons.Default.Apps
@@ -923,40 +1130,46 @@ fun DesktopWindowFrame(
                     )
                 }
 
-                // Window control buttons
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Minimize (Turn Off Window)
+                // 2. Window Control Buttons (Dedicated click scope with generous touch targets)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Minimize
                     Box(
                         modifier = Modifier
-                            .size(18.dp)
-                            .clip(RoundedCornerShape(3.dp))
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(4.dp))
                             .background(Slate800)
-                            .clickable { viewModel.minimizeWindow(window.id) },
+                            .clickable { viewModel.minimizeWindow(window.id) }
+                            .testTag("win_btn_min_${window.id}"),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "–", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(text = "–", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
-                    // Maximize
+                    // Maximize / Restore
                     Box(
                         modifier = Modifier
-                            .size(18.dp)
-                            .clip(RoundedCornerShape(3.dp))
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(4.dp))
                             .background(Slate800)
-                            .clickable { viewModel.toggleMaximizeWindow(window.id) },
+                            .clickable { viewModel.toggleMaximizeWindow(window.id) }
+                            .testTag("win_btn_max_${window.id}"),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "□", color = Color.White, fontSize = 11.sp)
+                        Text(text = "□", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
-                    // Close
+                    // Close Window (Vivid Red X)
                     Box(
                         modifier = Modifier
-                            .size(18.dp)
-                            .clip(RoundedCornerShape(3.dp))
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(4.dp))
                             .background(Color(0xFFEF4444))
-                            .clickable { viewModel.closeWindow(window.id) },
+                            .clickable { viewModel.closeWindow(window.id) }
+                            .testTag("win_btn_close_${window.id}"),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(12.dp))
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close Window", tint = Color.White, modifier = Modifier.size(14.dp))
                     }
                 }
             }
@@ -993,17 +1206,40 @@ fun BrowserWindowContent(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
+    var history by remember { mutableStateOf(listOf("https://github.com/phonix-os/linux-arm64")) }
+    var historyIndex by remember { mutableStateOf(0) }
     var urlInput by remember { mutableStateOf("https://github.com/phonix-os/linux-arm64") }
     var currentUrl by remember { mutableStateOf("https://github.com/phonix-os/linux-arm64") }
     var activeTabTitle by remember { mutableStateOf("GitHub: Phonix Linux ARM64") }
+    var isReloading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isReloading) {
+        if (isReloading) {
+            kotlinx.coroutines.delay(350L)
+            isReloading = false
+        }
+    }
+
+    fun navigateTo(url: String, title: String? = null) {
+        val target = if (url.startsWith("http://") || url.startsWith("https://")) url
+        else "https://duckduckgo.com/?q=${url.replace(" ", "+")}"
+        currentUrl = target
+        urlInput = target
+        activeTabTitle = title ?: target.removePrefix("https://").removePrefix("http://").take(24)
+        val newHistory = history.take(historyIndex + 1) + target
+        history = newHistory
+        historyIndex = newHistory.size - 1
+    }
 
     val bookmarks = listOf(
-        Pair("GitHub", "https://github.com"),
+        Pair("GitHub", "https://github.com/phonix-os/linux-arm64"),
         Pair("Nginx Host", "http://localhost:8080"),
+        Pair("Python API", "http://localhost:5000"),
+        Pair("OpenSSH (:2222)", "http://localhost:2222"),
+        Pair("Samba (:4455)", "http://localhost:4455"),
         Pair("Pi-hole Admin", "http://localhost/admin"),
         Pair("Debian Packages", "https://packages.debian.org"),
-        Pair("Reddit Linux", "https://reddit.com/r/linux"),
-        Pair("Wikipedia", "https://wikipedia.org")
+        Pair("DuckDuckGo", "https://duckduckgo.com")
     )
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0F172A))) {
@@ -1025,14 +1261,27 @@ fun BrowserWindowContent(
                     Icon(Icons.Default.Language, contentDescription = null, tint = PhonixBlueLight, modifier = Modifier.size(12.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = activeTabTitle, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(Slate700.copy(alpha = 0.6f))
+                            .clickable {
+                                val win = uiState.windows.find { it.type == WindowType.BROWSER }
+                                if (win != null) viewModel.closeWindow(win.id)
+                            }
+                            .testTag("browser_tab_close_btn"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close tab", tint = Color.White, modifier = Modifier.size(10.dp))
+                    }
                 }
             }
             Spacer(modifier = Modifier.width(4.dp))
             IconButton(
                 onClick = {
-                    urlInput = "https://duckduckgo.com"
-                    currentUrl = urlInput
-                    activeTabTitle = "New Tab"
+                    navigateTo("https://duckduckgo.com", "New Tab")
                 },
                 modifier = Modifier.size(24.dp)
             ) {
@@ -1048,21 +1297,48 @@ fun BrowserWindowContent(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { currentUrl = "https://duckduckgo.com"; urlInput = currentUrl }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Slate300, modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = { currentUrl = "https://github.com"; urlInput = currentUrl }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.ArrowForward, contentDescription = "Forward", tint = Slate300, modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = { /* Refresh */ }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate300, modifier = Modifier.size(16.dp))
-            }
+            val canGoBack = historyIndex > 0
+            val canGoForward = historyIndex < history.size - 1
+
             IconButton(
                 onClick = {
-                    currentUrl = "http://localhost:8080"
-                    urlInput = currentUrl
-                    activeTabTitle = "Localhost Nginx Home"
+                    if (canGoBack) {
+                        historyIndex--
+                        currentUrl = history[historyIndex]
+                        urlInput = currentUrl
+                        activeTabTitle = currentUrl.removePrefix("https://").removePrefix("http://").take(24)
+                    }
                 },
+                enabled = canGoBack,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = if (canGoBack) Slate300 else Slate600, modifier = Modifier.size(16.dp))
+            }
+
+            IconButton(
+                onClick = {
+                    if (canGoForward) {
+                        historyIndex++
+                        currentUrl = history[historyIndex]
+                        urlInput = currentUrl
+                        activeTabTitle = currentUrl.removePrefix("https://").removePrefix("http://").take(24)
+                    }
+                },
+                enabled = canGoForward,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(Icons.Default.ArrowForward, contentDescription = "Forward", tint = if (canGoForward) Slate300 else Slate600, modifier = Modifier.size(16.dp))
+            }
+
+            IconButton(
+                onClick = { isReloading = true },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = if (isReloading) PhonixGreen else Slate300, modifier = Modifier.size(16.dp))
+            }
+
+            IconButton(
+                onClick = { navigateTo("http://localhost:8080", "Localhost Nginx Home") },
                 modifier = Modifier.size(28.dp)
             ) {
                 Icon(Icons.Default.Home, contentDescription = "Home", tint = PhonixCyan, modifier = Modifier.size(16.dp))
@@ -1085,15 +1361,13 @@ fun BrowserWindowContent(
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = {
-                    currentUrl = if (urlInput.startsWith("http://") || urlInput.startsWith("https://")) urlInput
-                    else "https://duckduckgo.com/?q=${urlInput.replace(" ", "+")}"
-                    activeTabTitle = currentUrl.take(28)
+                    navigateTo(urlInput)
                 }),
                 leadingIcon = {
                     Icon(
                         imageVector = if (currentUrl.startsWith("https://")) Icons.Default.OpenInBrowser else Icons.Default.Language,
                         contentDescription = null,
-                        tint = if (currentUrl.startsWith("https://")) PhonixGreen else Slate400,
+                        tint = if (currentUrl.startsWith("https://") || currentUrl.contains("localhost")) PhonixGreen else Slate400,
                         modifier = Modifier.size(14.dp)
                     )
                 }
@@ -1101,11 +1375,7 @@ fun BrowserWindowContent(
 
             Spacer(modifier = Modifier.width(6.dp))
             Button(
-                onClick = {
-                    currentUrl = if (urlInput.startsWith("http://") || urlInput.startsWith("https://")) urlInput
-                    else "https://duckduckgo.com/?q=${urlInput.replace(" ", "+")}"
-                    activeTabTitle = currentUrl.take(28)
-                },
+                onClick = { navigateTo(urlInput) },
                 modifier = Modifier.height(34.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
                 shape = RoundedCornerShape(17.dp),
@@ -1130,11 +1400,7 @@ fun BrowserWindowContent(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .background(Color(0xFF1E293B))
-                        .clickable {
-                            urlInput = url
-                            currentUrl = url
-                            activeTabTitle = title
-                        }
+                        .clickable { navigateTo(url, title) }
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(text = title, color = Slate300, fontSize = 10.sp, fontWeight = FontWeight.Medium)
@@ -1166,7 +1432,7 @@ fun BrowserWindowContent(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (currentUrl.contains("localhost")) "Local Web Server Dashboard" else "Phonix Open Source Web Engine",
+                                text = if (currentUrl.contains("localhost") || currentUrl.contains("127.0.0.1")) "Local Microservices Console" else "Phonix Web Navigation Engine",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
@@ -1177,25 +1443,63 @@ fun BrowserWindowContent(
                     }
                 }
 
-                if (currentUrl.contains("localhost")) {
+                if (currentUrl.contains("8080") || currentUrl.contains("nginx")) {
                     Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Welcome to Nginx on Phonix OS!", color = PhonixGreen, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Welcome to Nginx HTTP Daemon!", color = PhonixGreen, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                "Your Android smartphone is successfully serving web pages via ARM64 Nginx HTTP daemon on port 8080. Accessible across your local Wi-Fi network at http://${uiState.localIpAddress}:8080.",
+                                "Serving from /var/www/html via ARM64 Nginx daemon on port 8080. Accessible across LAN at http://${uiState.localIpAddress}:8080.",
                                 color = Slate300,
                                 fontSize = 11.sp
+                            )
+                        }
+                    }
+                } else if (currentUrl.contains("5000") || currentUrl.contains("python")) {
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Python 3 Micro-service Active", color = PhonixCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                "Running /home/phonix/server.py on port 5000. Ready to handle HTTP requests, telemetry queries, and IoT automation webhooks.",
+                                color = Slate300,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                } else if (currentUrl.contains("2222") || currentUrl.contains("ssh")) {
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("OpenSSH Remote Daemon", color = PhonixAmber, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                "Port 2222 is active. Connect from your PC terminal via:\nssh phonix@${uiState.localIpAddress} -p 2222",
+                                color = Slate300,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                } else if (currentUrl.contains("4455") || currentUrl.contains("samba")) {
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Samba Windows File Share (NAS)", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                "Shared folder /home/phonix/shared is mounted. On Windows PC, open File Explorer and enter:\\\\${uiState.localIpAddress}\\shared",
+                                color = Slate300,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
                             )
                         }
                     }
                 } else {
                     Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Fast Chromium / Gecko Core Rendering", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("VirGL Hardware-Accelerated Rendering", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                "Phonix OS includes hardware-accelerated web browsing with support for HTML5, CSS3, JavaScript, and WebGL through VirGL GLES 3D drivers. Optimized for both external monitors and handheld screens.",
+                                "Phonix OS includes hardware-accelerated web browsing with support for HTML5, CSS3, JavaScript, and WebGL through VirGL GLES 3D drivers. Optimized for both external monitors and handheld touchscreens.",
                                 color = Slate400,
                                 fontSize = 11.sp
                             )
@@ -1734,30 +2038,58 @@ fun PhonixStartMenu(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-            HorizontalDivider(color = Slate800)
-            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = uiState.startMenuSearchQuery,
+                onValueChange = { viewModel.updateStartMenuSearch(it) },
+                placeholder = { Text("Search apps & tools...", color = Slate400, fontSize = 11.sp) },
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp),
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp),
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Slate400, modifier = Modifier.size(14.dp))
+                },
+                trailingIcon = {
+                    if (uiState.startMenuSearchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.updateStartMenuSearch("") }, modifier = Modifier.size(16.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Slate400, modifier = Modifier.size(12.dp))
+                        }
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF0F172A),
+                    unfocusedContainerColor = Color(0xFF0F172A),
+                    focusedBorderColor = PhonixBlueLight,
+                    unfocusedBorderColor = Slate800
+                )
+            )
 
-            StartMenuItem(title = "Web Browser (Chromium/Firefox)", icon = Icons.Default.Language, tint = PhonixBlueLight) {
-                viewModel.toggleWindow(WindowType.BROWSER)
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Slate800)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            val allMenuItems = listOf(
+                Triple("Web Browser (Chromium/Firefox)", Icons.Default.Language, PhonixBlueLight) to WindowType.BROWSER,
+                Triple("Linux Distro Downloader (8 OS)", Icons.Default.Apps, PhonixAmber) to WindowType.DISTRO_STORE,
+                Triple("Personalize Desktop & Displays", Icons.Default.Palette, Color(0xFFA855F7)) to WindowType.PERSONALIZE,
+                Triple("Terminal (bash)", Icons.Default.Terminal, TerminalGreen) to WindowType.TERMINAL,
+                Triple("Server Suite Hub", Icons.Default.Dns, PhonixCyan) to WindowType.SERVER_MANAGER,
+                Triple("Resource Monitor (htop)", Icons.Default.Speed, PhonixGreen) to WindowType.RESOURCE_MONITOR,
+                Triple("VirGL 3D Benchmark", Icons.Default.PlayArrow, Color(0xFFF43F5E)) to WindowType.BENCHMARK,
+                Triple("File Manager", Icons.Default.Folder, Color(0xFFFBBF24)) to WindowType.FILE_EXPLORER,
+                Triple("Notepad Editor", Icons.Default.Code, Slate200) to WindowType.NOTEPAD,
+                Triple("About Phonix OS", Icons.Default.Info, PhonixCyan) to WindowType.ABOUT
+            )
+
+            val query = uiState.startMenuSearchQuery.trim().lowercase(Locale.ROOT)
+            val filteredMenuItems = if (query.isEmpty()) allMenuItems else allMenuItems.filter {
+                it.first.first.lowercase(Locale.ROOT).contains(query)
             }
-            StartMenuItem(title = "Linux Distro Downloader (8 OS)", icon = Icons.Default.Apps, tint = PhonixAmber) {
-                viewModel.toggleWindow(WindowType.DISTRO_STORE)
-            }
-            StartMenuItem(title = "Personalize Desktop & Displays", icon = Icons.Default.Palette, tint = Color(0xFFA855F7)) {
-                viewModel.toggleWindow(WindowType.PERSONALIZE)
-            }
-            StartMenuItem(title = "Terminal (bash)", icon = Icons.Default.Terminal, tint = TerminalGreen) {
-                viewModel.toggleWindow(WindowType.TERMINAL)
-            }
-            StartMenuItem(title = "Server Suite Hub", icon = Icons.Default.Dns, tint = PhonixCyan) {
-                viewModel.toggleWindow(WindowType.SERVER_MANAGER)
-            }
-            StartMenuItem(title = "Resource Monitor (htop)", icon = Icons.Default.Speed, tint = PhonixGreen) {
-                viewModel.toggleWindow(WindowType.RESOURCE_MONITOR)
-            }
-            StartMenuItem(title = "VirGL 3D Benchmark", icon = Icons.Default.PlayArrow, tint = Color(0xFFF43F5E)) {
-                viewModel.toggleWindow(WindowType.BENCHMARK)
+
+            filteredMenuItems.forEach { (meta, winType) ->
+                StartMenuItem(title = meta.first, icon = meta.second, tint = meta.third) {
+                    viewModel.toggleWindow(winType)
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))

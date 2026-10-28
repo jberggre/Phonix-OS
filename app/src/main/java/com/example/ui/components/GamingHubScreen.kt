@@ -189,6 +189,7 @@ fun GamingHubScreen(
                 game = game,
                 onLaunch = {
                     Toast.makeText(context, "Launching ${game.name} with ${game.engineRunner}...", Toast.LENGTH_SHORT).show()
+                    viewModel.launchGame(game)
                 }
             )
         }

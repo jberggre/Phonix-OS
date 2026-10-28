@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for rebranding from Lindows to Phonix OS, introducing active cooling motherboard governor profiles, direct distro bootloader enhancements, and an x86 gaming emulation suite for Samsung Galaxy S8/Note 8 and newer hardware.",
-  "updatedAt":  "2026-10-28T03:41:40.651016459Z",
+  "summary":  "Revised implementation plan introducing a Windows 11 Out-of-Box Experience (OOBE) setup wizard for first-time launch and new-user reset. It walks the user through zero-waste app selection (choose which apps to keep or download to minimize internal storage consumption), hardware debloat selection for screenless Mini PCs, desktop theming and taskbar layout, with a one-click 'Reset for New User' option for refurbishers.",
+  "updatedAt":  "2026-10-28T18:09:23.874456317Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

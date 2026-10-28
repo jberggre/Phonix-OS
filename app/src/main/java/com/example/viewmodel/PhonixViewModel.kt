@@ -32,6 +32,16 @@ import com.example.model.IconSizeMode
 import com.example.model.TaskbarPosition
 import com.example.model.TaskbarStyle
 import com.example.model.MonitorDisplayMode
+import com.example.model.DesktopContextMenuData
+import com.example.model.ShortcutShape
+import com.example.model.ShortcutBgStyle
+import com.example.model.InstalledAppInfo
+import com.example.model.OobeSetupConfig
+import com.example.model.AppCategory
+import com.example.model.MiniPcProfile
+import com.example.model.DesktopThemePreset
+import com.example.util.AppLaunchHelper
+import android.graphics.Rect
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,7 +98,7 @@ data class PhonixUiState(
             type = WindowType.BROWSER,
             title = "Phonix Web Browser (Chromium / Firefox)",
             posX = 20f,
-            posY = 20f,
+            posY = 36f,
             width = 390f,
             height = 360f,
             zIndex = 2f
@@ -98,7 +108,7 @@ data class PhonixUiState(
             type = WindowType.TERMINAL,
             title = "Phonix Terminal (bash)",
             posX = 50f,
-            posY = 50f,
+            posY = 64f,
             width = 380f,
             height = 350f,
             zIndex = 1f,
@@ -137,7 +147,14 @@ data class PhonixUiState(
     val coolingState: MotherboardCoolingState = MotherboardCoolingState(),
     val isBatteryRemovedDirectPower: Boolean = true,
     val autoBootOnUsbPower: Boolean = true,
-    val customization: DesktopCustomization = DesktopCustomization()
+    val customization: DesktopCustomization = DesktopCustomization(),
+    val isTopNotchExpanded: Boolean = false,
+    val activeContextMenu: DesktopContextMenuData? = null,
+    val isOobeCompleted: Boolean = false,
+    val oobeConfig: OobeSetupConfig = OobeSetupConfig(),
+    val installedApps: List<InstalledAppInfo> = emptyList(),
+    val isAddAppDialogOpen: Boolean = false,
+    val addAppSearchQuery: String = ""
 )
 
 enum class BootTarget {
@@ -236,9 +253,14 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     private var maxZIndex: Float = 3f
 
     init {
+        val prefs = application.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
+        val oobeDone = prefs.getBoolean("oobe_completed", false)
+        _uiState.update { it.copy(isOobeCompleted = oobeDone) }
+
         detectLocalIp()
         initTerminalWelcome()
         startTelemetryLoop()
+        loadInstalledApps(application)
     }
 
     private fun detectLocalIp() {
@@ -431,8 +453,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 windows = state.windows.map { win ->
                     if (win.id == windowId && !win.isMaximized) {
                         win.copy(
-                            posX = (win.posX + deltaX).coerceAtLeast(0f),
-                            posY = (win.posY + deltaY).coerceAtLeast(0f)
+                            posX = (win.posX + deltaX).coerceIn(-100f, 850f),
+                            posY = (win.posY + deltaY).coerceIn(8f, 750f)
                         )
                     } else win
                 }
@@ -464,6 +486,23 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         val trimmed = command.trim()
         if (trimmed.isEmpty()) return
 
+        if (trimmed.equals("clear", ignoreCase = true)) {
+            _uiState.update { it.copy(terminalLines = emptyList(), terminalInput = "") }
+            return
+        }
+
+        if (trimmed.equals("reboot", ignoreCase = true)) {
+            _uiState.update { it.copy(terminalInput = "") }
+            triggerLinuxRebootAnimation()
+            return
+        }
+
+        if (trimmed.equals("poweroff", ignoreCase = true) || trimmed.equals("shutdown", ignoreCase = true)) {
+            _uiState.update { it.copy(terminalInput = "") }
+            toggleContainerPower()
+            return
+        }
+
         val state = _uiState.value
         val response = emulator.executeCommand(
             cmdRaw = trimmed,
@@ -484,6 +523,22 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearTerminal() {
         _uiState.update { it.copy(terminalLines = emptyList()) }
+    }
+
+    fun launchGame(game: com.example.model.GameTitleItem) {
+        viewModelScope.launch {
+            _uiState.update { state ->
+                state.copy(
+                    notificationMessage = "Launching ${game.name} via ${game.engineRunner}...",
+                    terminalLines = state.terminalLines + listOf(
+                        TerminalLine("phonix@desktop:~$ ./launch_game.sh --title \"${game.name}\" --runner \"${game.engineRunner}\"", TerminalLine.LineType.INPUT),
+                        TerminalLine("[GameHub] Allocating ${game.ramRequirementMb} MB memory space...", TerminalLine.LineType.SYSTEM),
+                        TerminalLine("[VirGL Turnip] 3D GPU context bound. Target: ${game.targetFps} FPS (${game.compatibilityRating})", TerminalLine.LineType.SUCCESS),
+                        TerminalLine("[Runner] ${game.name} process running in background.", TerminalLine.LineType.ACCENT)
+                    )
+                )
+            }
+        }
     }
 
     // Server Management
@@ -1170,45 +1225,99 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     fun dropShortcut(shortcutId: String, currentX: Float, currentY: Float) {
         _uiState.update { state ->
             val lockGrid = state.customization.lockIconsToGrid
-            val updated = state.customization.shortcuts.map { sc ->
-                if (sc.id == shortcutId) {
-                    if (lockGrid) {
-                        val col = Math.round((currentX - 16f) / 84f).coerceIn(0, 5).toInt()
-                        val row = Math.round((currentY - 16f) / 84f).coerceIn(0, 7).toInt()
-                        val snappedX = 16f + (col * 84f)
-                        val snappedY = 16f + (row * 84f)
-                        sc.copy(
-                            gridCol = col,
-                            gridRow = row,
-                            posX = snappedX,
-                            posY = snappedY
-                        )
+            val currentShortcuts = state.customization.shortcuts
+            val dragged = currentShortcuts.find { it.id == shortcutId } ?: return@update state
+
+            if (lockGrid) {
+                val targetCol = Math.round((currentX - 16f) / 88f).coerceIn(0, 5).toInt()
+                val targetRow = Math.round((currentY - 16f) / 94f).coerceIn(0, 7).toInt()
+
+                // Check if another shortcut already occupies targetCol, targetRow
+                val occupant = currentShortcuts.find { it.id != shortcutId && it.gridCol == targetCol && it.gridRow == targetRow }
+
+                val updatedShortcuts = if (occupant != null) {
+                    val prevCol = dragged.gridCol
+                    val prevRow = dragged.gridRow
+
+                    val (occupantNewCol, occupantNewRow) = if (prevCol != targetCol || prevRow != targetRow) {
+                        Pair(prevCol, prevRow)
                     } else {
-                        sc.copy(
-                            posX = currentX.coerceAtLeast(0f),
-                            posY = currentY.coerceAtLeast(0f)
-                        )
+                        val occupied = currentShortcuts
+                            .filter { it.id != shortcutId && it.id != occupant.id }
+                            .map { Pair(it.gridCol, it.gridRow) }
+                            .toSet() + Pair(targetCol, targetRow)
+                        findNearestFreeGridSlot(targetCol, targetRow, occupied)
                     }
-                } else sc
+
+                    currentShortcuts.map { sc ->
+                        when (sc.id) {
+                            shortcutId -> sc.copy(
+                                gridCol = targetCol,
+                                gridRow = targetRow,
+                                posX = 16f + (targetCol * 88f),
+                                posY = 16f + (targetRow * 94f)
+                            )
+                            occupant.id -> sc.copy(
+                                gridCol = occupantNewCol,
+                                gridRow = occupantNewRow,
+                                posX = 16f + (occupantNewCol * 88f),
+                                posY = 16f + (occupantNewRow * 94f)
+                            )
+                            else -> sc
+                        }
+                    }
+                } else {
+                    currentShortcuts.map { sc ->
+                        if (sc.id == shortcutId) {
+                            sc.copy(
+                                gridCol = targetCol,
+                                gridRow = targetRow,
+                                posX = 16f + (targetCol * 88f),
+                                posY = 16f + (targetRow * 94f)
+                            )
+                        } else sc
+                    }
+                }
+
+                state.copy(
+                    customization = state.customization.copy(shortcuts = updatedShortcuts),
+                    notificationMessage = if (occupant != null) "Swapped ${dragged.title} with ${occupant.title}" else "Shortcut snapped to grid"
+                )
+            } else {
+                // Freeform: place anywhere the user wants on the desktop!
+                val newX = currentX.coerceIn(8f, 800f)
+                val newY = currentY.coerceIn(8f, 700f)
+                val updated = currentShortcuts.map { sc ->
+                    if (sc.id == shortcutId) {
+                        sc.copy(posX = newX, posY = newY)
+                    } else sc
+                }
+                state.copy(
+                    customization = state.customization.copy(shortcuts = updated),
+                    notificationMessage = "Shortcut moved"
+                )
             }
-            state.copy(
-                customization = state.customization.copy(shortcuts = updated),
-                notificationMessage = if (lockGrid) "Shortcut locked to grid" else "Shortcut moved"
-            )
         }
     }
 
     fun toggleLockIconsToGrid(enabled: Boolean) {
         _uiState.update { state ->
             val shortcuts = if (enabled) {
+                val occupied = mutableSetOf<Pair<Int, Int>>()
                 state.customization.shortcuts.map { sc ->
-                    val col = Math.round((sc.posX - 16f) / 84f).coerceIn(0, 5).toInt()
-                    val row = Math.round((sc.posY - 16f) / 84f).coerceIn(0, 7).toInt()
+                    val desiredCol = Math.round((sc.posX - 16f) / 88f).coerceIn(0, 5).toInt()
+                    val desiredRow = Math.round((sc.posY - 16f) / 94f).coerceIn(0, 7).toInt()
+                    val (finalCol, finalRow) = if (Pair(desiredCol, desiredRow) !in occupied) {
+                        Pair(desiredCol, desiredRow)
+                    } else {
+                        findNearestFreeGridSlot(desiredCol, desiredRow, occupied)
+                    }
+                    occupied.add(Pair(finalCol, finalRow))
                     sc.copy(
-                        gridCol = col,
-                        gridRow = row,
-                        posX = 16f + (col * 84f),
-                        posY = 16f + (row * 84f)
+                        gridCol = finalCol,
+                        gridRow = finalRow,
+                        posX = 16f + (finalCol * 88f),
+                        posY = 16f + (finalRow * 94f)
                     )
                 }
             } else {
@@ -1219,9 +1328,37 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     lockIconsToGrid = enabled,
                     shortcuts = shortcuts
                 ),
-                notificationMessage = if (enabled) "Grid Snapping: Locked to Grid (84dp)" else "Grid Snapping: Freeform Movement"
+                notificationMessage = if (enabled) "Grid Snapping: Locked to Grid" else "Freeform Mode: Move shortcuts wherever you want"
             )
         }
+    }
+
+    private fun findNearestFreeGridSlot(
+        col: Int,
+        row: Int,
+        occupied: Set<Pair<Int, Int>>,
+        maxCol: Int = 5,
+        maxRow: Int = 7
+    ): Pair<Int, Int> {
+        for (radius in 1..(maxCol + maxRow)) {
+            for (dr in -radius..radius) {
+                for (dc in -radius..radius) {
+                    if (kotlin.math.max(kotlin.math.abs(dc), kotlin.math.abs(dr)) == radius) {
+                        val c = col + dc
+                        val r = row + dr
+                        if (c in 0..maxCol && r in 0..maxRow && Pair(c, r) !in occupied) {
+                            return Pair(c, r)
+                        }
+                    }
+                }
+            }
+        }
+        for (r in 0..maxRow) {
+            for (c in 0..maxCol) {
+                if (Pair(c, r) !in occupied) return Pair(c, r)
+            }
+        }
+        return Pair(col, row)
     }
 
     fun resetShortcutGrid() {
@@ -1232,6 +1369,447 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 ),
                 notificationMessage = "Desktop shortcuts reset to default grid"
             )
+        }
+    }
+
+    // Top Notch Controls
+    fun setTopNotchExpanded(expanded: Boolean) {
+        _uiState.update { it.copy(isTopNotchExpanded = expanded) }
+    }
+
+    fun toggleTopNotch() {
+        _uiState.update { it.copy(isTopNotchExpanded = !it.isTopNotchExpanded) }
+    }
+
+    // Context Menus
+    fun openShortcutContextMenu(shortcutId: String, x: Float, y: Float) {
+        _uiState.update {
+            it.copy(
+                activeContextMenu = DesktopContextMenuData.ShortcutMenu(shortcutId, x, y),
+                isStartMenuOpen = false
+            )
+        }
+    }
+
+    fun openWallpaperContextMenu(x: Float, y: Float) {
+        _uiState.update {
+            it.copy(
+                activeContextMenu = DesktopContextMenuData.WallpaperMenu(x, y),
+                isStartMenuOpen = false
+            )
+        }
+    }
+
+    fun closeContextMenu() {
+        _uiState.update { it.copy(activeContextMenu = null) }
+    }
+
+    // Per-Shortcut Appearance Customization
+    fun updateShortcutStyle(
+        shortcutId: String,
+        size: IconSizeMode?,
+        shape: ShortcutShape,
+        color: DesktopAccentColor?,
+        bgStyle: ShortcutBgStyle
+    ) {
+        _uiState.update { state ->
+            val updated = state.customization.shortcuts.map { sc ->
+                if (sc.id == shortcutId) {
+                    sc.copy(
+                        customSize = size,
+                        customShape = shape,
+                        customColor = color,
+                        customBackground = bgStyle
+                    )
+                } else sc
+            }
+            state.copy(
+                customization = state.customization.copy(shortcuts = updated),
+                activeContextMenu = null,
+                notificationMessage = "Updated shortcut appearance"
+            )
+        }
+    }
+
+    fun togglePinShortcutToTaskbar(shortcutId: String) {
+        _uiState.update { state ->
+            val updated = state.customization.shortcuts.map { sc ->
+                if (sc.id == shortcutId) {
+                    sc.copy(isPinnedToTaskbar = !sc.isPinnedToTaskbar)
+                } else sc
+            }
+            val target = state.customization.shortcuts.find { it.id == shortcutId }
+            val pinnedNow = target?.let { !it.isPinnedToTaskbar } ?: false
+            state.copy(
+                customization = state.customization.copy(shortcuts = updated),
+                activeContextMenu = null,
+                notificationMessage = if (pinnedNow) "Pinned to taskbar" else "Unpinned from taskbar"
+            )
+        }
+    }
+
+    fun removeShortcut(shortcutId: String) {
+        _uiState.update { state ->
+            val updated = state.customization.shortcuts.filter { it.id != shortcutId }
+            state.copy(
+                customization = state.customization.copy(shortcuts = updated),
+                activeContextMenu = null,
+                notificationMessage = "Shortcut removed from desktop"
+            )
+        }
+    }
+
+    // OOBE Setup Wizard Management
+    fun updateOobeConfig(config: OobeSetupConfig) {
+        _uiState.update { it.copy(oobeConfig = config) }
+    }
+
+    fun toggleOobeCategory(category: AppCategory) {
+        _uiState.update { state ->
+            val current = state.oobeConfig.selectedCategories
+            val updated = if (current.contains(category)) {
+                current - category
+            } else {
+                current + category
+            }
+            state.copy(oobeConfig = state.oobeConfig.copy(selectedCategories = updated))
+        }
+    }
+
+    fun completeOobeSetup(context: Context) {
+        viewModelScope.launch {
+            try {
+                val prefs = context.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
+                prefs.edit().putBoolean("oobe_completed", true).apply()
+            } catch (_: Exception) {
+            }
+
+            val cfg = _uiState.value.oobeConfig
+            val categories = cfg.selectedCategories
+
+            // Build dynamic shortcuts according to user's zero-waste selection
+            val generatedShortcuts = mutableListOf<DesktopShortcut>()
+            var col = 0
+            var row = 0
+
+            fun addShortcut(sc: DesktopShortcut) {
+                generatedShortcuts.add(
+                    sc.copy(
+                        gridCol = col,
+                        gridRow = row,
+                        posX = 24f + (col * 96f),
+                        posY = 20f + (row * 88f)
+                    )
+                )
+                row++
+                if (row >= 4) {
+                    row = 0
+                    col++
+                }
+            }
+
+            if (categories.contains(AppCategory.APP_STORE)) {
+                addShortcut(
+                    DesktopShortcut(
+                        id = "sc_store",
+                        title = "App Store",
+                        windowType = WindowType.APP_STORE,
+                        customColor = DesktopAccentColor.CYBER_CYAN,
+                        launchPackage = "com.android.vending",
+                        isPinnedToTaskbar = true,
+                        isAppStore = true
+                    )
+                )
+            }
+
+            if (categories.contains(AppCategory.WEB_BROWSER)) {
+                addShortcut(
+                    DesktopShortcut(
+                        id = "sc_browser",
+                        title = "Google Chrome / Web",
+                        windowType = WindowType.BROWSER,
+                        launchPackage = "com.android.chrome",
+                        isPinnedToTaskbar = true,
+                        isNativeApp = true
+                    )
+                )
+            }
+
+            if (categories.contains(AppCategory.FILE_MANAGER)) {
+                addShortcut(
+                    DesktopShortcut(
+                        id = "sc_files",
+                        title = "File Explorer",
+                        windowType = WindowType.FILE_EXPLORER,
+                        customColor = DesktopAccentColor.AMBER_EMBER,
+                        launchPackage = "com.google.android.documentsui",
+                        isPinnedToTaskbar = true,
+                        isNativeApp = true
+                    )
+                )
+            }
+
+            if (categories.contains(AppCategory.MEDIA_GALLERY)) {
+                addShortcut(
+                    DesktopShortcut(
+                        id = "sc_photos",
+                        title = "Photos & Media",
+                        windowType = WindowType.BROWSER,
+                        customColor = DesktopAccentColor.PURPLE_NEBULA,
+                        launchPackage = "com.google.android.apps.photos",
+                        isPinnedToTaskbar = false,
+                        isNativeApp = true
+                    )
+                )
+            }
+
+            if (categories.contains(AppCategory.LINUX_TERMINAL)) {
+                addShortcut(
+                    DesktopShortcut(
+                        id = "sc_terminal",
+                        title = "Phonix Terminal",
+                        windowType = WindowType.TERMINAL,
+                        customColor = DesktopAccentColor.EMERALD_LINUX,
+                        isPinnedToTaskbar = true
+                    )
+                )
+            }
+
+            if (categories.contains(AppCategory.LINUX_DISTROS)) {
+                addShortcut(
+                    DesktopShortcut(
+                        id = "sc_distro",
+                        title = "Linux Distro Store",
+                        windowType = WindowType.DISTRO_STORE,
+                        customColor = DesktopAccentColor.CYBER_CYAN,
+                        isPinnedToTaskbar = true
+                    )
+                )
+            }
+
+            if (categories.contains(AppCategory.SERVER_CENTER)) {
+                addShortcut(
+                    DesktopShortcut(
+                        id = "sc_server",
+                        title = "Server Hub",
+                        windowType = WindowType.SERVER_MANAGER,
+                        customColor = DesktopAccentColor.PURPLE_NEBULA
+                    )
+                )
+            }
+
+            if (categories.contains(AppCategory.HARDWARE_MONITOR)) {
+                addShortcut(
+                    DesktopShortcut(
+                        id = "sc_monitor",
+                        title = "System Monitor",
+                        windowType = WindowType.RESOURCE_MONITOR,
+                        customColor = DesktopAccentColor.CYBER_CYAN
+                    )
+                )
+            }
+
+            // Always add settings and personalize
+            addShortcut(
+                DesktopShortcut(
+                    id = "sc_settings",
+                    title = "Settings",
+                    windowType = WindowType.SETTINGS,
+                    isNativeApp = true
+                )
+            )
+            addShortcut(
+                DesktopShortcut(
+                    id = "sc_personalize",
+                    title = "Personalize",
+                    windowType = WindowType.PERSONALIZE
+                )
+            )
+
+            val (themeAccent, themeWallpaper) = when (cfg.themePreset) {
+                DesktopThemePreset.WINDOWS_11_DARK -> Pair(DesktopAccentColor.ELECTRIC_BLUE, DesktopWallpaper.PHOENIX_CYBER_DEFAULT)
+                DesktopThemePreset.CYBER_PHOENIX -> Pair(DesktopAccentColor.AMBER_EMBER, DesktopWallpaper.PHOENIX_CYBER_DEFAULT)
+                DesktopThemePreset.CLEAN_SLATE -> Pair(DesktopAccentColor.SLATE_MONOCHROME, DesktopWallpaper.MATRIX_DEEP_BLUE)
+                DesktopThemePreset.OLED_OBSIDIAN -> Pair(DesktopAccentColor.CYBER_CYAN, DesktopWallpaper.OBSIDIAN_NIGHT)
+            }
+
+            _uiState.update { state ->
+                state.copy(
+                    isOobeCompleted = true,
+                    customization = state.customization.copy(
+                        shortcuts = generatedShortcuts,
+                        accentColor = themeAccent,
+                        wallpaper = themeWallpaper
+                    ),
+                    notificationMessage = "Welcome to Phonix OS! Setup complete for ${cfg.deviceName}."
+                )
+            }
+
+            if (cfg.enableAggressiveDebloat) {
+                runScreenlessMiniPcDebloat()
+            }
+        }
+    }
+
+    fun resetForNewUser(context: Context) {
+        viewModelScope.launch {
+            try {
+                val prefs = context.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
+                prefs.edit().putBoolean("oobe_completed", false).apply()
+            } catch (_: Exception) {
+            }
+
+            _uiState.update { state ->
+                state.copy(
+                    isOobeCompleted = false,
+                    oobeConfig = OobeSetupConfig(),
+                    isStartMenuOpen = false,
+                    activeContextMenu = null,
+                    notificationMessage = "Mini PC prepared for new user. Launching Out-of-Box Setup Wizard..."
+                )
+            }
+        }
+    }
+
+    // Installed Apps & DeX Shortcut Management
+    fun loadInstalledApps(context: Context) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val apps = AppLaunchHelper.getInstalledLauncherApps(context)
+            _uiState.update { it.copy(installedApps = apps) }
+        }
+    }
+
+    fun openAddAppDialog() {
+        _uiState.update { it.copy(isAddAppDialogOpen = true, addAppSearchQuery = "", activeContextMenu = null) }
+    }
+
+    fun closeAddAppDialog() {
+        _uiState.update { it.copy(isAddAppDialogOpen = false, addAppSearchQuery = "") }
+    }
+
+    fun updateAddAppSearchQuery(query: String) {
+        _uiState.update { it.copy(addAppSearchQuery = query) }
+    }
+
+    fun pinInstalledApp(context: Context, app: InstalledAppInfo) {
+        _uiState.update { state ->
+            val existing = state.customization.shortcuts
+            // Avoid duplicates
+            if (existing.any { it.launchPackage == app.packageName }) {
+                return@update state.copy(
+                    isAddAppDialogOpen = false,
+                    notificationMessage = "${app.label} is already pinned on desktop"
+                )
+            }
+
+            val maxCol = existing.maxOfOrNull { it.gridCol } ?: 0
+            val maxRowInLastCol = existing.filter { it.gridCol == maxCol }.maxOfOrNull { it.gridRow } ?: -1
+            val (nextCol, nextRow) = if (maxRowInLastCol >= 3) {
+                Pair(maxCol + 1, 0)
+            } else {
+                Pair(maxCol, maxRowInLastCol + 1)
+            }
+
+            val newShortcut = DesktopShortcut(
+                id = "sc_pkg_${app.packageName.replace('.', '_')}",
+                title = app.label,
+                windowType = WindowType.BROWSER,
+                gridCol = nextCol,
+                gridRow = nextRow,
+                posX = 24f + (nextCol * 96f),
+                posY = 20f + (nextRow * 88f),
+                launchPackage = app.packageName,
+                isNativeApp = true,
+                customColor = DesktopAccentColor.CYBER_CYAN
+            )
+
+            state.copy(
+                customization = state.customization.copy(shortcuts = existing + newShortcut),
+                isAddAppDialogOpen = false,
+                notificationMessage = "${app.label} added to desktop"
+            )
+        }
+    }
+
+    fun openAppStore(context: Context, bounds: Rect? = null) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(notificationMessage = "Opening App Store...") }
+            AppLaunchHelper.openAppStore(context, bounds)
+        }
+    }
+
+    // Native App Launching & Desktop Overlay Integration (Samsung DeX-Style)
+    fun launchShortcutOrHostApp(
+        context: Context,
+        shortcut: DesktopShortcut,
+        bounds: Rect? = null
+    ) {
+        closeContextMenu()
+        viewModelScope.launch {
+            if (shortcut.isAppStore) {
+                _uiState.update { it.copy(notificationMessage = "Opening App Store...") }
+                AppLaunchHelper.openAppStore(context, bounds)
+                return@launch
+            }
+
+            if (shortcut.isNativeApp || shortcut.launchPackage != null) {
+                val pkg = shortcut.launchPackage
+                if (!pkg.isNullOrBlank()) {
+                    val launched = AppLaunchHelper.launchNativeApp(context, pkg, bounds)
+                    if (launched) {
+                        _uiState.update { it.copy(notificationMessage = "Opened ${shortcut.title} in window") }
+                        return@launch
+                    }
+                }
+
+                // Fallback to specific intent categories
+                when (shortcut.windowType) {
+                    WindowType.BROWSER -> {
+                        if (AppLaunchHelper.launchWebBrowser(context)) {
+                            _uiState.update { it.copy(notificationMessage = "Opening Web Browser...") }
+                            return@launch
+                        }
+                    }
+                    WindowType.FILE_EXPLORER -> {
+                        if (AppLaunchHelper.launchFileManager(context)) {
+                            _uiState.update { it.copy(notificationMessage = "Opening File Manager...") }
+                            return@launch
+                        }
+                    }
+                    WindowType.SETTINGS -> {
+                        if (AppLaunchHelper.launchSettings(context)) {
+                            _uiState.update { it.copy(notificationMessage = "Opening System Settings...") }
+                            return@launch
+                        }
+                    }
+                    else -> {}
+                }
+            }
+
+            // Fallback or windowed mode: open internal Phonix Window
+            toggleWindow(shortcut.windowType)
+        }
+    }
+
+    // Screenless Mini PC Debloat Batch
+    fun runScreenlessMiniPcDebloat() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(notificationMessage = "Debloating phone services for screenless Mini PC...") }
+            delay(400L)
+            _uiState.update { state ->
+                val updatedPkgs = state.debloatPackages.map { pkg ->
+                    if (pkg.category.equals("Telephony & Carrier", ignoreCase = true) ||
+                        pkg.category.equals("Biometrics & Sensors", ignoreCase = true) ||
+                        pkg.category.equals("OEM Bloat", ignoreCase = true)
+                    ) {
+                        pkg.copy(isEnabled = true)
+                    } else pkg
+                }
+                state.copy(
+                    debloatPackages = updatedPkgs,
+                    notificationMessage = "Debloat complete: Telephony & sensor services stopped (+1.2GB RAM freed)"
+                )
+            }
         }
     }
 

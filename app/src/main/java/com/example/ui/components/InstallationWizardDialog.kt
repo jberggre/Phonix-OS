@@ -294,7 +294,7 @@ fun Step0DeviceAssessment(
                 )
 
                 Text(
-                    text = "★ Hardware Tip: When removing the battery, solder a 4.0V DC step-down from the USB-C dock rail (or retain the original battery BMS protection board) so the motherboard detects a healthy power supply.",
+                    text = "★ Recycled Mini PC Shell: Motherboards harvested from phones with cracked or unusable screens are mounted into custom recycled plastic shells with passive/active heatsinks, giving e-waste high-performance second lives!",
                     color = PhonixAmber,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
@@ -557,12 +557,19 @@ fun Step3StoragePartitioning(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(
-            text = "Storage Partitioning & zRAM Memory:",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Column {
+            Text(
+                text = "DeX-Style Container Storage & zRAM Memory:",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Zero-Partition Safe Overlay • Directly reuses installed Chrome & Files to save 4GB+ storage",
+                color = PhonixCyan,
+                fontSize = 10.sp
+            )
+        }
 
         // Visual Partition Breakdown Bar
         Card(
