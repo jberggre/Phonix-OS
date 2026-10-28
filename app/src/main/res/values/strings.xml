@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Phonix</string>
+    <string name="server_running_notification_title">Phonix Linux Server Active</string>
+    <string name="server_running_notification_desc">Hardware accelerated Linux container with active cooling governor</string>
+</resources>
