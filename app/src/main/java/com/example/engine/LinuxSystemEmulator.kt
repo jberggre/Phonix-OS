@@ -96,6 +96,7 @@ class LinuxSystemEmulator {
                 output.add(TerminalLine("  neofetch       - Hardware specs, OS release & Phoenix logo"))
                 output.add(TerminalLine("  sensors        - Motherboard SoC, heatsink & battery thermals"))
                 output.add(TerminalLine("  box64          - x86_64 to ARM64 binary translation runner"))
+                output.add(TerminalLine("  distros        - View available ARM64 Linux rootfs catalog"))
                 output.add(TerminalLine("  htop, top      - Process monitor and CPU core utilization"))
                 output.add(TerminalLine("  free -m        - Memory, buffers, cache & zRAM swap usage"))
                 output.add(TerminalLine("  df -h          - Partition and EXT4 virtual storage breakdown"))
@@ -106,6 +107,19 @@ class LinuxSystemEmulator {
                 output.add(TerminalLine("  systemctl      - Check and manage background server daemons"))
                 output.add(TerminalLine("  apt update     - Update package repository index"))
                 output.add(TerminalLine("  uptime         - Phone 24/7 server uptime"))
+                output.add(TerminalLine("  clear          - Clear terminal display"))
+                output.add(TerminalLine("  reboot         - Reboot Linux OS container"))
+                output.add(TerminalLine("  shutdown       - Shutdown Linux container"))
+            }
+            "distros" -> {
+                output.add(TerminalLine("Phonix OS Linux Distribution Catalog (8 ARM64 Rootfs):", TerminalLine.LineType.ACCENT))
+                val distros = com.example.model.DistroCatalog.distros
+                for (d in distros) {
+                    val status = if (d.isInstalled) "[INSTALLED]" else "[AVAILABLE]"
+                    val lineType = if (d.isInstalled) TerminalLine.LineType.SUCCESS else TerminalLine.LineType.OUTPUT
+                    output.add(TerminalLine(String.format(Locale.ROOT, "  %-24s %-12s %-10s (%d MB) - %s", d.name, status, d.base, d.downloadSizeMb, d.desktopEnvironment), lineType))
+                }
+                output.add(TerminalLine("Use Distro Store window or 'apt install <distro-id>' to download.", TerminalLine.LineType.SYSTEM))
             }
             "sensors" -> {
                 output.add(TerminalLine("soc_thermal-virtual-0", TerminalLine.LineType.ACCENT))

@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -18,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -28,6 +30,7 @@ import com.example.ui.components.GamingHubScreen
 import com.example.ui.components.InstallationWizardDialog
 import com.example.ui.components.LinuxBootSplash
 import com.example.ui.components.PhonixDesktopScreen
+import com.example.ui.components.AutoHidingTopBar
 import com.example.ui.components.PhonixTopBar
 import com.example.ui.components.PartitionManagerScreen
 import com.example.ui.components.ServerCenterScreen
@@ -42,6 +45,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } catch (_: Exception) {
+        }
         enableEdgeToEdge()
 
         try {
@@ -74,27 +81,17 @@ class MainActivity : ComponentActivity() {
                             distroName = uiState.currentDistro.name
                         )
                     } else {
-                        // 2. Main Phonix OS System Environment
-                        Scaffold(
-                            modifier = Modifier.fillMaxSize(),
-                            snackbarHost = { SnackbarHost(snackbarHostState) },
-                            topBar = {
-                                PhonixTopBar(
-                                    activeTab = uiState.activeTab,
-                                    containerStatus = uiState.containerStatus,
-                                    isBatteryRemoved = uiState.isBatteryRemovedDirectPower,
-                                    onTabSelected = { viewModel.setActiveTab(it) },
-                                    onTogglePower = { viewModel.toggleContainerPower() },
-                                    onRestart = { viewModel.triggerLinuxRebootAnimation() }
-                                )
-                            },
-                            containerColor = Slate950
-                        ) { innerPadding ->
+                        // 2. Main Phonix OS System Environment with Auto-Hiding Top Notch
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            // Active Tab Content Area
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(innerPadding)
-                                ) {
+                                    .then(
+                                        if (uiState.activeTab != AppNavTab.DESKTOP) Modifier.padding(top = 24.dp)
+                                        else Modifier
+                                    )
+                            ) {
                                 when (uiState.activeTab) {
                                     AppNavTab.DESKTOP -> PhonixDesktopScreen(
                                         uiState = uiState,
@@ -122,6 +119,28 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
+
+                            // Sleek Auto-Hiding Top Notch (collapses to ~16dp, expands on hover/tap)
+                            AutoHidingTopBar(
+                                isExpanded = uiState.isTopNotchExpanded,
+                                activeTab = uiState.activeTab,
+                                containerStatus = uiState.containerStatus,
+                                isBatteryRemoved = uiState.isBatteryRemovedDirectPower,
+                                onToggleExpand = { viewModel.setTopNotchExpanded(it) },
+                                onTabSelected = { viewModel.setActiveTab(it) },
+                                onTogglePower = { viewModel.toggleContainerPower() },
+                                onRestart = { viewModel.triggerLinuxRebootAnimation() },
+                                onRunDebloat = { viewModel.runScreenlessMiniPcDebloat() },
+                                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter)
+                            )
+
+                            // Toast Notification Host
+                            SnackbarHost(
+                                hostState = snackbarHostState,
+                                modifier = Modifier
+                                    .align(androidx.compose.ui.Alignment.BottomCenter)
+                                    .padding(bottom = 56.dp)
+                            )
                         }
                     }
 
