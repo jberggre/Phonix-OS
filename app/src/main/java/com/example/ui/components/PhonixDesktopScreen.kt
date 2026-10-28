@@ -1,0 +1,2075 @@
+package com.example.ui.components
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import com.example.R
+import com.example.engine.TerminalLine
+import com.example.model.DesktopAccentColor
+import com.example.model.DesktopShortcut
+import com.example.model.DesktopWallpaper
+import com.example.model.DesktopWindow
+import com.example.model.IconSizeMode
+import com.example.model.LinuxDistro
+import com.example.model.MonitorDisplayMode
+import com.example.model.TaskbarPosition
+import com.example.model.TaskbarStyle
+import com.example.model.WindowType
+import com.example.ui.theme.PhonixAmber
+import com.example.ui.theme.PhonixBlue
+import com.example.ui.theme.PhonixBlueLight
+import com.example.ui.theme.PhonixCyan
+import com.example.ui.theme.PhonixGreen
+import com.example.ui.theme.PhonixRed
+import com.example.ui.theme.Slate100
+import com.example.ui.theme.Slate200
+import com.example.ui.theme.Slate300
+import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate600
+import com.example.ui.theme.Slate700
+import com.example.ui.theme.Slate800
+import com.example.ui.theme.Slate850
+import com.example.ui.theme.Slate900
+import com.example.ui.theme.Slate950
+import com.example.ui.theme.TerminalBlack
+import com.example.ui.theme.TerminalGreen
+import com.example.viewmodel.PhonixUiState
+import com.example.viewmodel.PhonixViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@Composable
+fun PhonixDesktopScreen(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel,
+    modifier: Modifier = Modifier
+) {
+    val customization = uiState.customization
+    var showContextMenu by remember { mutableStateOf(false) }
+    var contextMenuPos by remember { mutableStateOf(Pair(100f, 100f)) }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+    ) {
+        val screenWidth = maxWidth
+        val screenHeight = maxHeight
+        val isHardwareLandscape = screenWidth > screenHeight
+        val isWidescreenMonitor = isHardwareLandscape || customization.displayMode.isWidescreen
+
+        // Desktop horizontal width: if widescreen monitor mode is forced on narrow screen, enable horizontal panning
+        val desktopWidth = if (customization.displayMode.isWidescreen && !isHardwareLandscape) 880.dp else screenWidth
+        val desktopHorizontalScrollState = rememberScrollState()
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (customization.displayMode.isWidescreen && !isHardwareLandscape)
+                        Modifier.horizontalScroll(desktopHorizontalScrollState)
+                    else Modifier
+                )
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(desktopWidth)
+                    .fillMaxHeight()
+            ) {
+                // 1. Customizable Desktop Background with Phoenix Emblem as default
+                DesktopWallpaperBackground(
+                    wallpaper = customization.wallpaper,
+                    accentColor = customization.accentColor.color,
+                    showGrid = customization.showDesktopGrid,
+                    lockToGrid = customization.lockIconsToGrid,
+                    onDesktopClicked = {
+                        viewModel.closeStartMenu()
+                        showContextMenu = false
+                    },
+                    onDesktopLongPressed = { x, y ->
+                        contextMenuPos = Pair(x, y)
+                        showContextMenu = true
+                    }
+                )
+
+                // 2. Top Monitor & Dock Status Bar (Quick Display Switcher & Dock Telemetry)
+                MonitorStatusBar(
+                    customization = customization,
+                    isHardwareLandscape = isHardwareLandscape,
+                    viewModel = viewModel,
+                    modifier = Modifier
+                        .align(if (customization.taskbarPosition == TaskbarPosition.BOTTOM) Alignment.TopStart else Alignment.BottomStart)
+                        .padding(
+                            top = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) 8.dp else 0.dp,
+                            bottom = if (customization.taskbarPosition == TaskbarPosition.TOP) 8.dp else 0.dp,
+                            start = 12.dp,
+                            end = 12.dp
+                        )
+                )
+
+                // 3. Desktop Shortcuts Layer (Draggable and Locked to 84dp Grid)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            top = if (customization.taskbarPosition == TaskbarPosition.TOP) 54.dp else 44.dp,
+                            bottom = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp,
+                            start = 12.dp,
+                            end = 12.dp
+                        )
+                ) {
+                    // Draggable icons
+                    customization.shortcuts.forEach { shortcut ->
+                        DraggableDesktopShortcut(
+                            shortcut = shortcut,
+                            iconSize = customization.iconSize,
+                            showLabel = customization.showDesktopLabels,
+                            accentColor = customization.accentColor.color,
+                            onMove = { dx, dy -> viewModel.moveShortcut(shortcut.id, dx, dy) },
+                            onDrop = { x, y -> viewModel.dropShortcut(shortcut.id, x, y) },
+                            onClick = { viewModel.toggleWindow(shortcut.windowType) }
+                        )
+                    }
+
+                    // Desktop Widgets (Docked on Right Side in Widescreen Monitor Mode)
+                    if (customization.showQuickDistroWidget || customization.showSystemMonitorWidget) {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .widthIn(max = if (isWidescreenMonitor) 260.dp else 220.dp)
+                                .padding(end = 4.dp, top = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (customization.showQuickDistroWidget) {
+                                DesktopQuickDistroWidget(uiState, viewModel)
+                            }
+                            if (customization.showSystemMonitorWidget) {
+                                DesktopSystemWidget(uiState)
+                            }
+                        }
+                    }
+                }
+
+                // 4. Desktop Windows Layer (Toggleable on / off)
+                uiState.windows.filter { !it.isMinimized }.forEach { window ->
+                    DesktopWindowFrame(
+                        window = window,
+                        isActive = uiState.activeWindowId == window.id,
+                        accentColor = customization.accentColor.color,
+                        uiState = uiState,
+                        viewModel = viewModel
+                    )
+                }
+
+                // 5. Desktop Right-Click / Long-Press Context Menu
+                if (showContextMenu) {
+                    DesktopContextMenu(
+                        posX = contextMenuPos.first,
+                        posY = contextMenuPos.second,
+                        lockToGrid = customization.lockIconsToGrid,
+                        areWindowsHidden = customization.areAllWindowsHidden,
+                        onDismiss = { showContextMenu = false },
+                        onToggleLockGrid = {
+                            viewModel.toggleLockIconsToGrid(!customization.lockIconsToGrid)
+                            showContextMenu = false
+                        },
+                        onResetGrid = {
+                            viewModel.resetShortcutGrid()
+                            showContextMenu = false
+                        },
+                        onToggleAllWindows = {
+                            viewModel.toggleAllWindowVisibility()
+                            showContextMenu = false
+                        },
+                        onCloseAllWindows = {
+                            viewModel.closeAllWindows()
+                            showContextMenu = false
+                        },
+                        onToggleMonitorMode = {
+                            val newMode = if (customization.displayMode == MonitorDisplayMode.PHONE_PORTRAIT)
+                                MonitorDisplayMode.MONITOR_FHD_16_9 else MonitorDisplayMode.PHONE_PORTRAIT
+                            viewModel.updateDisplayMode(newMode)
+                            showContextMenu = false
+                        },
+                        onPersonalize = {
+                            showContextMenu = false
+                            viewModel.openWindow(WindowType.PERSONALIZE)
+                        },
+                        onOpenBrowser = {
+                            showContextMenu = false
+                            viewModel.openWindow(WindowType.BROWSER)
+                        },
+                        onOpenDistroStore = {
+                            showContextMenu = false
+                            viewModel.openWindow(WindowType.DISTRO_STORE)
+                        },
+                        onOpenTerminal = {
+                            showContextMenu = false
+                            viewModel.openWindow(WindowType.TERMINAL)
+                        }
+                    )
+                }
+
+                // 6. Start Menu
+                if (uiState.isStartMenuOpen) {
+                    PhonixStartMenu(
+                        uiState = uiState,
+                        viewModel = viewModel,
+                        modifier = Modifier
+                            .align(if (customization.taskbarPosition == TaskbarPosition.BOTTOM) Alignment.BottomStart else Alignment.TopStart)
+                            .offset(
+                                x = 8.dp,
+                                y = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) (-52).dp else 52.dp
+                            )
+                    )
+                }
+
+                // 7. Full PC Taskbar (with Show Desktop Peek button & Window On/Off toggling)
+                PhonixTaskbar(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    isWidescreen = isWidescreenMonitor,
+                    modifier = Modifier.align(
+                        if (customization.taskbarPosition == TaskbarPosition.BOTTOM) Alignment.BottomCenter
+                        else Alignment.TopCenter
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MonitorStatusBar(
+    customization: com.example.model.DesktopCustomization,
+    isHardwareLandscape: Boolean,
+    viewModel: PhonixViewModel,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Slate900.copy(alpha = 0.75f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Tv,
+                contentDescription = null,
+                tint = if (customization.displayMode.isWidescreen || isHardwareLandscape) PhonixGreen else PhonixCyan,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (isHardwareLandscape || customization.displayMode.isWidescreen)
+                    "External Display: 1080p 60Hz HDMI (USB-C Dock Connected)"
+                else "Handheld Mode (Plug in USB-C dock for external monitor)",
+                color = Slate300,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        // Quick Display Mode Toggle Pill
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(if (customization.displayMode.isWidescreen) PhonixBlue else Slate800)
+                .clickable {
+                    val next = when (customization.displayMode) {
+                        MonitorDisplayMode.PHONE_PORTRAIT -> MonitorDisplayMode.MONITOR_FHD_16_9
+                        MonitorDisplayMode.MONITOR_FHD_16_9 -> MonitorDisplayMode.ULTRAWIDE_21_9
+                        MonitorDisplayMode.ULTRAWIDE_21_9 -> MonitorDisplayMode.PHONE_PORTRAIT
+                    }
+                    viewModel.updateDisplayMode(next)
+                }
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.AspectRatio,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(10.dp)
+                )
+                Spacer(modifier = Modifier.width(3.dp))
+                Text(
+                    text = customization.displayMode.title,
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DesktopWallpaperBackground(
+    wallpaper: DesktopWallpaper,
+    accentColor: Color,
+    showGrid: Boolean,
+    lockToGrid: Boolean,
+    onDesktopClicked: () -> Unit,
+    onDesktopLongPressed: (Float, Float) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { _ -> onDesktopClicked() },
+                    onDrag = { _, _ -> }
+                )
+            }
+            .clickable { onDesktopClicked() }
+    ) {
+        when (wallpaper) {
+            DesktopWallpaper.PHOENIX_CYBER_DEFAULT -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color(0xFF040711), Color(0xFF070E1E), Color(0xFF0A1428), Color(0xFF040711))
+                            )
+                        )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(340.dp)
+                            .align(Alignment.Center)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(accentColor.copy(alpha = 0.18f), Color(0xFF0284C7).copy(alpha = 0.08f), Color.Transparent)
+                                )
+                            )
+                    )
+
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_phoenix_logo),
+                            contentDescription = "Phoenix OS Emblem",
+                            modifier = Modifier
+                                .size(170.dp)
+                                .shadow(24.dp, shape = CircleShape, spotColor = accentColor)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "PHONIX",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 3.sp,
+                                fontFamily = FontFamily.SansSerif
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "OS",
+                                color = PhonixAmber,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 2.sp
+                            )
+                        }
+                        Text(
+                            text = "ARM64 Linux Workstation • VirGL Hardware Accelerated",
+                            color = Slate400.copy(alpha = 0.7f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            DesktopWallpaper.MATRIX_DEEP_BLUE -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.verticalGradient(listOf(Color(0xFF030712), Color(0xFF0B192C), Color(0xFF030712))))
+                ) {
+                    Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Code, contentDescription = null, tint = PhonixCyan.copy(alpha = 0.35f), modifier = Modifier.size(90.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("MATRIX ARM64 SHELL", color = PhonixCyan.copy(alpha = 0.5f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+
+            DesktopWallpaper.OBSIDIAN_NIGHT -> {
+                Box(modifier = Modifier.fillMaxSize().background(Color(0xFF000000))) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(150.dp)
+                            .border(1.dp, Slate800, RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("PHONIX", color = Slate700, fontWeight = FontWeight.Black, fontSize = 18.sp, letterSpacing = 4.sp)
+                    }
+                }
+            }
+
+            DesktopWallpaper.RETRO_CLASSIC_TEAL -> {
+                Box(modifier = Modifier.fillMaxSize().background(Color(0xFF008080)))
+            }
+
+            DesktopWallpaper.SYNTHWAVE_NEON -> {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(listOf(Color(0xFF1E1035), Color(0xFF0B1B3D), Color(0xFF050515)))
+                    )
+                )
+            }
+        }
+
+        // Snapping Grid Overlay (Faint dot alignment for locking shortcuts)
+        if (showGrid && lockToGrid) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val step = 84.dp.toPx()
+                val dotRadius = 1.2.dp.toPx()
+                var x = 16.dp.toPx()
+                while (x < size.width) {
+                    var y = 16.dp.toPx()
+                    while (y < size.height) {
+                        drawCircle(
+                            color = Color(0x2238BDF8),
+                            radius = dotRadius,
+                            center = Offset(x, y)
+                        )
+                        y += step
+                    }
+                    x += step
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// DRAGGABLE APP SHORTCUTS (LOCKED TO GRID)
+// -------------------------------------------------------------
+@Composable
+fun DraggableDesktopShortcut(
+    shortcut: DesktopShortcut,
+    iconSize: IconSizeMode,
+    showLabel: Boolean,
+    accentColor: Color,
+    onMove: (Float, Float) -> Unit,
+    onDrop: (Float, Float) -> Unit,
+    onClick: () -> Unit
+) {
+    val sizeDp = iconSize.sizeDp.dp
+    val icon = when (shortcut.windowType) {
+        WindowType.BROWSER -> Icons.Default.Language
+        WindowType.DISTRO_STORE -> Icons.Default.Apps
+        WindowType.PERSONALIZE -> Icons.Default.Palette
+        WindowType.TERMINAL -> Icons.Default.Terminal
+        WindowType.SERVER_MANAGER -> Icons.Default.Dns
+        WindowType.RESOURCE_MONITOR -> Icons.Default.Speed
+        WindowType.FILE_EXPLORER -> Icons.Default.Folder
+        WindowType.BENCHMARK -> Icons.Default.PlayArrow
+        WindowType.NOTEPAD -> Icons.Default.Code
+        else -> Icons.Default.Computer
+    }
+
+    val iconTint = when (shortcut.windowType) {
+        WindowType.BROWSER -> PhonixBlueLight
+        WindowType.DISTRO_STORE -> PhonixAmber
+        WindowType.PERSONALIZE -> Color(0xFFA855F7)
+        WindowType.TERMINAL -> TerminalGreen
+        WindowType.SERVER_MANAGER -> PhonixCyan
+        WindowType.RESOURCE_MONITOR -> Color(0xFF34D399)
+        WindowType.FILE_EXPLORER -> Color(0xFFFBBF24)
+        WindowType.BENCHMARK -> Color(0xFFF43F5E)
+        else -> Color.White
+    }
+
+    val containerColor = when (shortcut.windowType) {
+        WindowType.BROWSER -> Color(0xFF0C2A4D)
+        WindowType.DISTRO_STORE -> Color(0xFF3B2A12)
+        WindowType.PERSONALIZE -> Color(0xFF28143F)
+        WindowType.TERMINAL -> Color(0xFF0D2818)
+        WindowType.SERVER_MANAGER -> Color(0xFF0A2E3D)
+        WindowType.RESOURCE_MONITOR -> Color(0xFF0E3022)
+        WindowType.FILE_EXPLORER -> Color(0xFF332A15)
+        else -> Slate850
+    }
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(shortcut.posX.toInt(), shortcut.posY.toInt()) }
+            .pointerInput(shortcut.id) {
+                detectDragGestures(
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onMove(dragAmount.x, dragAmount.y)
+                    },
+                    onDragEnd = {
+                        onDrop(shortcut.posX, shortcut.posY)
+                    }
+                )
+            }
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(4.dp)
+            .widthIn(max = 76.dp)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(sizeDp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(containerColor)
+                    .border(1.dp, iconTint.copy(alpha = 0.45f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = shortcut.title,
+                    tint = iconTint,
+                    modifier = Modifier.size(sizeDp * 0.55f)
+                )
+            }
+            if (showLabel) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = shortcut.title,
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DesktopQuickDistroWidget(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.88f)),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(PhonixBlue, Slate800)))
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Apps, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "Active Linux OS", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(text = "8 Available", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(text = uiState.currentDistro.name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            Text(text = uiState.currentDistro.desktopEnvironment, color = Slate400, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { viewModel.toggleWindow(WindowType.DISTRO_STORE) },
+                modifier = Modifier.fillMaxWidth().height(30.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Download Distros", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun DesktopSystemWidget(uiState: PhonixUiState) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.88f)),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(Slate800, PhonixCyan)))
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = "System Vitals", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "${uiState.telemetry.batteryTempC.toInt()}°C",
+                    color = if (uiState.telemetry.batteryTempC > 40f) PhonixRed else PhonixGreen,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("CPU", color = Slate400, fontSize = 10.sp)
+                Text("${uiState.telemetry.cpuPercent}%", color = PhonixBlueLight, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            LinearProgressIndicator(
+                progress = { uiState.telemetry.cpuPercent / 100f },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                color = PhonixBlueLight,
+                trackColor = Slate800
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("RAM", color = Slate400, fontSize = 10.sp)
+                Text("${uiState.telemetry.ramUsedMb}MB", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            LinearProgressIndicator(
+                progress = { (uiState.telemetry.ramUsedMb.toFloat() / uiState.telemetry.ramTotalMb).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                color = PhonixCyan,
+                trackColor = Slate800
+            )
+        }
+    }
+}
+
+@Composable
+fun DesktopContextMenu(
+    posX: Float,
+    posY: Float,
+    lockToGrid: Boolean,
+    areWindowsHidden: Boolean,
+    onDismiss: () -> Unit,
+    onToggleLockGrid: () -> Unit,
+    onResetGrid: () -> Unit,
+    onToggleAllWindows: () -> Unit,
+    onCloseAllWindows: () -> Unit,
+    onToggleMonitorMode: () -> Unit,
+    onPersonalize: () -> Unit,
+    onOpenBrowser: () -> Unit,
+    onOpenDistroStore: () -> Unit,
+    onOpenTerminal: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .offset { IntOffset(posX.toInt().coerceAtMost(300), posY.toInt().coerceAtMost(380)) }
+            .width(240.dp)
+            .shadow(16.dp, RoundedCornerShape(8.dp)),
+        colors = CardDefaults.cardColors(containerColor = Slate900),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(PhonixBlue, Slate700)))
+    ) {
+        Column(modifier = Modifier.padding(6.dp)) {
+            ContextMenuItem(
+                title = if (areWindowsHidden) "Restore Windows (Turn On)" else "Show Desktop (Turn Off Windows)",
+                icon = if (areWindowsHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                onClick = onToggleAllWindows
+            )
+            ContextMenuItem(
+                title = if (lockToGrid) "✓ Lock Shortcuts to Grid" else "Lock Shortcuts to Grid",
+                icon = Icons.Default.GridView,
+                onClick = onToggleLockGrid
+            )
+            ContextMenuItem(
+                title = "Align Shortcuts to Default Grid",
+                icon = Icons.Default.Refresh,
+                onClick = onResetGrid
+            )
+            ContextMenuItem(
+                title = "Toggle 16:9 External Monitor View",
+                icon = Icons.Default.Tv,
+                onClick = onToggleMonitorMode
+            )
+            HorizontalDivider(color = Slate800, modifier = Modifier.padding(vertical = 3.dp))
+            ContextMenuItem(title = "Personalize Desktop & Colors", icon = Icons.Default.Palette, onClick = onPersonalize)
+            ContextMenuItem(title = "Download Linux Distros (8 OS)", icon = Icons.Default.Apps, onClick = onOpenDistroStore)
+            ContextMenuItem(title = "Open Web Browser", icon = Icons.Default.Language, onClick = onOpenBrowser)
+            ContextMenuItem(title = "Open Terminal (bash)", icon = Icons.Default.Terminal, onClick = onOpenTerminal)
+            ContextMenuItem(title = "Close All Windows", icon = Icons.Default.Close, onClick = onCloseAllWindows)
+            HorizontalDivider(color = Slate800, modifier = Modifier.padding(vertical = 3.dp))
+            ContextMenuItem(title = "Close Menu", icon = Icons.Default.Close, onClick = onDismiss)
+        }
+    }
+}
+
+@Composable
+fun ContextMenuItem(
+    title: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = PhonixBlueLight, modifier = Modifier.size(15.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+fun DesktopWindowFrame(
+    window: DesktopWindow,
+    isActive: Boolean,
+    accentColor: Color,
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    Box(
+        modifier = Modifier
+            .offset {
+                if (window.isMaximized) IntOffset(0, 0)
+                else IntOffset(window.posX.toInt(), window.posY.toInt())
+            }
+            .then(
+                if (window.isMaximized) Modifier.fillMaxSize().padding(bottom = 48.dp)
+                else Modifier.size(width = window.width.dp, height = window.height.dp)
+            )
+            .zIndex(window.zIndex)
+            .shadow(
+                elevation = if (isActive) 16.dp else 6.dp,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .clip(RoundedCornerShape(8.dp))
+            .border(
+                width = if (isActive) 1.5.dp else 1.dp,
+                color = if (isActive) accentColor else Slate700,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .background(Slate950)
+            .clickable { viewModel.focusWindow(window.id) }
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Title bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(34.dp)
+                    .background(
+                        if (isActive) Brush.horizontalGradient(listOf(Slate900, accentColor.copy(alpha = 0.4f)))
+                        else Brush.horizontalGradient(listOf(Slate900, Slate850))
+                    )
+                    .pointerInput(window.id) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            viewModel.moveWindow(window.id, dragAmount.x, dragAmount.y)
+                        }
+                    }
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val windowIcon = when (window.type) {
+                        WindowType.BROWSER -> Icons.Default.Language
+                        WindowType.DISTRO_STORE -> Icons.Default.Apps
+                        WindowType.PERSONALIZE -> Icons.Default.Palette
+                        WindowType.TERMINAL -> Icons.Default.Terminal
+                        WindowType.SERVER_MANAGER -> Icons.Default.Dns
+                        WindowType.RESOURCE_MONITOR -> Icons.Default.Speed
+                        WindowType.FILE_EXPLORER -> Icons.Default.Folder
+                        WindowType.BENCHMARK -> Icons.Default.PlayArrow
+                        else -> Icons.Default.Computer
+                    }
+                    Icon(
+                        imageVector = windowIcon,
+                        contentDescription = null,
+                        tint = if (isActive) accentColor else Slate400,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = window.title,
+                        color = if (isActive) Color.White else Slate300,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Window control buttons
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Minimize (Turn Off Window)
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Slate800)
+                            .clickable { viewModel.minimizeWindow(window.id) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "–", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    // Maximize
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Slate800)
+                            .clickable { viewModel.toggleMaximizeWindow(window.id) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "□", color = Color.White, fontSize = 11.sp)
+                    }
+                    // Close
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFFEF4444))
+                            .clickable { viewModel.closeWindow(window.id) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(12.dp))
+                    }
+                }
+            }
+
+            // Window Content Area
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Slate950)
+            ) {
+                when (window.type) {
+                    WindowType.BROWSER -> BrowserWindowContent(uiState, viewModel)
+                    WindowType.DISTRO_STORE -> DistroDownloaderWindowContent(uiState, viewModel)
+                    WindowType.PERSONALIZE -> PersonalizeWindowContent(uiState, viewModel)
+                    WindowType.TERMINAL -> TerminalWindowContent(uiState, viewModel)
+                    WindowType.SERVER_MANAGER -> ServerManagerWindowContent(uiState, viewModel)
+                    WindowType.RESOURCE_MONITOR -> ResourceMonitorWindowContent(uiState)
+                    WindowType.FILE_EXPLORER -> FileExplorerWindowContent()
+                    WindowType.BENCHMARK -> BenchmarkWindowContent(uiState, viewModel)
+                    WindowType.NOTEPAD -> NotepadWindowContent()
+                    WindowType.ABOUT -> AboutWindowContent(uiState)
+                    else -> TerminalWindowContent(uiState, viewModel)
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// BROWSER WINDOW CONTENT
+// -------------------------------------------------------------
+@Composable
+fun BrowserWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    var urlInput by remember { mutableStateOf("https://github.com/phonix-os/linux-arm64") }
+    var currentUrl by remember { mutableStateOf("https://github.com/phonix-os/linux-arm64") }
+    var activeTabTitle by remember { mutableStateOf("GitHub: Phonix Linux ARM64") }
+
+    val bookmarks = listOf(
+        Pair("GitHub", "https://github.com"),
+        Pair("Nginx Host", "http://localhost:8080"),
+        Pair("Pi-hole Admin", "http://localhost/admin"),
+        Pair("Debian Packages", "https://packages.debian.org"),
+        Pair("Reddit Linux", "https://reddit.com/r/linux"),
+        Pair("Wikipedia", "https://wikipedia.org")
+    )
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0F172A))) {
+        // Tab Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF090D16))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                    .background(Color(0xFF1E293B))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Language, contentDescription = null, tint = PhonixBlueLight, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = activeTabTitle, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                }
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            IconButton(
+                onClick = {
+                    urlInput = "https://duckduckgo.com"
+                    currentUrl = urlInput
+                    activeTabTitle = "New Tab"
+                },
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "New Tab", tint = Slate400, modifier = Modifier.size(14.dp))
+            }
+        }
+
+        // Navigation Bar & URL Address Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF1E293B))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { currentUrl = "https://duckduckgo.com"; urlInput = currentUrl }, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Slate300, modifier = Modifier.size(16.dp))
+            }
+            IconButton(onClick = { currentUrl = "https://github.com"; urlInput = currentUrl }, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.ArrowForward, contentDescription = "Forward", tint = Slate300, modifier = Modifier.size(16.dp))
+            }
+            IconButton(onClick = { /* Refresh */ }, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate300, modifier = Modifier.size(16.dp))
+            }
+            IconButton(
+                onClick = {
+                    currentUrl = "http://localhost:8080"
+                    urlInput = currentUrl
+                    activeTabTitle = "Localhost Nginx Home"
+                },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(Icons.Default.Home, contentDescription = "Home", tint = PhonixCyan, modifier = Modifier.size(16.dp))
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            OutlinedTextField(
+                value = urlInput,
+                onValueChange = { urlInput = it },
+                modifier = Modifier.weight(1f).height(42.dp),
+                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp),
+                singleLine = true,
+                shape = RoundedCornerShape(20.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF0F172A),
+                    unfocusedContainerColor = Color(0xFF0F172A),
+                    focusedBorderColor = PhonixBlueLight,
+                    unfocusedBorderColor = Slate700
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = {
+                    currentUrl = if (urlInput.startsWith("http://") || urlInput.startsWith("https://")) urlInput
+                    else "https://duckduckgo.com/?q=${urlInput.replace(" ", "+")}"
+                    activeTabTitle = currentUrl.take(28)
+                }),
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (currentUrl.startsWith("https://")) Icons.Default.OpenInBrowser else Icons.Default.Language,
+                        contentDescription = null,
+                        tint = if (currentUrl.startsWith("https://")) PhonixGreen else Slate400,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            )
+
+            Spacer(modifier = Modifier.width(6.dp))
+            Button(
+                onClick = {
+                    currentUrl = if (urlInput.startsWith("http://") || urlInput.startsWith("https://")) urlInput
+                    else "https://duckduckgo.com/?q=${urlInput.replace(" ", "+")}"
+                    activeTabTitle = currentUrl.take(28)
+                },
+                modifier = Modifier.height(34.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                shape = RoundedCornerShape(17.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+            ) {
+                Text("Go", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // Bookmark Bar
+        val bookmarkScroll = rememberScrollState()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF131D31))
+                .horizontalScroll(bookmarkScroll)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            bookmarks.forEach { (title, url) ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFF1E293B))
+                        .clickable {
+                            urlInput = url
+                            currentUrl = url
+                            activeTabTitle = title
+                        }
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(text = title, color = Slate300, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        // Web Page Content Area
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF070B14))
+                .verticalScroll(rememberScrollState())
+                .padding(14.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Slate900),
+                    border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(PhonixBlue, Slate700)))
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier.size(24.dp).clip(CircleShape).background(PhonixBlue),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (currentUrl.contains("localhost")) "Local Web Server Dashboard" else "Phonix Open Source Web Engine",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = "URL: $currentUrl", color = PhonixBlueLight, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+
+                if (currentUrl.contains("localhost")) {
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Welcome to Nginx on Phonix OS!", color = PhonixGreen, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                "Your Android smartphone is successfully serving web pages via ARM64 Nginx HTTP daemon on port 8080. Accessible across your local Wi-Fi network at http://${uiState.localIpAddress}:8080.",
+                                color = Slate300,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                } else {
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Fast Chromium / Gecko Core Rendering", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                "Phonix OS includes hardware-accelerated web browsing with support for HTML5, CSS3, JavaScript, and WebGL through VirGL GLES 3D drivers. Optimized for both external monitors and handheld screens.",
+                                color = Slate400,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// DISTRO DOWNLOADER & MANAGER WINDOW
+// -------------------------------------------------------------
+@Composable
+fun DistroDownloaderWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    Column(modifier = Modifier.fillMaxSize().background(Slate950).padding(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text("Linux Distro Download Center", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("8 official ARM64 rootfs distributions ready for 1-click download", color = Slate400, fontSize = 10.sp)
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(PhonixBlue.copy(alpha = 0.2f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text("Current: ${uiState.currentDistro.name}", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(uiState.availableDistros) { distro ->
+                DistroDownloaderCard(distro = distro, isCurrent = uiState.currentDistro.id == distro.id, viewModel = viewModel)
+            }
+        }
+    }
+}
+
+@Composable
+fun DistroDownloaderCard(
+    distro: LinuxDistro,
+    isCurrent: Boolean,
+    viewModel: PhonixViewModel
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = if (isCurrent) Color(0xFF0F253E) else Slate900),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(if (isCurrent) PhonixBlueLight else Slate800, Slate800)))
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(distro.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        if (isCurrent) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(PhonixGreen)
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text("ACTIVE", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+                    }
+                    Text("${distro.base} • ${distro.desktopEnvironment}", color = Slate400, fontSize = 10.sp, maxLines = 1)
+                }
+
+                Text(text = "${distro.downloadSizeMb} MB", color = PhonixAmber, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(distro.description, color = Slate300, fontSize = 10.sp)
+
+            if (distro.isDownloading) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Downloading rootfs archive...", color = PhonixCyan, fontSize = 10.sp)
+                    Text("${(distro.downloadProgress * 100).toInt()}% (${distro.downloadSpeedMbps.toInt()} MB/s)", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { distro.downloadProgress },
+                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
+                    color = PhonixCyan,
+                    trackColor = Slate800
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!distro.isInstalled && !distro.isDownloading) {
+                    Button(
+                        onClick = { viewModel.downloadDistro(distro.id) },
+                        modifier = Modifier.height(28.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Download & Install (${distro.downloadSizeMb}MB)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else if (distro.isInstalled) {
+                    if (!isCurrent) {
+                        Button(
+                            onClick = { viewModel.switchAndBootDistro(distro) },
+                            modifier = Modifier.height(28.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = PhonixGreen),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Black)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Switch & Boot OS", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Text("✓ Currently Running", color = PhonixGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// PERSONALIZATION & APPEARANCE WINDOW (WITH MONITOR MODE & WINDOW TOGGLES)
+// -------------------------------------------------------------
+@Composable
+fun PersonalizeWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    val customization = uiState.customization
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Slate950)
+            .verticalScroll(rememberScrollState())
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("Desktop Personalization & Display Settings", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text("Customize desktop layout, monitor mode, grid snapping, and window visibility", color = Slate400, fontSize = 11.sp)
+
+        // 1. External Monitor & Display Mode
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Slate900)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Tv, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Display & Monitor Mode", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                MonitorDisplayMode.values().forEach { mode ->
+                    val isSelected = customization.displayMode == mode
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) PhonixBlue.copy(alpha = 0.25f) else Color.Transparent)
+                            .clickable { viewModel.updateDisplayMode(mode) }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(mode.title, color = if (isSelected) PhonixBlueLight else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(mode.label, color = Slate400, fontSize = 10.sp)
+                        }
+                        if (isSelected) {
+                            Icon(Icons.Default.Check, contentDescription = "Active", tint = PhonixBlueLight, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Window Visibility & Home Screen Toggles
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Slate900)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Visibility, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Toggle Windows On / Off", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { viewModel.toggleAllWindowVisibility() },
+                        modifier = Modifier.weight(1f).height(32.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(if (customization.areAllWindowsHidden) "Restore Windows" else "Show Desktop", fontSize = 10.sp)
+                    }
+                    Button(
+                        onClick = { viewModel.closeAllWindows() },
+                        modifier = Modifier.weight(1f).height(32.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text("Close All Windows", fontSize = 10.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Open Windows Toggles:", color = Slate300, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(6.dp))
+
+                uiState.windows.forEach { win ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(win.title, color = if (!win.isMinimized) Color.White else Slate400, fontSize = 11.sp)
+                        Switch(
+                            checked = !win.isMinimized,
+                            onCheckedChange = { viewModel.toggleWindowById(win.id) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Grid Snapping & App Shortcut Layout
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Slate900)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.GridView, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("App Shortcuts Grid Snapping", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Lock Icons to Grid (84dp)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        Text("Snaps dragged shortcuts to alignment slots", color = Slate400, fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = customization.lockIconsToGrid,
+                        onCheckedChange = { viewModel.toggleLockIconsToGrid(it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = { viewModel.resetShortcutGrid() },
+                    modifier = Modifier.fillMaxWidth().height(32.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Reset Shortcuts to Default Grid", fontSize = 10.sp)
+                }
+            }
+        }
+
+        // 4. Wallpaper Selection
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Slate900)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Brush, contentDescription = null, tint = PhonixBlueLight, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Desktop Wallpaper", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                DesktopWallpaper.values().forEach { wp ->
+                    val isSelected = customization.wallpaper == wp
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) PhonixBlue.copy(alpha = 0.25f) else Color.Transparent)
+                            .clickable { viewModel.updateWallpaper(wp) }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(wp.title, color = if (isSelected) PhonixBlueLight else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(wp.description, color = Slate400, fontSize = 10.sp)
+                        }
+                        if (isSelected) {
+                            Icon(Icons.Default.Check, contentDescription = "Active", tint = PhonixBlueLight, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Accent Color Selection
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Slate900)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Palette, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("System Accent Color", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    DesktopAccentColor.values().forEach { ac ->
+                        val isSelected = customization.accentColor == ac
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(ac.color)
+                                .border(
+                                    width = if (isSelected) 3.dp else 1.dp,
+                                    color = if (isSelected) Color.White else Slate700,
+                                    shape = CircleShape
+                                )
+                                .clickable { viewModel.updateAccentColor(ac) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// TASKBAR & START MENU
+// -------------------------------------------------------------
+@Composable
+fun PhonixTaskbar(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel,
+    isWidescreen: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val currentTime = remember { SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date()) }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(46.dp),
+        color = Slate950,
+        tonalElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .border(width = 1.dp, color = Slate800)
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Left: Start Button & Active Window Pills (Toggles)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
+                // Phoenix Start Menu Button
+                Box(
+                    modifier = Modifier
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (uiState.isStartMenuOpen) SolidColor(PhonixBlue)
+                            else Brush.horizontalGradient(listOf(Color(0xFF0F2038), Color(0xFF162D4E)))
+                        )
+                        .border(1.dp, if (uiState.isStartMenuOpen) PhonixBlueLight else PhonixCyan.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                        .clickable { viewModel.toggleStartMenu() }
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "🔥", fontSize = 13.sp)
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(text = "Start", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+
+                // Window Taskbar Pills with On/Off Toggle Behavior
+                uiState.windows.forEach { window ->
+                    val isFocused = uiState.activeWindowId == window.id && !window.isMinimized
+                    val isVisible = !window.isMinimized
+
+                    Box(
+                        modifier = Modifier
+                            .height(32.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isFocused) Slate800 else if (isVisible) Color(0xFF16253B) else Color(0xFF0D1522))
+                            .border(1.dp, if (isFocused) PhonixBlueLight else if (isVisible) Slate700 else Slate850, RoundedCornerShape(4.dp))
+                            .clickable {
+                                // Toggle window on / off
+                                viewModel.toggleWindowById(window.id)
+                            }
+                            .padding(horizontal = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isVisible) PhonixGreen else Slate600)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = window.title.take(16),
+                                color = if (isFocused) Color.White else if (isVisible) Slate200 else Slate500,
+                                fontSize = 10.sp,
+                                fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Right: System Tray & Show Desktop Toggle Button
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (isWidescreen) {
+                    Text(text = "1080p 60Hz", color = PhonixGreen, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                }
+
+                Text(text = uiState.localIpAddress, color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+
+                Text(
+                    text = if (uiState.isBatteryRemovedDirectPower) "AC ⚡" else "${uiState.telemetry.batteryLevel}%",
+                    color = PhonixGreen,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(text = currentTime, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+
+                // Show Desktop (Win+D) Peek Toggle Bar (far right corner like Windows PC)
+                Box(
+                    modifier = Modifier
+                        .width(22.dp)
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (uiState.customization.areAllWindowsHidden) PhonixBlue else Slate800)
+                        .border(1.dp, if (uiState.customization.areAllWindowsHidden) PhonixBlueLight else Slate700, RoundedCornerShape(2.dp))
+                        .clickable { viewModel.toggleAllWindowVisibility() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (uiState.customization.areAllWindowsHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = "Show Desktop (Toggle all windows)",
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+val Slate500 = Color(0xFF64748B)
+
+@Composable
+fun PhonixStartMenu(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .width(280.dp)
+            .shadow(20.dp, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = Slate900),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.verticalGradient(listOf(PhonixBlue, Slate800)))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Image(painter = painterResource(id = R.drawable.img_phoenix_logo), contentDescription = null, modifier = Modifier.size(36.dp).clip(CircleShape))
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text("Phonix Workstation", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Current OS: ${uiState.currentDistro.name}", color = PhonixCyan, fontSize = 10.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = Slate800)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            StartMenuItem(title = "Web Browser (Chromium/Firefox)", icon = Icons.Default.Language, tint = PhonixBlueLight) {
+                viewModel.toggleWindow(WindowType.BROWSER)
+            }
+            StartMenuItem(title = "Linux Distro Downloader (8 OS)", icon = Icons.Default.Apps, tint = PhonixAmber) {
+                viewModel.toggleWindow(WindowType.DISTRO_STORE)
+            }
+            StartMenuItem(title = "Personalize Desktop & Displays", icon = Icons.Default.Palette, tint = Color(0xFFA855F7)) {
+                viewModel.toggleWindow(WindowType.PERSONALIZE)
+            }
+            StartMenuItem(title = "Terminal (bash)", icon = Icons.Default.Terminal, tint = TerminalGreen) {
+                viewModel.toggleWindow(WindowType.TERMINAL)
+            }
+            StartMenuItem(title = "Server Suite Hub", icon = Icons.Default.Dns, tint = PhonixCyan) {
+                viewModel.toggleWindow(WindowType.SERVER_MANAGER)
+            }
+            StartMenuItem(title = "Resource Monitor (htop)", icon = Icons.Default.Speed, tint = PhonixGreen) {
+                viewModel.toggleWindow(WindowType.RESOURCE_MONITOR)
+            }
+            StartMenuItem(title = "VirGL 3D Benchmark", icon = Icons.Default.PlayArrow, tint = Color(0xFFF43F5E)) {
+                viewModel.toggleWindow(WindowType.BENCHMARK)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Slate800)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Button(
+                    onClick = { viewModel.restartContainer() },
+                    modifier = Modifier.height(28.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Reboot", fontSize = 10.sp)
+                }
+                Button(
+                    onClick = { viewModel.toggleContainerPower() },
+                    modifier = Modifier.height(28.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) {
+                    Icon(Icons.Default.PowerSettingsNew, contentDescription = null, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Shutdown", fontSize = 10.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StartMenuItem(title: String, icon: ImageVector, tint: Color, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(text = title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+// -------------------------------------------------------------
+// TERMINAL WINDOW
+// -------------------------------------------------------------
+@Composable
+fun TerminalWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(uiState.terminalLines.size) {
+        if (uiState.terminalLines.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.terminalLines.size - 1)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(TerminalBlack)
+            .padding(8.dp)
+    ) {
+        val quickCmds = listOf("neofetch", "htop", "free -m", "df -h", "ip a", "glxinfo", "virgl_test", "clear")
+        val scrollState = rememberScrollState()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scrollState)
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            quickCmds.forEach { cmd ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Slate800)
+                        .clickable { viewModel.executeTerminalCommand(cmd) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = cmd,
+                        color = PhonixBlueLight,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+            items(uiState.terminalLines) { line ->
+                val textColor = when (line.type) {
+                    TerminalLine.LineType.INPUT -> Color.White
+                    TerminalLine.LineType.OUTPUT -> Color(0xFFCBD5E1)
+                    TerminalLine.LineType.ERROR -> PhonixRed
+                    TerminalLine.LineType.SUCCESS -> TerminalGreen
+                    TerminalLine.LineType.SYSTEM -> PhonixCyan
+                    TerminalLine.LineType.ACCENT -> PhonixBlueLight
+                }
+                Text(
+                    text = line.text,
+                    color = textColor,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 14.sp
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "phonix@desktop:~$ ",
+                color = TerminalGreen,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
+            )
+            TextField(
+                value = uiState.terminalInput,
+                onValueChange = { viewModel.updateTerminalInput(it) },
+                modifier = Modifier.weight(1f).height(44.dp).testTag("terminal_input_field"),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
+                ),
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = {
+                    viewModel.executeTerminalCommand(uiState.terminalInput)
+                })
+            )
+            IconButton(
+                onClick = { viewModel.executeTerminalCommand(uiState.terminalInput) },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(Icons.Default.Send, contentDescription = "Send Command", tint = PhonixCyan, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// SERVER MANAGER WINDOW
+// -------------------------------------------------------------
+@Composable
+fun ServerManagerWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(uiState.serverServices) { service ->
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(if (service.isRunning) PhonixGreen else Slate600))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(service.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        Text("Port :${service.port} • ${service.category}", color = Slate400, fontSize = 10.sp)
+                    }
+                    Switch(checked = service.isRunning, onCheckedChange = { viewModel.toggleServerService(service.id) })
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// RESOURCE MONITOR WINDOW
+// -------------------------------------------------------------
+@Composable
+fun ResourceMonitorWindowContent(uiState: PhonixUiState) {
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Real-Time Hardware Monitor", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text("CPU Utilization: ${uiState.telemetry.cpuPercent}%", color = PhonixBlueLight, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                LinearProgressIndicator(
+                    progress = { uiState.telemetry.cpuPercent / 100f },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = PhonixBlueLight,
+                    trackColor = Slate800
+                )
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text("RAM: ${uiState.telemetry.ramUsedMb} MB / ${uiState.telemetry.ramTotalMb} MB", color = PhonixCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                LinearProgressIndicator(
+                    progress = { (uiState.telemetry.ramUsedMb.toFloat() / uiState.telemetry.ramTotalMb).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = PhonixCyan,
+                    trackColor = Slate800
+                )
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text("Motherboard Temperature: ${uiState.telemetry.batteryTempC.toInt()}°C", color = PhonixGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = if (uiState.isBatteryRemovedDirectPower) "Battery Removed: Direct DC Power via USB-C Dock" else "Battery Mode",
+                    color = Slate400,
+                    fontSize = 10.sp
+                )
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// BENCHMARK & NOTEPAD & ABOUT WINDOWS
+// -------------------------------------------------------------
+@Composable
+fun BenchmarkWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(12.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("VirGL 3D GLES Hardware Acceleration Benchmark", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Text("Scores 3D shader pipeline & Adreno / Mali GPU performance", color = Slate400, fontSize = 10.sp)
+
+        Button(
+            onClick = { viewModel.run3dGpuBenchmark() },
+            enabled = !uiState.isBenchmarkRunning,
+            colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue)
+        ) {
+            Text(if (uiState.isBenchmarkRunning) "Running Benchmark..." else "Start glmark2-es2 Benchmark")
+        }
+
+        if (uiState.benchmarkScore > 0) {
+            Text("Score: ${uiState.benchmarkScore} pts", color = PhonixGreen, fontWeight = FontWeight.Black, fontSize = 16.sp)
+        }
+
+        LazyColumn(modifier = Modifier.height(180.dp).background(TerminalBlack).padding(6.dp)) {
+            items(uiState.benchmarkLog) { log ->
+                Text(log, color = Slate300, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
+}
+
+@Composable
+fun FileExplorerWindowContent() {
+    val folders = listOf("/bin", "/etc", "/home/phonix", "/root", "/usr", "/var", "/sdcard/PhonixShare")
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(10.dp)) {
+        items(folders) { path ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Folder, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(path, color = Color.White, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
+}
+
+@Composable
+fun NotepadWindowContent() {
+    var text by remember { mutableStateOf("# Phonix OS Notes\n\n- Phone running as headless mini PC\n- Direct USB-C power active\n- VirGL hardware acceleration active\n- 8 Linux distributions supported") }
+    TextField(
+        value = text,
+        onValueChange = { text = it },
+        modifier = Modifier.fillMaxSize(),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = TerminalBlack,
+            unfocusedContainerColor = TerminalBlack,
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White
+        )
+    )
+}
+
+@Composable
+fun AboutWindowContent(uiState: PhonixUiState) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Image(painter = painterResource(id = R.drawable.img_phoenix_logo), contentDescription = null, modifier = Modifier.size(80.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("Phonix OS", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+        Text("Turn smartphones into powerful Mini PCs", color = Slate400, fontSize = 11.sp)
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("Kernel: 5.15.148-phonix-arm64", color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        Text("Active Distro: ${uiState.currentDistro.name}", color = PhonixAmber, fontSize = 10.sp)
+    }
+}
