@@ -5,6 +5,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- The first-run flow saves a real Wi-Fi network through WifiManager. Android 10+ only
+         allows that for system apps and DPCs, and provision.sh makes Phonix the device owner,
+         so the restriction does not apply to this app. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- Granted to itself by the device owner (DevicePolicyManager.setPermissionGrantState) so
+         the connected SSID can be shown. Phonix does not scan for networks and does not turn
+         location services on; without this permission Android redacts the SSID. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Android 13+ Wi-Fi APIs; harmless on the Android 12 units this build ships on. -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

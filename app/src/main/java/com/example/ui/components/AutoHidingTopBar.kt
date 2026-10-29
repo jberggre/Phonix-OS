@@ -37,7 +37,10 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -76,6 +79,10 @@ fun AutoHidingTopBar(
     activeTab: AppNavTab,
     containerStatus: ContainerStatus,
     isBatteryRemoved: Boolean,
+    /** SSID, or ONLINE/OFFLINE when the platform does not expose a name. */
+    networkLabel: String,
+    isOnline: Boolean,
+    onOpenNetwork: () -> Unit,
     onToggleExpand: (Boolean) -> Unit,
     onTabSelected: (AppNavTab) -> Unit,
     onTogglePower: () -> Unit,
@@ -252,6 +259,7 @@ fun AutoHidingTopBar(
                                         AppNavTab.SERVERS -> Icons.Default.Dns
                                         AppNavTab.PARTITIONS -> Icons.Default.Storage
                                         AppNavTab.DISTROS -> Icons.Default.Widgets
+                                        AppNavTab.APPS -> Icons.Default.Storefront
                                     },
                                     contentDescription = null,
                                     tint = if (isSelected) PhonixCyan else Slate400,
@@ -322,6 +330,37 @@ fun AutoHidingTopBar(
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
                 )
+
+                // Always reachable with the mouse: when a unit loses its network, the fix
+                // must not depend on a phone screen that DeX has switched off.
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { onOpenNetwork() }
+                        .testTag("network_chip"),
+                    color = if (isOnline) PhonixGreen.copy(alpha = 0.15f) else PhonixRed.copy(alpha = 0.22f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isOnline) Icons.Default.Wifi else Icons.Default.WifiOff,
+                            contentDescription = null,
+                            tint = if (isOnline) PhonixGreen else PhonixRed,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Text(
+                            text = networkLabel,
+                            color = if (isOnline) PhonixGreen else PhonixRed,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1
+                        )
+                    }
+                }
 
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowDown,

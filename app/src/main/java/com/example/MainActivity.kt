@@ -29,10 +29,12 @@ import com.example.ui.components.DistroHubScreen
 import com.example.ui.components.GamingHubScreen
 import com.example.ui.components.InstallationWizardDialog
 import com.example.ui.components.LinuxBootSplash
+import com.example.ui.components.NetworkSetupScreen
 import com.example.ui.components.PhonixDesktopScreen
 import com.example.ui.components.AutoHidingTopBar
 import com.example.ui.components.PhonixTopBar
 import com.example.ui.components.PartitionManagerScreen
+import com.example.ui.components.PcAppsScreen
 import com.example.ui.components.ServerCenterScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.service.DesktopAutoLaunchService
@@ -134,6 +136,10 @@ class MainActivity : ComponentActivity() {
                                         uiState = uiState,
                                         viewModel = viewModel
                                     )
+                                    AppNavTab.APPS -> PcAppsScreen(
+                                        uiState = uiState,
+                                        viewModel = viewModel
+                                    )
                                 }
                             }
 
@@ -148,6 +154,10 @@ class MainActivity : ComponentActivity() {
                                 onTogglePower = { viewModel.toggleContainerPower() },
                                 onRestart = { viewModel.triggerLinuxRebootAnimation() },
                                 onRunDebloat = { viewModel.runScreenlessMiniPcDebloat() },
+                                networkLabel = uiState.network.networkName
+                                    ?: if (uiState.network.online) "ONLINE" else "OFFLINE",
+                                isOnline = uiState.network.online,
+                                onOpenNetwork = { viewModel.openNetworkSetup() },
                                 modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter)
                             )
 
@@ -161,7 +171,22 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // 3. Step-by-Step Debloat, Partitioning & Installation Walkthrough Wizard
+                    // 3. Network setup. Above the desktop on purpose: a unit with no working
+                    // link cannot install anything, so this is the first thing a customer sees.
+                    if (uiState.showNetworkSetup) {
+                        NetworkSetupScreen(
+                            state = uiState.network,
+                            busy = uiState.networkBusy,
+                            message = uiState.networkMessage,
+                            canDismiss = true,
+                            onConnect = { ssid, password -> viewModel.connectToWifi(ssid, password) },
+                            onOpenSettings = { viewModel.openAndroidWifiSettings() },
+                            onRefresh = { viewModel.checkNetworkAgain() },
+                            onDismiss = { viewModel.dismissNetworkSetup() }
+                        )
+                    }
+
+                    // 4. Step-by-Step Debloat, Partitioning & Installation Walkthrough Wizard
                     if (uiState.isWizardOpen) {
                         InstallationWizardDialog(
                             uiState = uiState,
@@ -177,6 +202,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         moveToDesktopDisplayIfNeeded()
+        // Returning from the Play Store or Android's Wi-Fi settings must change what the UI
+        // shows, so re-read the package list rather than trusting where the customer was.
+        viewModel.loadInstalledApps(this)
     }
 
     /**

@@ -107,17 +107,18 @@ data class DesktopShortcut(
                 isPinnedToTaskbar = true,
                 isAppStore = true
             ),
+            // Phonix's own browser window, not Chrome. It has to be launchable from the
+            // desktop: once the window was closed there was no way back to it.
             DesktopShortcut(
                 id = "sc_browser",
-                title = "Google Chrome / Web",
+                title = "Phonix Browser",
                 windowType = WindowType.BROWSER,
                 gridCol = 0,
                 gridRow = 1,
                 posX = 24f,
                 posY = 108f,
-                launchPackage = "com.android.chrome",
-                isPinnedToTaskbar = true,
-                isNativeApp = true
+                customColor = DesktopAccentColor.CYBER_CYAN,
+                isPinnedToTaskbar = true
             ),
             DesktopShortcut(
                 id = "sc_files",

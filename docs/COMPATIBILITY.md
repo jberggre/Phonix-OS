@@ -21,9 +21,16 @@ exact regional SKU before promising a customer anything.
 
 ## What this means for Phonix
 
-- **The app works anywhere Android gives it a second display.** It creates its own desktop
-  surface and does not need DeX-specific APIs. On Pixel desktop mode it will draw its desktop
-  in a window or fullscreen on the monitor the same way it does under DeX.
+- **The app draws its own desktop surface, but finding the right surface is vendor-specific on
+  Samsung.** An earlier version of this page claimed Phonix "does not need DeX-specific APIs".
+  That is no longer true and has been removed. DeX does not publish its workspace in
+  `DisplayManager.getDisplays()`; it exposes a virtual display named `Desktop` under the vendor
+  category `com.samsung.android.hardware.display.category.DESKTOP`. Phonix resolves that
+  category and waits for it, because launching on the raw HDMI output composes the window
+  *under* DeX's presentation (invisible on the monitor) and moving it afterwards triggers
+  DeX's "already running on another display" dialog. On other vendors the code falls back to
+  the physical presentation display after a grace period; that fallback has only been exercised
+  on Samsung hardware, so treat non-Samsung desktop mode as untested.
 - **Phonix cannot become the system desktop.** On every one of these platforms the taskbar,
   window decorations and wallpaper of the *host* desktop belong to the phone vendor. The Phonix
   window is an app, so on Pixel the user still sees Pixel's taskbar, and on Motorola its own.

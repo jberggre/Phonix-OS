@@ -44,8 +44,8 @@ enum class AppCategory(
 ) {
     WEB_BROWSER(
         id = "cat_browser",
-        title = "Google Chrome / Web Browser",
-        subtitle = "Uses phone's native browser (Zero extra flash storage)",
+        title = "Phonix Browser",
+        subtitle = "The desktop's own private browser window (DuckDuckGo home, no Chrome needed)",
         estStorageMb = 0,
         isDefault = true,
         isHostPhoneApp = true
