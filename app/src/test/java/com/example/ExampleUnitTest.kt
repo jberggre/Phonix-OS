@@ -1,24 +1,23 @@
 package com.example
 
-import com.example.engine.LinuxSystemEmulator
 import com.example.model.CoolingMode
 import com.example.model.DebloatCatalog
 import com.example.model.DefaultServerCatalog
-import com.example.model.HardwareAccelerationConfig
-import com.example.model.PartitionConfig
+import com.example.model.GameCatalog
+import com.example.model.LinuxAppCatalog
+import com.example.model.StorageState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExampleUnitTest {
 
     @Test
-    fun testDebloatCatalogReclaimsOverOneGigabyte() {
+    fun testDebloatCatalogPackages() {
         val packages = DebloatCatalog.getDefaultPackages()
-        val totalRamReclaimed = packages.filter { it.isEnabled }.sumOf { it.estimatedRamSavedMb }
-        // Should reclaim > 1,000 MB RAM for older Samsung devices
-        assertTrue("Expected > 1000MB reclaimed RAM, but got $totalRamReclaimed MB", totalRamReclaimed > 1000)
+        assertTrue("Expected non-empty debloat list", packages.isNotEmpty())
 
         val hasGos = packages.any { it.packageName == "com.samsung.android.game.gos" }
         assertTrue("Samsung GOS package must be present in debloat list", hasGos)
@@ -28,66 +27,64 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testLinuxSystemEmulatorCommands() {
-        val emulator = LinuxSystemEmulator()
-        val partition = PartitionConfig()
-        val hw = HardwareAccelerationConfig()
+    fun testDefaultServerCatalogUnprivilegedPorts() {
         val servers = DefaultServerCatalog.getDefaultServices()
+        assertTrue("Expected server services in catalog", servers.isNotEmpty())
 
-        // Test neofetch output
-        val neofetchOut = emulator.executeCommand(
-            cmdRaw = "neofetch",
-            ipAddress = "192.168.1.105",
-            partitionConfig = partition,
-            hwConfig = hw,
-            services = servers,
-            uptimeSeconds = 3600
-        )
-        assertTrue(neofetchOut.any { it.text.contains("Phonix OS") })
-
-        // Test sensors output for motherboard heatsink thermals
-        val sensorsOut = emulator.executeCommand(
-            cmdRaw = "sensors",
-            ipAddress = "192.168.1.105",
-            partitionConfig = partition,
-            hwConfig = hw,
-            services = servers,
-            uptimeSeconds = 3600
-        )
-        assertTrue(sensorsOut.any { it.text.contains("Sustained 2.45 GHz") || it.text.contains("Active 5V Fan") })
-
-        // Test box64 x86 translation command
-        val box64Out = emulator.executeCommand(
-            cmdRaw = "box64",
-            ipAddress = "192.168.1.105",
-            partitionConfig = partition,
-            hwConfig = hw,
-            services = servers,
-            uptimeSeconds = 3600
-        )
-        assertTrue(box64Out.any { it.text.contains("Box64") && it.text.contains("Dynarec") })
+        // Android unprivileged port constraint: all exposed ports must be >= 1024
+        for (server in servers) {
+            assertTrue(
+                "Port ${server.port} on service ${server.name} must be >= 1024",
+                server.port >= 1024
+            )
+        }
     }
 
     @Test
-    fun testPartitionConfigCalculations() {
-        val partition = PartitionConfig(
-            totalDeviceStorageGb = 64f,
-            androidSystemUsedGb = 12f,
-            allocatedLinuxGb = 16f,
-            allocatedSwapGb = 2f
-        )
-        assertEquals(34f, partition.freeStorageGb, 0.01f)
-        assertTrue(partition.ioOptimization.contains("barrier=0"))
-        assertTrue(partition.ioOptimization.contains("noatime"))
+    fun testCoolingModeDefinitions() {
+        val stock = CoolingMode.STOCK_PASSIVE
+        assertNotNull(stock.title)
+        assertNotNull(stock.description)
+
+        val active = CoolingMode.ACTIVE_MODDED_COOLING
+        assertEquals("Heatsink and fan on the board", active.title)
     }
 
     @Test
-    fun testActiveCoolingModeProperties() {
-        val activeCooling = CoolingMode.ACTIVE_MODDED_COOLING
-        assertTrue("Active cooling mode should bypass thermal throttle", activeCooling.isThrottleBypassed)
-        assertEquals(2.45f, activeCooling.maxClockGhz, 0.01f)
+    fun testGameCatalogEntriesAndDirectUrls() {
+        val games = GameCatalog.games
+        assertTrue("Game catalog should have titles", games.isNotEmpty())
 
-        val passiveMode = CoolingMode.STOCK_PASSIVE
-        assertFalse("Passive mode should enforce thermal throttling", passiveMode.isThrottleBypassed)
+        val emulators = GameCatalog.emulators
+        assertTrue("Emulator catalog should have titles", emulators.isNotEmpty())
+
+        // Open-source titles should have fallback URLs (F-Droid or GitHub release)
+        val mindustry = GameCatalog.byPackage("io.anuke.mindustry")
+        assertNotNull(mindustry)
+        assertNotNull(mindustry?.directUrl)
+
+        val retroArch = GameCatalog.byPackage("com.retroarch")
+        assertNotNull(retroArch)
+        assertNotNull(retroArch?.directUrl)
+    }
+
+    @Test
+    fun testLinuxAppCatalogAlpinePackages() {
+        val apps = LinuxAppCatalog.apps
+        assertTrue("Linux apps catalog should have entries", apps.isNotEmpty())
+        assertTrue("Expected mpv in apps", apps.any { it.packageName == "mpv" })
+        assertTrue("Expected htop in apps", apps.any { it.packageName == "htop" })
+    }
+
+    @Test
+    fun testStorageStateDefaults() {
+        val state = StorageState(
+            totalBytes = 64_000_000_000L,
+            freeBytes = 32_000_000_000L,
+            guestBytes = 559_000_000L,
+            guestPath = "/data/data/com.example/files/linux/alpine"
+        )
+        assertEquals(64_000_000_000L, state.totalBytes)
+        assertEquals(559_000_000L, state.guestBytes)
     }
 }

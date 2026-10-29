@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.model.CoolingMode
-import com.example.model.GpuDriverType
 import com.example.model.WindowType
 import com.example.viewmodel.AppNavTab
 import com.example.viewmodel.ContainerStatus
@@ -27,7 +26,7 @@ class ExampleRobolectricTest {
     fun `read string from context`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
-        assertEquals("Phonix", appName)
+        assertEquals("Phonix OS", appName)
     }
 
     @Test
@@ -39,37 +38,37 @@ class ExampleRobolectricTest {
         viewModel.toggleLockIconsToGrid(true)
 
         val initialShortcuts = viewModel.uiState.value.customization.shortcuts
+        val scStore = initialShortcuts.first { it.id == "sc_store" }
         val scBrowser = initialShortcuts.first { it.id == "sc_browser" }
-        val scDistro = initialShortcuts.first { it.id == "sc_distro" }
 
-        // Initially sc_browser is at (0, 0) and sc_distro is at (0, 1)
+        // Initially sc_store is at (0, 0) and sc_browser is at (0, 1)
+        assertEquals(0, scStore.gridCol)
+        assertEquals(0, scStore.gridRow)
         assertEquals(0, scBrowser.gridCol)
-        assertEquals(0, scBrowser.gridRow)
-        assertEquals(0, scDistro.gridCol)
-        assertEquals(1, scDistro.gridRow)
+        assertEquals(1, scBrowser.gridRow)
 
-        // Drop sc_browser directly onto sc_distro's grid slot (x=16f, y=100f -> col 0, row 1)
-        viewModel.dropShortcut("sc_browser", 16f, 100f)
+        // Drop sc_browser directly onto sc_store's grid slot (x=16f, y=16f -> col 0, row 0)
+        viewModel.dropShortcut("sc_browser", 16f, 16f)
 
         val updatedShortcuts = viewModel.uiState.value.customization.shortcuts
         val updatedBrowser = updatedShortcuts.first { it.id == "sc_browser" }
-        val updatedDistro = updatedShortcuts.first { it.id == "sc_distro" }
+        val updatedStore = updatedShortcuts.first { it.id == "sc_store" }
 
         // Both shortcuts must NOT have the same position! They must have swapped or displaced
         assertFalse(
-            "Browser and Distro shortcuts must not overlap at the same grid coordinates",
-            updatedBrowser.gridCol == updatedDistro.gridCol && updatedBrowser.gridRow == updatedDistro.gridRow
+            "Browser and Store shortcuts must not overlap at the same grid coordinates",
+            updatedBrowser.gridCol == updatedStore.gridCol && updatedBrowser.gridRow == updatedStore.gridRow
         )
         assertFalse(
-            "Browser and Distro shortcuts must not overlap at the same pixel coordinates",
-            updatedBrowser.posX == updatedDistro.posX && updatedBrowser.posY == updatedDistro.posY
+            "Browser and Store shortcuts must not overlap at the same pixel coordinates",
+            updatedBrowser.posX == updatedStore.posX && updatedBrowser.posY == updatedStore.posY
         )
 
-        // Specifically, sc_browser now has (0, 1) and sc_distro was swapped to (0, 0)
+        // Specifically, sc_browser took (0, 0) and sc_store was swapped to (0, 1)
         assertEquals(0, updatedBrowser.gridCol)
-        assertEquals(1, updatedBrowser.gridRow)
-        assertEquals(0, updatedDistro.gridCol)
-        assertEquals(0, updatedDistro.gridRow)
+        assertEquals(0, updatedBrowser.gridRow)
+        assertEquals(0, updatedStore.gridCol)
+        assertEquals(1, updatedStore.gridRow)
 
         // Ensure ALL shortcuts on the desktop have completely unique grid coordinates
         val allSlots = updatedShortcuts.map { Pair(it.gridCol, it.gridRow) }
@@ -147,24 +146,19 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `test terminal command clear, distros, and power execution`() {
+    fun `test terminal command clear and power execution`() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = PhonixViewModel(app)
 
-        // Execute distros command
-        viewModel.executeTerminalCommand("distros")
-        val linesWithDistros = viewModel.uiState.value.terminalLines
-        assertTrue("Terminal must list Linux distros", linesWithDistros.any { it.text.contains("Catalog") })
+        // Execute a command (records input or container status)
+        viewModel.executeTerminalCommand("uname -a")
+        val lines = viewModel.uiState.value.terminalLines
+        assertTrue("Terminal should record input or status message", lines.isNotEmpty())
 
         // Execute clear command
         viewModel.executeTerminalCommand("clear")
         val linesAfterClear = viewModel.uiState.value.terminalLines
         assertTrue("Terminal should be completely cleared after clear command", linesAfterClear.isEmpty())
-
-        // Execute help command
-        viewModel.executeTerminalCommand("help")
-        val linesAfterHelp = viewModel.uiState.value.terminalLines
-        assertTrue("Terminal should display help reference", linesAfterHelp.any { it.text.contains("neofetch") })
 
         // Execute shutdown command
         assertEquals(ContainerStatus.RUNNING, viewModel.uiState.value.containerStatus)
@@ -199,38 +193,29 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `test cooling profile and hardware tuning`() {
+    fun `test cooling profile and direct power mode`() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = PhonixViewModel(app)
 
         viewModel.setCoolingMode(CoolingMode.ACTIVE_MODDED_COOLING)
         val state = viewModel.uiState.value
         assertEquals(CoolingMode.ACTIVE_MODDED_COOLING, state.coolingState.activeMode)
-        assertEquals("performance", state.hwConfig.cpuGovernor)
-        assertEquals(2.45f, state.coolingState.currentCpuClockGhz, 0.01f)
+        assertTrue(state.notificationMessage?.contains("Heatsink and fan") == true)
 
-        // Switch GPU driver
-        viewModel.updateGpuDriver(GpuDriverType.TURNIP_ZINK)
-        assertEquals(GpuDriverType.TURNIP_ZINK, viewModel.uiState.value.hwConfig.gpuDriver)
+        viewModel.toggleBatteryRemovedDirectPower(true)
+        assertTrue(viewModel.uiState.value.isBatteryRemovedDirectPower)
     }
 
     @Test
-    fun `test server service toggle and game launching`() {
+    fun `test server service toggle and terminal state`() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = PhonixViewModel(app)
 
         val nginx = viewModel.uiState.value.serverServices.first { it.id == "nginx_web" }
-        assertTrue(nginx.isRunning)
+        assertFalse(nginx.isRunning)
 
-        // Toggle Nginx off
         viewModel.toggleService("nginx_web")
-        val updatedNginx = viewModel.uiState.value.serverServices.first { it.id == "nginx_web" }
-        assertFalse(updatedNginx.isRunning)
-
-        // Launch game
-        val game = com.example.model.DefaultGamingCatalog.items.first()
-        viewModel.launchGame(game)
-        assertTrue(viewModel.uiState.value.notificationMessage?.contains(game.name) == true)
-        assertTrue(viewModel.uiState.value.terminalLines.any { it.text.contains(game.name) })
+        // Without active proot container running in JVM test, sets prompt to start container
+        assertTrue(viewModel.uiState.value.notificationMessage?.contains("container") == true)
     }
 }

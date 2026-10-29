@@ -14,7 +14,10 @@ enum class WindowType(val defaultTitle: String, val iconName: String) {
     PRIVACY("Privacy Hub", "shield"),
     NOTEPAD("Notepad / Editor", "note"),
     BENCHMARK("Container Benchmark", "speed"),
-    ABOUT("About Phonix OS", "info")
+    ABOUT("About Phonix OS", "info"),
+    PHONE_MIRROR("Phone Screen (Display 0)", "phone_android"),
+    VS_CODE("VS Code Web IDE", "code"),
+    AI_ASSISTANT("Phonix Cyberdeck AI", "smart_toy")
 }
 
 data class DesktopWindow(

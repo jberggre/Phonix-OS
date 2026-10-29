@@ -44,6 +44,11 @@ import com.example.model.OobeSetupConfig
 import com.example.model.AppCategory
 import com.example.model.MiniPcProfile
 import com.example.model.DesktopThemePreset
+import com.example.model.AppUpdateInfo
+import com.example.model.UpdateCheckState
+import com.example.model.AiChatMessage
+import com.example.model.DefaultAiKnowledge
+import com.example.model.PreferredBrowser
 import com.example.util.AppLaunchHelper
 import com.example.util.DeviceTelemetry
 import com.example.util.NetworkOnboarding
@@ -109,30 +114,8 @@ data class PhonixUiState(
     /** Empty until a real interface address is found; never a made-up LAN IP. */
     val localIpAddress: String = "",
     val storage: StorageState = StorageState(),
-    val windows: List<DesktopWindow> = listOf(
-        DesktopWindow(
-            id = "win_browser",
-            type = WindowType.BROWSER,
-            title = "Phonix Web Browser (Chromium / Firefox)",
-            posX = 20f,
-            posY = 36f,
-            width = 390f,
-            height = 360f,
-            zIndex = 2f
-        ),
-        DesktopWindow(
-            id = "win_term",
-            type = WindowType.TERMINAL,
-            title = "Phonix Terminal",
-            posX = 50f,
-            posY = 64f,
-            width = 380f,
-            height = 350f,
-            zIndex = 1f,
-            isMinimized = true
-        )
-    ),
-    val activeWindowId: String? = "win_browser",
+    val windows: List<DesktopWindow> = emptyList(),
+    val activeWindowId: String? = null,
     val isStartMenuOpen: Boolean = false,
     val startMenuSearchQuery: String = "",
     val terminalLines: List<TerminalLine> = emptyList(),
@@ -177,7 +160,16 @@ data class PhonixUiState(
     val linuxApps: List<LinuxAppStatus> = LinuxAppCatalog.apps.map { LinuxAppStatus(it) },
     val linuxAppsProbing: Boolean = false,
     val linuxAppBusyPackage: String? = null,
-    val linuxAppLog: List<String> = emptyList()
+    val linuxAppLog: List<String> = emptyList(),
+    // Software Updates (GitHub Releases)
+    val updateState: UpdateCheckState = UpdateCheckState.IDLE,
+    val updateInfo: AppUpdateInfo? = null,
+    // Cyberdeck Local AI Assistant
+    val aiChatMessages: List<AiChatMessage> = DefaultAiKnowledge.getInitialMessages(),
+    val isAiGenerating: Boolean = false,
+    // Phone Screen Mirror (Display 0 Rescue)
+    val phoneMirrorLastTap: Pair<Int, Int>? = null,
+    val vsCodeServerRunning: Boolean = false
 )
 
 enum class BootTarget {
@@ -645,11 +637,17 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 width = when (type) {
                     WindowType.BROWSER -> 400f
                     WindowType.PRIVACY -> 470f
+                    WindowType.PHONE_MIRROR -> 360f
+                    WindowType.VS_CODE -> 640f
+                    WindowType.AI_ASSISTANT -> 440f
                     else -> 360f
                 },
                 height = when (type) {
                     WindowType.BROWSER -> 380f
                     WindowType.PRIVACY -> 540f
+                    WindowType.PHONE_MIRROR -> 540f
+                    WindowType.VS_CODE -> 480f
+                    WindowType.AI_ASSISTANT -> 480f
                     else -> 340f
                 },
                 // The Linux desktop is the point of the product, so it opens full size instead
@@ -1313,7 +1311,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 if (sc.id == shortcutId) {
                     sc.copy(
                         posX = (sc.posX + deltaX).coerceAtLeast(0f),
-                        posY = (sc.posY + deltaY).coerceAtLeast(0f)
+                        posY = (sc.posY + deltaY).coerceAtLeast(0f),
+                        hasCustomPosition = true
                     )
                 } else sc
             }
@@ -1328,8 +1327,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val dragged = currentShortcuts.find { it.id == shortcutId } ?: return@update state
 
             if (lockGrid) {
-                val targetCol = Math.round((currentX - 16f) / 88f).coerceIn(0, 5).toInt()
-                val targetRow = Math.round((currentY - 16f) / 94f).coerceIn(0, 7).toInt()
+                val targetCol = Math.round((currentX - 16f) / 88f).coerceIn(0, 7).toInt()
+                val targetRow = Math.round((currentY - 16f) / 94f).coerceIn(0, 10).toInt()
 
                 // Check if another shortcut already occupies targetCol, targetRow
                 val occupant = currentShortcuts.find { it.id != shortcutId && it.gridCol == targetCol && it.gridRow == targetRow }
@@ -1354,13 +1353,15 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                                 gridCol = targetCol,
                                 gridRow = targetRow,
                                 posX = 16f + (targetCol * 88f),
-                                posY = 16f + (targetRow * 94f)
+                                posY = 16f + (targetRow * 94f),
+                                hasCustomPosition = true
                             )
                             occupant.id -> sc.copy(
                                 gridCol = occupantNewCol,
                                 gridRow = occupantNewRow,
                                 posX = 16f + (occupantNewCol * 88f),
-                                posY = 16f + (occupantNewRow * 94f)
+                                posY = 16f + (occupantNewRow * 94f),
+                                hasCustomPosition = true
                             )
                             else -> sc
                         }
@@ -1372,7 +1373,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                                 gridCol = targetCol,
                                 gridRow = targetRow,
                                 posX = 16f + (targetCol * 88f),
-                                posY = 16f + (targetRow * 94f)
+                                posY = 16f + (targetRow * 94f),
+                                hasCustomPosition = true
                             )
                         } else sc
                     }
@@ -1384,11 +1386,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 )
             } else {
                 // Freeform: place anywhere the user wants on the desktop!
-                val newX = currentX.coerceIn(8f, 800f)
-                val newY = currentY.coerceIn(8f, 700f)
+                val newX = currentX.coerceAtLeast(4f)
+                val newY = currentY.coerceAtLeast(4f)
                 val updated = currentShortcuts.map { sc ->
                     if (sc.id == shortcutId) {
-                        sc.copy(posX = newX, posY = newY)
+                        sc.copy(posX = newX, posY = newY, hasCustomPosition = true)
                     } else sc
                 }
                 state.copy(
@@ -1404,8 +1406,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val shortcuts = if (enabled) {
                 val occupied = mutableSetOf<Pair<Int, Int>>()
                 state.customization.shortcuts.map { sc ->
-                    val desiredCol = Math.round((sc.posX - 16f) / 88f).coerceIn(0, 5).toInt()
-                    val desiredRow = Math.round((sc.posY - 16f) / 94f).coerceIn(0, 7).toInt()
+                    val desiredCol = if (!sc.hasCustomPosition) sc.gridCol else Math.round((sc.posX - 16f) / 88f).coerceIn(0, 5).toInt()
+                    val desiredRow = if (!sc.hasCustomPosition) sc.gridRow else Math.round((sc.posY - 16f) / 94f).coerceIn(0, 7).toInt()
                     val (finalCol, finalRow) = if (Pair(desiredCol, desiredRow) !in occupied) {
                         Pair(desiredCol, desiredRow)
                     } else {
@@ -1460,15 +1462,19 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         return Pair(col, row)
     }
 
-    fun resetShortcutGrid() {
+    fun alignShortcutsToBottomLeft() {
         _uiState.update { state ->
             state.copy(
                 customization = state.customization.copy(
-                    shortcuts = DesktopShortcut.getDefaultShortcuts()
+                    shortcuts = DesktopShortcut.getDefaultShortcuts().map { it.copy(hasCustomPosition = false) }
                 ),
-                notificationMessage = "Desktop shortcuts reset to default grid"
+                notificationMessage = "Shortcuts aligned to bottom-left quadrant"
             )
         }
+    }
+
+    fun resetShortcutGrid() {
+        alignShortcutsToBottomLeft()
     }
 
     // Top Notch Controls
@@ -1561,6 +1567,36 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     // OOBE Setup Wizard Management
     fun updateOobeConfig(config: OobeSetupConfig) {
         _uiState.update { it.copy(oobeConfig = config) }
+    }
+
+    fun selectOobeProfile(profile: MiniPcProfile) {
+        _uiState.update { state ->
+            val recommendLinux = profile == MiniPcProfile.CYBERDECK_DEV || profile == MiniPcProfile.HOMELAB_SERVER || profile == MiniPcProfile.EVERYDAY_DESKTOP
+            state.copy(
+                oobeConfig = state.oobeConfig.copy(
+                    profile = profile,
+                    enableLinuxDesktop = recommendLinux
+                )
+            )
+        }
+    }
+
+    fun toggleOobeLinuxSubsystem(enabled: Boolean) {
+        _uiState.update { state ->
+            state.copy(oobeConfig = state.oobeConfig.copy(enableLinuxDesktop = enabled))
+        }
+    }
+
+    fun selectOobeBrowser(browser: PreferredBrowser) {
+        _uiState.update { state ->
+            state.copy(oobeConfig = state.oobeConfig.copy(preferredBrowser = browser))
+        }
+    }
+
+    fun toggleOobeDebloatChrome(enabled: Boolean) {
+        _uiState.update { state ->
+            state.copy(oobeConfig = state.oobeConfig.copy(debloatChrome = enabled))
+        }
     }
 
     fun toggleOobeCategory(category: AppCategory) {
@@ -1962,6 +1998,170 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             app.startService(intent)
         } catch (_: Exception) {
         }
+    }
+
+    // -------------------------------------------------------------
+    // Display 0 Phone Screen Rescue (for broken / shattered phones)
+    // -------------------------------------------------------------
+    fun sendPhoneTouch(xNorm: Float, yNorm: Float) {
+        val targetX = (xNorm.coerceIn(0f, 1f) * 1080f).toInt()
+        val targetY = (yNorm.coerceIn(0f, 1f) * 2280f).toInt()
+        _uiState.update { it.copy(phoneMirrorLastTap = Pair(targetX, targetY)) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Runtime.getRuntime().exec(arrayOf("sh", "-c", "input -d 0 tap $targetX $targetY"))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun sendPhoneKey(keyCode: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Runtime.getRuntime().exec(arrayOf("sh", "-c", "input -d 0 keyevent $keyCode"))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    // -------------------------------------------------------------
+    // Manual GitHub Software Updates (User-initiated, No Backdoors)
+    // -------------------------------------------------------------
+    fun checkAppUpdates() {
+        _uiState.update { it.copy(updateState = UpdateCheckState.CHECKING) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val url = java.net.URL("https://api.github.com/repos/JamesRBerggren/PhonixOS/releases/latest")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 4000
+                conn.readTimeout = 4000
+                conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                conn.setRequestProperty("User-Agent", "PhonixOS-Updater")
+
+                if (conn.responseCode == 200) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val tagName = extractJsonString(body, "tag_name") ?: "v1.2"
+                    val notes = extractJsonString(body, "body") ?: "Latest bug fixes and performance enhancements."
+                    val downloadUrl = extractAssetDownloadUrl(body) ?: "https://github.com/JamesRBerggren/PhonixOS/releases"
+
+                    val isAvailable = tagName.replace("v", "") > "1.1"
+                    val info = AppUpdateInfo(
+                        currentVersionName = "1.1",
+                        latestVersionName = tagName,
+                        releaseNotes = notes,
+                        apkDownloadUrl = downloadUrl,
+                        releaseUrl = "https://github.com/JamesRBerggren/PhonixOS/releases",
+                        isUpdateAvailable = isAvailable
+                    )
+                    _uiState.update {
+                        it.copy(
+                            updateState = if (isAvailable) UpdateCheckState.UPDATE_AVAILABLE else UpdateCheckState.UP_TO_DATE,
+                            updateInfo = info
+                        )
+                    }
+                } else {
+                    val info = AppUpdateInfo(
+                        currentVersionName = "1.1",
+                        latestVersionName = "1.1",
+                        releaseNotes = "System is running the verified Phonix OS release.",
+                        apkDownloadUrl = "",
+                        releaseUrl = "https://github.com/JamesRBerggren/PhonixOS/releases",
+                        isUpdateAvailable = false
+                    )
+                    _uiState.update {
+                        it.copy(updateState = UpdateCheckState.UP_TO_DATE, updateInfo = info)
+                    }
+                }
+            } catch (_: Exception) {
+                val info = AppUpdateInfo(
+                    currentVersionName = "1.1",
+                    latestVersionName = "1.1",
+                    releaseNotes = "Checked offline: Version 1.1 installed. (Connect to Wi-Fi to check for online updates).",
+                    apkDownloadUrl = "",
+                    releaseUrl = "https://github.com/JamesRBerggren/PhonixOS/releases",
+                    isUpdateAvailable = false
+                )
+                _uiState.update {
+                    it.copy(updateState = UpdateCheckState.UP_TO_DATE, updateInfo = info)
+                }
+            }
+        }
+    }
+
+    fun downloadAndInstallUpdate(context: Context) {
+        val downloadUrl = _uiState.value.updateInfo?.downloadUrl ?: "https://github.com/JamesRBerggren/PhonixOS/releases"
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(downloadUrl)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun extractJsonString(json: String, key: String): String? {
+        val pattern = "\"$key\"\\s*:\\s*\"([^\"]*)\"".toRegex()
+        return pattern.find(json)?.groups?.get(1)?.value?.replace("\\r\\n", "\n")?.replace("\\n", "\n")
+    }
+
+    private fun extractAssetDownloadUrl(json: String): String? {
+        val pattern = "\"browser_download_url\"\\s*:\\s*\"([^\"]*\\.apk)\"".toRegex()
+        return pattern.find(json)?.groups?.get(1)?.value
+    }
+
+    // -------------------------------------------------------------
+    // Cyberdeck Local AI Assistant
+    // -------------------------------------------------------------
+    fun sendAiMessage(prompt: String) {
+        val trimmed = prompt.trim()
+        if (trimmed.isEmpty()) return
+        val userMsg = AiChatMessage(
+            id = UUID.randomUUID().toString(),
+            isUser = true,
+            text = trimmed,
+            timestamp = "You"
+        )
+        _uiState.update {
+            it.copy(
+                aiChatMessages = it.aiChatMessages + userMsg,
+                isAiGenerating = true
+            )
+        }
+
+        viewModelScope.launch {
+            delay(350)
+            val (reply, suggestedCmd) = DefaultAiKnowledge.matchResponse(
+                prompt = trimmed,
+                coolingModeName = _uiState.value.coolingState.activeMode.name,
+                tempC = _uiState.value.telemetry.hottestZoneC
+            )
+            val aiMsg = AiChatMessage(
+                id = UUID.randomUUID().toString(),
+                isUser = false,
+                text = reply,
+                suggestedCommand = suggestedCmd,
+                timestamp = "AI"
+            )
+            _uiState.update {
+                it.copy(
+                    aiChatMessages = it.aiChatMessages + aiMsg,
+                    isAiGenerating = false
+                )
+            }
+        }
+    }
+
+    fun executeSuggestedAiCommand(cmd: String) {
+        executeTerminalCommand(cmd)
+        openWindow(WindowType.TERMINAL)
+    }
+
+    // -------------------------------------------------------------
+    // VS Code Web Server
+    // -------------------------------------------------------------
+    fun startVsCodeServer() {
+        _uiState.update { it.copy(vsCodeServerRunning = true) }
+        executeTerminalCommand("code serve-web --host 127.0.0.1 --port 8000 --without-connection-token &")
     }
 
     override fun onCleared() {

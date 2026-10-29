@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -94,14 +95,21 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import com.example.model.UpdateCheckState
+import com.example.model.AiChatMessage
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -236,29 +244,41 @@ fun PhonixDesktopScreen(
                         )
                 ) {
                     // Draggable icons with per-shortcut shape, size, color, background & context menu
+                    // Shortcuts are anchored in the BOTTOM-LEFT QUADRANT by default above the taskbar.
+                    val desktopHeightDp = (screenHeight - (if (customization.taskbarPosition == TaskbarPosition.BOTTOM) 64.dp else 16.dp)).value
+                    val bottomQuadrantBaseY = (desktopHeightDp - 360f).coerceAtLeast(140f)
+
                     customization.shortcuts.forEach { shortcut ->
-                        val appIcon = uiState.installedApps.find { it.packageName == shortcut.launchPackage }?.iconDrawable
+                        val effectiveShortcut = if (!shortcut.hasCustomPosition) {
+                            shortcut.copy(
+                                posX = 20f + (shortcut.gridCol * 90f),
+                                posY = bottomQuadrantBaseY + (shortcut.gridRow * 88f)
+                            )
+                        } else {
+                            shortcut
+                        }
+                        val appIcon = uiState.installedApps.find { it.packageName == effectiveShortcut.launchPackage }?.iconDrawable
                         DraggableDesktopShortcut(
-                            shortcut = shortcut,
+                            shortcut = effectiveShortcut,
                             iconSize = customization.iconSize,
                             showLabel = customization.showDesktopLabels,
                             accentColor = customization.accentColor.color,
                             appIconDrawable = appIcon,
-                            onMove = { dx, dy -> viewModel.moveShortcut(shortcut.id, dx, dy) },
-                            onDrop = { x, y -> viewModel.dropShortcut(shortcut.id, x, y) },
+                            onMove = { dx, dy -> viewModel.moveShortcut(effectiveShortcut.id, dx, dy) },
+                            onDrop = { x, y -> viewModel.dropShortcut(effectiveShortcut.id, x, y) },
                             onClick = {
                                 val density = desktopContext.resources.displayMetrics.density
                                 val bounds = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
                                     android.graphics.Rect(
-                                        (shortcut.posX * density).toInt(),
-                                        (shortcut.posY * density).toInt(),
-                                        ((shortcut.posX + 380f) * density).toInt(),
-                                        ((shortcut.posY + 320f) * density).toInt()
+                                        (effectiveShortcut.posX * density).toInt(),
+                                        (effectiveShortcut.posY * density).toInt(),
+                                        ((effectiveShortcut.posX + 380f) * density).toInt(),
+                                        ((effectiveShortcut.posY + 320f) * density).toInt()
                                     )
                                 } else null
-                                viewModel.launchShortcutOrHostApp(desktopContext, shortcut, bounds)
+                                viewModel.launchShortcutOrHostApp(desktopContext, effectiveShortcut, bounds)
                             },
-                            onRightClick = { x, y -> viewModel.openShortcutContextMenu(shortcut.id, x, y) }
+                            onRightClick = { x, y -> viewModel.openShortcutContextMenu(effectiveShortcut.id, x, y) }
                         )
                     }
 
@@ -646,6 +666,9 @@ fun DraggableDesktopShortcut(
         WindowType.BENCHMARK -> Icons.Default.PlayArrow
         WindowType.NOTEPAD -> Icons.Default.Code
         WindowType.PRIVACY -> Icons.Default.Security
+        WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
+        WindowType.VS_CODE -> Icons.Default.Code
+        WindowType.AI_ASSISTANT -> Icons.Default.SmartToy
         else -> Icons.Default.Computer
     }
 
@@ -659,6 +682,9 @@ fun DraggableDesktopShortcut(
         WindowType.FILE_EXPLORER -> Color(0xFFFBBF24)
         WindowType.BENCHMARK -> Color(0xFFF43F5E)
         WindowType.PRIVACY -> PhonixGreen
+        WindowType.PHONE_MIRROR -> PhonixAmber
+        WindowType.VS_CODE -> PhonixBlueLight
+        WindowType.AI_ASSISTANT -> Color(0xFFA855F7)
         else -> PhonixBlueLight
     }
 
@@ -1145,6 +1171,9 @@ fun DesktopWindowFrame(
                         WindowType.FILE_EXPLORER -> Icons.Default.Folder
                         WindowType.BENCHMARK -> Icons.Default.PlayArrow
                         WindowType.PRIVACY -> Icons.Default.Security
+                        WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
+                        WindowType.VS_CODE -> Icons.Default.Code
+                        WindowType.AI_ASSISTANT -> Icons.Default.SmartToy
                         else -> Icons.Default.Computer
                     }
                     Icon(
@@ -1226,7 +1255,10 @@ fun DesktopWindowFrame(
                     WindowType.BENCHMARK -> BenchmarkWindowContent(uiState, viewModel)
                     WindowType.NOTEPAD -> NotepadWindowContent()
                     WindowType.PRIVACY -> PrivacyHubWindowContent(viewModel)
-                    WindowType.ABOUT -> AboutWindowContent(uiState)
+                    WindowType.ABOUT -> AboutWindowContent(uiState, viewModel)
+                    WindowType.PHONE_MIRROR -> PhoneMirrorWindowContent(uiState, viewModel)
+                    WindowType.VS_CODE -> VsCodeWindowContent(uiState, viewModel)
+                    WindowType.AI_ASSISTANT -> CyberdeckAiWindowContent(uiState, viewModel)
                     else -> TerminalWindowContent(uiState, viewModel)
                 }
             }
@@ -1810,11 +1842,16 @@ fun PhonixStartMenu(
     Card(
         modifier = modifier
             .width(280.dp)
+            .heightIn(max = 480.dp)
             .shadow(20.dp, RoundedCornerShape(12.dp)),
         colors = CardDefaults.cardColors(containerColor = Slate900),
         border = CardDefaults.outlinedCardBorder().copy(brush = Brush.verticalGradient(listOf(PhonixBlue, Slate800)))
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(12.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Image(painter = painterResource(id = R.drawable.img_phoenix_logo), contentDescription = null, modifier = Modifier.size(36.dp).clip(CircleShape))
                 Spacer(modifier = Modifier.width(10.dp))
@@ -1865,6 +1902,9 @@ fun PhonixStartMenu(
                 Triple("VirGL 3D Benchmark", Icons.Default.PlayArrow, Color(0xFFF43F5E)) to WindowType.BENCHMARK,
                 Triple("File Manager", Icons.Default.Folder, Color(0xFFFBBF24)) to WindowType.FILE_EXPLORER,
                 Triple("Notepad Editor", Icons.Default.Code, Slate200) to WindowType.NOTEPAD,
+                Triple("Phone Screen (Display 0 Rescue)", Icons.Default.PhoneAndroid, PhonixAmber) to WindowType.PHONE_MIRROR,
+                Triple("Cyberdeck Local AI", Icons.Default.SmartToy, Color(0xFFA855F7)) to WindowType.AI_ASSISTANT,
+                Triple("VS Code Web IDE", Icons.Default.Code, PhonixBlueLight) to WindowType.VS_CODE,
                 Triple("About Phonix OS", Icons.Default.Info, PhonixCyan) to WindowType.ABOUT
             )
 
@@ -2221,10 +2261,17 @@ fun NotepadWindowContent() {
 }
 
 @Composable
-fun AboutWindowContent(uiState: PhonixUiState) {
+fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
     val context = LocalContext.current
     val guest = remember {
         runCatching { com.example.engine.LinuxRuntime.container(context).version() }.getOrNull()
+    }
+    val appVersion = remember {
+        runCatching {
+            val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+            val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
+            "${pi.versionName} (build $code)"
+        }.getOrDefault("1.1 (build 2)")
     }
     Column(
         modifier = Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState()),
@@ -2238,11 +2285,123 @@ fun AboutWindowContent(uiState: PhonixUiState) {
 
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("This device", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text("This system & app", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                AboutRow("Version", appVersion)
+                AboutRow("Package", context.packageName)
                 AboutRow("Model", android.os.Build.MODEL)
                 AboutRow("Android", android.os.Build.VERSION.RELEASE + " (API " + android.os.Build.VERSION.SDK_INT + ")")
                 AboutRow("ABI", android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "-")
                 AboutRow("Kernel", System.getProperty("os.version") ?: "-")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Software Updates Card (User-Controlled GitHub Releases)
+        Card(
+            modifier = Modifier.fillMaxWidth().testTag("card_software_updates"),
+            colors = CardDefaults.cardColors(containerColor = Slate900)
+        ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(16.dp))
+                        Text("Software Updates", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                    Text("Manual Only", color = PhonixGreen, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text(
+                    "Transparent GitHub updates. You are in full control — no hidden or backdoor background updates.",
+                    color = Slate400,
+                    fontSize = 10.sp
+                )
+                AboutRow("Repository", "JamesRBerggren/PhonixOS")
+
+                when (uiState.updateState) {
+                    UpdateCheckState.IDLE -> {
+                        Button(
+                            onClick = { viewModel.checkAppUpdates() },
+                            modifier = Modifier.fillMaxWidth().testTag("btn_check_updates"),
+                            colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Check for Updates", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    UpdateCheckState.CHECKING -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PhonixCyan, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Checking GitHub Releases...", color = Slate300, fontSize = 11.sp)
+                        }
+                    }
+                    UpdateCheckState.UP_TO_DATE -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().background(Slate950, RoundedCornerShape(6.dp)).padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                uiState.updateInfo?.releaseNotes ?: "System is up to date (v1.1).",
+                                color = Slate200,
+                                fontSize = 10.sp
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.checkAppUpdates() },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Check Again", fontSize = 10.sp)
+                        }
+                    }
+                    UpdateCheckState.UPDATE_AVAILABLE -> {
+                        val update = uiState.updateInfo
+                        Column(
+                            modifier = Modifier.fillMaxWidth().background(Color(0xFF0F2942), RoundedCornerShape(8.dp)).padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("New Version Available: ${update?.latestVersionName ?: "Update"}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            Text(update?.releaseNotes ?: "Release updates and improvements.", color = Slate300, fontSize = 10.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Button(
+                                onClick = { viewModel.downloadAndInstallUpdate(context) },
+                                modifier = Modifier.fillMaxWidth().testTag("btn_install_update"),
+                                colors = ButtonDefaults.buttonColors(containerColor = PhonixGreen),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Download & Install Update", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    else -> {
+                        Text("Could not reach GitHub. Offline mode.", color = Slate400, fontSize = 10.sp)
+                        OutlinedButton(
+                            onClick = { viewModel.checkAppUpdates() },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Retry", fontSize = 10.sp)
+                        }
+                    }
+                }
             }
         }
 
@@ -2268,6 +2427,484 @@ fun AboutWindowContent(uiState: PhonixUiState) {
             fontSize = 10.sp,
             lineHeight = 14.sp
         )
+    }
+}
+
+// -------------------------------------------------------------
+// PHONE SCREEN RESCUE WINDOW (Display 0 for shattered screens)
+// -------------------------------------------------------------
+@Composable
+fun PhoneMirrorWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Slate950)
+            .padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Rescue Banner
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
+        ) {
+            Row(
+                modifier = Modifier.padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(20.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Display 0 Rescue (Physical Phone Screen)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text("Controls the shattered phone inside the shell. Tap screen or use navigation buttons.", color = Slate400, fontSize = 9.sp)
+                }
+                uiState.phoneMirrorLastTap?.let { (x, y) ->
+                    Text("Tap: $x,$y", color = PhonixCyan, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Phone Screen Surface (Aspect Ratio ~9:19 for S10)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .widthIn(max = 280.dp)
+                .fillMaxWidth()
+                .background(Color.Black, RoundedCornerShape(16.dp))
+                .border(2.dp, Slate800, RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        val xNorm = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        val yNorm = (offset.y / size.height.toFloat()).coerceIn(0f, 1f)
+                        viewModel.sendPhoneTouch(xNorm, yNorm)
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Top Status Bar Area
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("12:00", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("LTE", color = Slate400, fontSize = 9.sp)
+                        Text("100%", color = PhonixGreen, fontSize = 9.sp)
+                    }
+                }
+
+                // Center Display Representation
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Default.PhoneAndroid,
+                        contentDescription = null,
+                        tint = Slate600,
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Text(
+                        "Active Display 0 Surface",
+                        color = Slate300,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Resolution: 1080 x 2280\nTap anywhere inside to forward touch directly to the phone OS.",
+                        color = Slate500,
+                        fontSize = 9.sp,
+                        lineHeight = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+
+                // Bottom Phone Dock Hint
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Slate900.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = Slate400, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Security, contentDescription = null, tint = Slate400, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Apps, contentDescription = null, tint = Slate400, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Virtual Navigation Bar (Direct hardware keyevent forwarding to Display 0)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Slate900)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Key 4: Back
+                IconButton(onClick = { viewModel.sendPhoneKey(4) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                // Key 3: Home
+                IconButton(onClick = { viewModel.sendPhoneKey(3) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Home, contentDescription = "Home", tint = PhonixCyan, modifier = Modifier.size(20.dp))
+                }
+                // Key 187: Recents / App Switch
+                IconButton(onClick = { viewModel.sendPhoneKey(187) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.GridView, contentDescription = "Recents", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                // Key 26: Power / Screen Wake
+                IconButton(onClick = { viewModel.sendPhoneKey(26) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.PowerSettingsNew, contentDescription = "Power", tint = PhonixAmber, modifier = Modifier.size(18.dp))
+                }
+                // Key 82: Unlock / Menu
+                IconButton(onClick = { viewModel.sendPhoneKey(82) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Security, contentDescription = "Unlock", tint = PhonixGreen, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// VS CODE WEB WINDOW CONTENT (Local ARM64 Alpine loopback)
+// -------------------------------------------------------------
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun VsCodeWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    val context = LocalContext.current
+    val ideUrl = "http://127.0.0.1:8000"
+    var isReloading by remember { mutableStateOf(false) }
+
+    val webView = remember {
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    isReloading = false
+                }
+            }
+            loadUrl(ideUrl)
+        }
+    }
+
+    DisposableEffect(webView) {
+        onDispose { webView.destroy() }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E))) {
+        // VS Code Header Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF252526))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Code, contentDescription = null, tint = PhonixBlueLight, modifier = Modifier.size(18.dp))
+                Text("VS Code Web IDE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Box(
+                    modifier = Modifier
+                        .background(if (uiState.vsCodeServerRunning) PhonixGreen.copy(alpha = 0.2f) else Slate800, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        if (uiState.vsCodeServerRunning) "Server Running :8000" else "Loopback 127.0.0.1:8000",
+                        color = if (uiState.vsCodeServerRunning) PhonixGreen else Slate400,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!uiState.vsCodeServerRunning) {
+                    Button(
+                        onClick = { viewModel.startVsCodeServer() },
+                        colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("Start Server", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        isReloading = true
+                        webView.reload()
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = Slate300, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+
+        // Web View IDE Content
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            AndroidView(
+                factory = { webView },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// CYBERDECK LOCAL AI ASSISTANT WINDOW CONTENT (Qwen2.5 / llama.cpp)
+// -------------------------------------------------------------
+@Composable
+fun CyberdeckAiWindowContent(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    var promptInput by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(uiState.aiChatMessages.size) {
+        if (uiState.aiChatMessages.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.aiChatMessages.size - 1)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Slate950)
+            .padding(10.dp)
+    ) {
+        // Header info bar with local engine telemetry
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF1E293B), RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.SmartToy, contentDescription = null, tint = Color(0xFFA855F7), modifier = Modifier.size(18.dp))
+                Column {
+                    Text("Qwen2.5 / Cyberdeck AI", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text("Dual Mode: Built-in Knowledge + Alpine llama.cpp", color = Slate400, fontSize = 8.sp)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF064E3B),
+                    border = BorderStroke(1.dp, Color(0xFF10B981))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(modifier = Modifier.size(6.dp).background(Color(0xFF34D399), CircleShape))
+                        Text("100% OFFLINE", color = Color(0xFFD1FAE5), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Slate800,
+                    modifier = Modifier.clickable {
+                        viewModel.executeSuggestedAiCommand("apk add llama.cpp && llama-cli --help")
+                    }
+                ) {
+                    Text("⚡ llama-cli", color = PhonixCyan, fontSize = 9.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Quick Suggestion Chips covering all offline modules
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(
+                "💧 Water Filtration",
+                "🛡️ Rule of 3s Survival",
+                "🌱 Farming & Calorie Crops",
+                "📻 Emergency Radio Frequencies",
+                "💻 Offline Coding Cheatsheet",
+                "⚡ 12V Buck & Solar Sizing",
+                "🩺 First Aid & ORS Salts",
+                "🌡️ Check Thermals"
+            ).forEach { query ->
+                Box(
+                    modifier = Modifier
+                        .background(Slate900, RoundedCornerShape(12.dp))
+                        .border(1.dp, Slate800, RoundedCornerShape(12.dp))
+                        .clickable { viewModel.sendAiMessage(query) }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(query, color = Slate300, fontSize = 10.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Chat Messages
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(uiState.aiChatMessages) { msg ->
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = if (msg.isUser) Alignment.End else Alignment.Start
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            if (msg.isUser) "You" else "Qwen2.5 Cyberdeck AI",
+                            color = if (msg.isUser) PhonixCyan else Color(0xFFA855F7),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Box(
+                        modifier = Modifier
+                            .widthIn(max = 380.dp)
+                            .background(
+                                if (msg.isUser) PhonixBlue else Slate900,
+                                RoundedCornerShape(10.dp)
+                            )
+                            .border(
+                                1.dp,
+                                if (msg.isUser) PhonixBlueLight else Slate800,
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                msg.text,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                            // Actionable Suggested Command with Run in Terminal button
+                            msg.suggestedCommand?.let { cmd ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = TerminalBlack)
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("Recommended Terminal Command:", color = Slate400, fontSize = 9.sp)
+                                        Text(
+                                            cmd,
+                                            color = PhonixGreen,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Button(
+                                            onClick = { viewModel.executeSuggestedAiCommand(cmd) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF047857)),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("⚡ Run in Terminal", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (uiState.isAiGenerating) {
+                item {
+                    Row(
+                        modifier = Modifier.padding(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFFA855F7), strokeWidth = 2.dp)
+                        Text("Thinking offline...", color = Slate400, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Input Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            OutlinedTextField(
+                value = promptInput,
+                onValueChange = { promptInput = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Ask about hardware, Linux commands, servers...", color = Slate500, fontSize = 11.sp) },
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Slate900,
+                    unfocusedContainerColor = Slate900,
+                    focusedBorderColor = Color(0xFFA855F7),
+                    unfocusedBorderColor = Slate800,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
+            )
+
+            IconButton(
+                onClick = {
+                    if (promptInput.isNotBlank()) {
+                        viewModel.sendAiMessage(promptInput)
+                        promptInput = ""
+                    }
+                },
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(Color(0xFFA855F7), RoundedCornerShape(8.dp))
+            ) {
+                Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
     }
 }
 
