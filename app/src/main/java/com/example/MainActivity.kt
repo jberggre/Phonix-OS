@@ -35,6 +35,7 @@ import com.example.ui.components.PartitionManagerScreen
 import com.example.ui.components.ServerCenterScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.service.DesktopAutoLaunchService
+import com.example.util.DesktopAutoLaunch
 import com.example.util.WallpaperProvisioner
 import com.example.ui.theme.Slate950
 import com.example.viewmodel.AppNavTab
@@ -164,6 +165,45 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        moveToDesktopDisplayIfNeeded()
+    }
+
+    /**
+     * Keeps the desktop on the screen the customer can see.
+     *
+     * A task keeps the display it was created on. If Phonix was first started there while DeX
+     * had not settled (or by a stale launcher intent), every later launch just resumes that
+     * invisible instance and the monitor keeps showing Samsung's launcher. Moving the task is
+     * not allowed, so the fix is to open a clean instance on the desktop display and retire
+     * this one. Runs at most once per process.
+     */
+    private fun moveToDesktopDisplayIfNeeded() {
+        if (relocateAttempted) return
+        val target = DesktopAutoLaunch.externalDisplay(this) ?: return
+        val current = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display?.displayId
+            else @Suppress("DEPRECATION") windowManager.defaultDisplay.displayId
+        } catch (_: Exception) {
+            null
+        } ?: return
+        if (current == target.displayId) return
+
+        relocateAttempted = true
+        if (DesktopAutoLaunch.launchDesktop(applicationContext)) finish()
+    }
+
+    private companion object {
+        /**
+         * Process-wide, not per instance: if the re-launch itself lands on the wrong display the
+         * new activity would otherwise try again, and again, restarting the desktop forever.
+         * One attempt per process is enough — the auto-launch service retries on display events.
+         */
+        @Volatile
+        private var relocateAttempted = false
     }
 
     private fun setImmersiveDesktopMode(immersive: Boolean) {

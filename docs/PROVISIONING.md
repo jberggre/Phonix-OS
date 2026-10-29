@@ -38,7 +38,9 @@ These are real readings from this unit, not estimates:
 - `dd` inside the guest: ~600–690 MB/s write, 1.2–1.7 GB/s read for a 64 MB file (page cache;
   treat it as an upper bound, not disk endurance).
 - Shell loop (2M awk iterations, via `time`): ~1.5 s.
-- DeX virtual display: 3440×1440 at 160 dpi, `type=VIRTUAL`, `FLAG_DESKTOP_DISPLAY`.
+- DeX virtual display: 3440×1440 at 160 dpi, `type=VIRTUAL`, `FLAG_DESKTOP_DISPLAY`;
+  presented to a 1920×1080 HDMI output (that is the resolution `screencap -d <desktop id>`
+  returns, and the size apps should fill).
 - Idle guest RAM is small; the desktop itself (Xvfb + IceWM + xterm) is the bulk.
 
 Re-run these after changing the rootfs or the X11 package list; the numbers above are the
@@ -72,6 +74,24 @@ Note the one normal-looking oddity: while DeX is active the phone's own panel go
 Samsung saving power, not a fault. If the panel stays dark after a power-button press *and* a
 mouse click on the monitor does nothing, then the panel or its flex is the fault, and the unit
 needs the mouse to be usable at all.
+
+## Bench traps found on the first real unit
+
+- **A preload can hold an account that blocks device owner.** After the factory reset this
+  Cricket S10 still had a `NewsBreak` account (type `Newsbreak`), created by the preloaded
+  `com.particlenews.newsbreak` app. `dpm set-device-owner` refuses while any account exists, so
+  the run has to remove the app (`pm uninstall --user 0 com.particlenews.newsbreak`) and wait a
+  second before claiming owner. `provision.sh` reports the count; do this by hand first.
+- **Wireless debugging does not survive a reboot.** Samsung turns it off, so a bench that pairs
+  over Wi-Fi and then reboots to test the kiosk loses contact mid-run. Provision over USB when
+  the unit will be rebooted, or expect to re-pair before the post-boot checks.
+- **The DeX workspace is not the HDMI display.** DeX renders its desktop on a virtual display
+  named `Desktop` and presents that onto the HDMI output. A window launched on the physical HDMI
+  display (it does appear in `DISPLAY_CATEGORY_PRESENTATION`) is composed *under* DeX's
+  presentation: the app looks healthy in `dumpsys` and the monitor still shows Samsung's
+  launcher. This build targets the `Desktop` display by name. If a unit shows the launcher
+  instead of Phonix, check `dumpsys SurfaceFlinger` — the HDMI display's layer list either ends
+  with the Phonix window or with `desktoplauncher`.
 
 ## The provisioning stick
 
