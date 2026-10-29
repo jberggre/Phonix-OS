@@ -10,6 +10,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Lets Phonix paint its own wallpaper onto the device so DeX/lock screen match the desktop -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
+    <supports-screens
+        android:smallScreens="true"
+        android:normalScreens="true"
+        android:largeScreens="true"
+        android:xlargeScreens="true"
+        android:anyDensity="true" />
 
     <queries>
         <intent>
@@ -22,24 +31,42 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
+        android:extractNativeLibs="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+        <!--
+            DeX / large-screen requirements:
+              * resizeableActivity=true so the window manager treats Phonix as a real
+                desktop app on an external display instead of confining it to a
+                phone-sized window.
+              * NO android:screenOrientation. A locked orientation makes Samsung's
+                desktop mode fall back to "designed for phone screens" behaviour.
+              * configChanges covers every size change so resizing a DeX window does
+                not recreate the activity (and lose desktop state).
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode"
             android:windowSoftInputMode="adjustResize"
             android:label="@string/app_name"
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-                <!-- Allows Phonix to act as the primary Home Screen / Custom Desktop Launcher so the phone boots straight into PC mode -->
-                <category android:name="android.intent.category.HOME" />
+                <!--
+                    HOME is intentionally NOT declared right now.
+                    Samsung DeX classifies HOME/launcher apps as "designed for phone screens"
+                    and refuses to window them on the external display (am start returns
+                    status 102). Keeping HOME off the desktop activity is what lets it run
+                    as a real DeX window; boot-to-desktop will be handled by a separate,
+                    thin launcher activity once that trade-off is decided.
+                -->
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
@@ -49,6 +76,29 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             tools:ignore="ForegroundServicePermission" />
+
+        <!-- Opens the desktop on the HDMI/DeX monitor, at boot and whenever one appears -->
+        <service
+            android:name=".service.DesktopAutoLaunchService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!--
+            Device-owner target for provision.sh (`dpm set-device-owner`).
+            Required for permanent HOME, keyguard disable, boot-to-desktop and
+            silent package management on a machine with no usable screen.
+        -->
+        <receiver
+            android:name=".receiver.PhonixDeviceAdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".receiver.BootReceiver"

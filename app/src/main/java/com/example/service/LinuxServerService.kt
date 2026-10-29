@@ -15,6 +15,7 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.engine.LinuxRuntime
 
 class LinuxServerService : Service() {
 
@@ -39,6 +40,7 @@ class LinuxServerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP_SERVER -> {
+                LinuxRuntime.stop()
                 releaseLocks()
                 isServiceRunning = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -47,6 +49,10 @@ class LinuxServerService : Service() {
             }
             ACTION_START_SERVER, null -> {
                 acquireLocks()
+                // Boot the guests once, on a worker: first run unpacks a rootfs.
+                Thread {
+                    runCatching { LinuxRuntime.start(applicationContext) }
+                }.apply { isDaemon = true }.start()
                 isServiceRunning = true
                 val notification = buildForegroundNotification()
                 try {
@@ -123,7 +129,7 @@ class LinuxServerService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Phonix Linux Server Active")
-            .setContentText("24/7 Server running with WakeLock & VirGL GPU acceleration")
+            .setContentText("Alpine Linux ${LinuxRuntime.state.name.lowercase()} • wake lock and Wi-Fi lock held")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

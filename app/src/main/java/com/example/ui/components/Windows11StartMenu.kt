@@ -157,16 +157,22 @@ fun Windows11StartMenu(
                 AppLaunchHelper.launchPhotos(context)
             },
             StartMenuItem(
-                "app_distro", "Linux Distro Store", "1-Click ARM64 Rootfs Hub",
+                "app_distro", "Linux System", "Alpine, installed and running",
                 Icons.Default.Widgets, PhonixAmber
             ) {
                 viewModel.toggleWindow(WindowType.DISTRO_STORE)
             },
             StartMenuItem(
-                "app_terminal", "Phonix Terminal", "bash • PRoot User-Space",
+                "app_terminal", "Terminal", "Alpine shell, proot, no root",
                 Icons.Default.Terminal, PhonixGreen
             ) {
                 viewModel.toggleWindow(WindowType.TERMINAL)
+            },
+            StartMenuItem(
+                "app_linux_desktop", "Linux Desktop", "Real X11 apps in a window",
+                Icons.Default.Computer, PhonixGreen
+            ) {
+                viewModel.toggleWindow(WindowType.LINUX_DESKTOP)
             },
             StartMenuItem(
                 "app_server", "Server Hub", "Nginx, SSH & Samba NAS",
@@ -175,7 +181,7 @@ fun Windows11StartMenu(
                 viewModel.toggleWindow(WindowType.SERVER_MANAGER)
             },
             StartMenuItem(
-                "app_monitor", "Resource Monitor", "htop • CPU & Thermals",
+                "app_monitor", "Resource Monitor", "Live battery & CPU readings",
                 Icons.Default.Speed, PhonixCyan
             ) {
                 viewModel.toggleWindow(WindowType.RESOURCE_MONITOR)
@@ -187,7 +193,7 @@ fun Windows11StartMenu(
                 AppLaunchHelper.launchSettings(context)
             },
             StartMenuItem(
-                "app_debloat", "Mini PC Debloater", "Free 1.5GB RAM for Desktop",
+                "app_debloat", "Android Debloater", "Remove bloat you do not need",
                 Icons.Default.Security, PhonixBlueLight
             ) {
                 viewModel.runScreenlessMiniPcDebloat()

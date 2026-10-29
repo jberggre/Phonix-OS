@@ -64,6 +64,13 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+  // proot is executed straight out of nativeLibraryDir, so the .so files must be extracted
+  // from the APK on install instead of being mapped from inside it.
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

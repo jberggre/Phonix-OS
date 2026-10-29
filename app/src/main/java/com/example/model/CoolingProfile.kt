@@ -1,45 +1,39 @@
 package com.example.model
 
+/**
+ * Build guides, not controls.
+ *
+ * An unrooted Android app cannot set CPU clocks, lift a thermal limit or read a fan, so these
+ * entries describe the physical build the unit is going into. The screen that shows them says
+ * exactly that, and no number here is presented as a measurement we did not make.
+ */
 enum class CoolingMode(
     val title: String,
     val subtitle: String,
-    val maxClockGhz: Float,
-    val thermalLimitC: Int,
-    val isThrottleBypassed: Boolean,
-    val description: String
+    val description: String,
 ) {
     STOCK_PASSIVE(
-        title = "Stock Passive Glass Body",
-        subtitle = "Factory Phone Enclosure (Throttled)",
-        maxClockGhz = 1.6f,
-        thermalLimitC = 40,
-        isThrottleBypassed = false,
-        description = "Standard thermal throttling active. Clocks will drop to 1.1 GHz after 3-5 minutes under heavy load to prevent battery overheating."
+        title = "Stock phone body",
+        subtitle = "Factory glass, battery in place",
+        description = "Samsung's thermal policy decides the clocks. Expect sustained performance to drop " +
+            "once the phone warms up, and nothing in this app can raise that limit."
     ),
     ACTIVE_MODDED_COOLING(
-        title = "Active Motherboard Cooling (Heatsink + Fan)",
-        subtitle = "Custom Hardware Mod (Sustained 2.45 GHz)",
-        maxClockGhz = 2.45f,
-        thermalLimitC = 65,
-        isThrottleBypassed = true,
-        description = "For phones with aftermarket copper heatsinks and 5V fans installed directly on SoC shield. Keeps CPU/GPU at 100% max clocks indefinitely (+60% sustained performance)!"
+        title = "Heatsink and fan on the board",
+        subtitle = "Hardware mod inside the case",
+        description = "A copper shim, thermal paste and a small fan move heat off the SoC shield, so the " +
+            "same policy throttles later. We have not measured a boost figure on this build; treat any " +
+            "percentage you have seen quoted as unverified."
     ),
     SERVER_ECO_247(
-        title = "24/7 Silent Server Eco",
-        subtitle = "Ultra-Low Power Mode (~1.8W)",
-        maxClockGhz = 1.2f,
-        thermalLimitC = 38,
-        isThrottleBypassed = false,
-        description = "Downclocks CPU cores for ultra-low power consumption and cold operation. Ideal for 24/7 web hosting, Pi-hole DNS, and Samba file shares."
+        title = "Always-on server build",
+        subtitle = "Low power, long life",
+        description = "For a unit that stays on: keep the guest mostly idle, remove heavy Android apps and " +
+            "use a slow charger. Android still owns the clocks - Phonix shows what the sensors report " +
+            "and stays out of the way."
     )
 }
 
 data class MotherboardCoolingState(
-    val activeMode: CoolingMode = CoolingMode.ACTIVE_MODDED_COOLING,
-    val socTempC: Float = 34.8f,
-    val batteryTempC: Float = 31.2f,
-    val currentCpuClockGhz: Float = 2.45f,
-    val sustainedPerformanceBoostPercent: Int = 58,
-    val fanEstimatedRpm: Int = 3200,
-    val batteryBypassRecommended: Boolean = true
+    val activeMode: CoolingMode = CoolingMode.STOCK_PASSIVE
 )

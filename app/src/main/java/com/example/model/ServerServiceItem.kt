@@ -1,26 +1,44 @@
 package com.example.model
 
+/**
+ * A server package the user can install into the Alpine container.
+ *
+ * Nothing here is "running" until the guest says so: [isInstalled] and [isRunning] are filled
+ * in from a real probe (`apk info -e`, `pidof`) over the live container, never assumed. The
+ * Alpine packages are the real package names, so the install button does what it says.
+ */
 data class ServerServiceItem(
     val id: String,
     val name: String,
-    val category: String, // Web, Remote Access, Storage, Network, Automation
+    val category: String,
     val port: Int,
     val protocol: String,
-    val isRunning: Boolean,
+    /** Alpine package that provides this service. */
+    val apkPackage: String,
+    /** Name of the daemon process, used to tell "installed" from "actually running". */
+    val processName: String,
     val description: String,
+    /** Where the service keeps its files inside the guest. */
     val internalPath: String,
-    val autoStartOnBoot: Boolean = true
+    val isInstalled: Boolean = false,
+    val isRunning: Boolean = false
 ) {
-    fun getLocalEndpoint(ipAddress: String): String {
-        return if (protocol == "HTTP" || protocol == "HTTPS") {
-            "http://$ipAddress:$port"
-        } else {
-            "$ipAddress:$port"
+    /** Exact command to start it, shown to the user instead of silently flipping a switch. */
+    val startHint: String
+        get() = when (id) {
+            "nginx_web" -> "nginx"
+            "openssh" -> "ssh-keygen -A && /usr/sbin/sshd"
+            "samba_nas" -> "smbd -D"
+            "pihole_dns" -> "dnsmasq"
+            else -> apkPackage
         }
-    }
+
+    fun endpoint(ipAddress: String): String =
+        if (protocol == "HTTP" || protocol == "HTTPS") "http://$ipAddress:$port" else "$ipAddress:$port"
 }
 
 object DefaultServerCatalog {
+
     fun getDefaultServices(): List<ServerServiceItem> = listOf(
         ServerServiceItem(
             id = "nginx_web",
@@ -28,10 +46,10 @@ object DefaultServerCatalog {
             category = "Web",
             port = 8080,
             protocol = "HTTP",
-            isRunning = true,
-            description = "High-performance web server serving static websites, PHP, and proxying web apps.",
-            internalPath = "/var/www/html",
-            autoStartOnBoot = true
+            apkPackage = "nginx",
+            processName = "nginx",
+            description = "Static site and reverse proxy. Serves /var/www/html from the guest.",
+            internalPath = "/var/www/html"
         ),
         ServerServiceItem(
             id = "openssh",
@@ -39,65 +57,32 @@ object DefaultServerCatalog {
             category = "Remote Access",
             port = 2222,
             protocol = "SSH",
-            isRunning = true,
-            description = "Secure encrypted terminal access. SSH directly into this phone from your laptop using: ssh phonix@IP -p 2222",
-            internalPath = "/etc/ssh",
-            autoStartOnBoot = true
+            apkPackage = "openssh",
+            processName = "sshd",
+            description = "Encrypted shell from your laptop. Needs a key generated inside the guest first.",
+            internalPath = "/etc/ssh"
         ),
         ServerServiceItem(
             id = "samba_nas",
-            name = "Samba Windows File Share (NAS)",
+            name = "Samba File Share",
             category = "Storage",
-            port = 4455,
+            port = 445,
             protocol = "SMB",
-            isRunning = true,
-            description = "Turn phone internal storage or MicroSD card into network drive visible in Windows File Explorer.",
-            internalPath = "/home/phonix/shared",
-            autoStartOnBoot = true
+            apkPackage = "samba",
+            processName = "smbd",
+            description = "Share a guest directory with Windows and macOS over the network.",
+            internalPath = "/srv/phonix"
         ),
         ServerServiceItem(
             id = "pihole_dns",
-            name = "Pi-hole / DNS Ad-Blocker",
+            name = "Pi-hole DNS Sink",
             category = "Network",
-            port = 8053,
-            protocol = "DNS / HTTP",
-            isRunning = false,
-            description = "Network-wide advertisement and tracking blocker. Route your home Wi-Fi through this old phone.",
-            internalPath = "/etc/pihole",
-            autoStartOnBoot = false
-        ),
-        ServerServiceItem(
-            id = "node_api",
-            name = "Node.js REST Service",
-            category = "Dev",
-            port = 3000,
-            protocol = "HTTP",
-            isRunning = false,
-            description = "Full Node.js v20 runtime hosting backend APIs or lightweight Express servers.",
-            internalPath = "/home/phonix/app",
-            autoStartOnBoot = false
-        ),
-        ServerServiceItem(
-            id = "nextcloud",
-            name = "Nextcloud Personal Cloud",
-            category = "Storage",
-            port = 8443,
-            protocol = "HTTPS",
-            isRunning = false,
-            description = "Self-hosted alternative to Google Drive / Dropbox running on your phone.",
-            internalPath = "/var/www/nextcloud",
-            autoStartOnBoot = false
-        ),
-        ServerServiceItem(
-            id = "python_flask",
-            name = "Python 3 Micro-service",
-            category = "Dev",
-            port = 5000,
-            protocol = "HTTP",
-            isRunning = true,
-            description = "Fast Python server for web hooks, home automation, and sensor monitoring.",
-            internalPath = "/home/phonix/server.py",
-            autoStartOnBoot = true
+            port = 53,
+            protocol = "DNS",
+            apkPackage = "dnsmasq",
+            processName = "dnsmasq",
+            description = "Network-wide DNS filtering once configured. Not a one-tap install.",
+            internalPath = "/etc/dnsmasq.d"
         )
     )
 }

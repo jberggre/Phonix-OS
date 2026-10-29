@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import com.example.MainActivity
+import com.example.service.DesktopAutoLaunchService
 import com.example.service.LinuxServerService
 
 class BootReceiver : BroadcastReceiver() {
@@ -26,14 +26,11 @@ class BootReceiver : BroadcastReceiver() {
             } catch (_: Exception) {
             }
 
-            // 2. Launch Phonix Desktop directly as the PC environment
-            val launchIntent = Intent(context, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-            try {
-                context.startActivity(launchIntent)
-            } catch (_: Exception) {
-            }
+            // 2. Open the desktop on whatever monitor is attached.
+            //    Starting MainActivity straight from a boot broadcast is blocked on
+            //    Android 10+, so hand off to the service, which reacts both to a monitor
+            //    that is already connected and to one plugged in later.
+            DesktopAutoLaunchService.start(context)
         }
     }
 }

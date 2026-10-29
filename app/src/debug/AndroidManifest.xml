@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug-only manifest overlay.
+
+    The desktop auto-launch service is deliberately NOT exported in release builds - on a
+    shipped unit only the system (BOOT_COMPLETED / package replaced) may start it. Debug
+    builds need to trigger it by hand while testing on a desk:
+
+        adb shell am start-foreground-service -n \
+            com.aistudio.phonix.vpxmkr/com.example.service.DesktopAutoLaunchService
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <service
+            android:name=".service.DesktopAutoLaunchService"
+            android:exported="true"
+            tools:replace="android:exported" />
+    </application>
+
+</manifest>

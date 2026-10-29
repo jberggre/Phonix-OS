@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+    Phonix Linux display page.
+
+    Copied into the guest's noVNC web root by engine/LinuxDesktop.kt and loaded by the desktop
+    window. It is deliberately not noVNC's own vnc_lite.html:
+
+      * noVNC's samples ship no <meta name="viewport">, so a WebView lays them out at the 980px
+        fallback width and the remote framebuffer ends up cropped instead of scaled.
+      * the top bar, "Send CtrlAltDel" button and connect splash are noise in an appliance.
+      * the window needs one honest signal ("connected" / "reconnecting") instead of scraping
+        status text out of the DOM.
+
+    Everything scales to the window and letterboxes onto Phonix's own background; the page
+    reconnects by itself so a restarted X server does not need the user to press anything.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Phonix Linux</title>
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0B1220;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: none;
+    }
+    #screen {
+        position: fixed;
+        inset: 0;
+    }
+    #screen canvas {
+        display: block;
+    }
+    /* noVNC inserts its own container with a dim-grey background; keep the letterbox
+       on Phonix's own colour instead. */
+    #screen > div {
+        background: #0B1220 !important;
+    }
+    #hint {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        text-align: center;
+        color: #64748B;
+        font: 13px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+        pointer-events: none;
+    }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<div id="hint">Starting the Linux desktop…</div>
+<script type="module">
+import RFB from './core/rfb.js';
+
+// The window reads this for its status light; `adb logcat` reads it for diagnostics.
+const status = window.__phonix = { state: 'loading', attempts: 0, error: '' };
+
+const screenEl = document.getElementById('screen');
+const hintEl = document.getElementById('hint');
+
+function setHint(text) {
+    if (hintEl) hintEl.textContent = text;
+}
+
+function connect() {
+    status.state = 'connecting';
+    status.attempts += 1;
+    setHint('Starting the Linux desktop…');
+
+    // Each RFB object is single-use: a disconnected one can never come back, so a retry
+    // builds a fresh one and clears whatever the last attempt left behind.
+    screenEl.replaceChildren();
+
+    let rfb;
+    try {
+        rfb = new RFB(screenEl, 'ws://' + location.host + '/websockify');
+    } catch (e) {
+        status.state = 'disconnected';
+        status.error = String(e && e.message || e);
+        setTimeout(connect, 3000);
+        return;
+    }
+
+    // Fit the whole framebuffer into the window instead of cropping it.
+    rfb.scaleViewport = true;
+    rfb.clipViewport = false;
+    // A click also hands the keyboard to the guest, like clicking into a real desktop.
+    rfb.focusOnClick = true;
+
+    rfb.addEventListener('connect', () => {
+        status.state = 'connected';
+        status.error = '';
+        setHint('');
+        console.log('[phonix] connected ' + window.innerWidth + 'x' + window.innerHeight);
+    });
+
+    rfb.addEventListener('disconnect', () => {
+        status.state = 'disconnected';
+        setHint('Reconnecting to the Linux desktop…');
+        console.log('[phonix] disconnected, retrying');
+        // The app starts x11vnc and websockify; on first run that takes a while, so keep
+        // asking rather than showing a dead canvas.
+        screenEl.replaceChildren();
+        setTimeout(connect, 2500);
+    });
+}
+
+window.addEventListener('resize', () => {
+    console.log('[phonix] resize ' + window.innerWidth + 'x' + window.innerHeight);
+});
+
+connect();
+</script>
+</body>
+</html>

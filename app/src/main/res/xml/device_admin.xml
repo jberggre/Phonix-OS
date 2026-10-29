@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Policies requested by PhonixDeviceAdminReceiver.
+
+    Deliberately minimal:
+      force-lock     - lets the desktop lock/unlock the machine without the
+                       power button, which is usually inaccessible once the
+                       phone is sealed inside a Mini PC shell.
+      disable-camera - cameras are physically removed from these units, so the
+                       policy keeps any residual camera surface dead.
+
+    wipe-data is intentionally NOT requested: "Prepare for new user" resets
+    Phonix state and re-runs the OOBE, it does not factory-reset the device.
+-->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+        <force-lock />
+        <disable-camera />
+    </uses-policies>
+</device-admin>

@@ -1,5 +1,12 @@
 package com.example.ui.components
 
+import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.viewinterop.AndroidView
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -8,6 +15,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import android.graphics.drawable.Drawable
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -135,7 +145,6 @@ import com.example.model.DesktopShortcut
 import com.example.model.DesktopWallpaper
 import com.example.model.DesktopWindow
 import com.example.model.IconSizeMode
-import com.example.model.LinuxDistro
 import com.example.model.MonitorDisplayMode
 import com.example.model.TaskbarPosition
 import com.example.model.TaskbarStyle
@@ -210,26 +219,16 @@ fun PhonixDesktopScreen(
                 )
 
                 // 2. Top Monitor & Dock Status Bar (Quick Display Switcher & Dock Telemetry)
-                MonitorStatusBar(
-                    customization = customization,
-                    isHardwareLandscape = isHardwareLandscape,
-                    viewModel = viewModel,
-                    modifier = Modifier
-                        .align(if (customization.taskbarPosition == TaskbarPosition.BOTTOM) Alignment.TopStart else Alignment.BottomStart)
-                        .padding(
-                            top = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) 8.dp else 0.dp,
-                            bottom = if (customization.taskbarPosition == TaskbarPosition.TOP) 8.dp else 0.dp,
-                            start = 12.dp,
-                            end = 12.dp
-                        )
-                )
+                // The monitor/dock status strip used to sit here and covered the top of the
+                // desktop. It is gone: on a Mini PC the screen is the product, so nothing may
+                // overlay it. The information it carried lives in the Vitals widget instead.
 
                 // 3. Desktop Shortcuts Layer (Freeform / Grid Draggable & Right-Click Customization)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(
-                            top = if (customization.taskbarPosition == TaskbarPosition.TOP) 54.dp else 44.dp,
+                            top = if (customization.taskbarPosition == TaskbarPosition.TOP) 54.dp else 10.dp,
                             bottom = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp,
                             start = 12.dp,
                             end = 12.dp
@@ -402,9 +401,9 @@ fun MonitorStatusBar(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = if (isHardwareLandscape)
-                    "External Monitor: 1080p 60Hz FHD (USB-C Dock Connected)"
+                    "External display connected (resolution is set by Android, not by this app)"
                 else
-                    "Monitor Output: 16:9 Landscape Desktop Mode",
+                    "No external display: desktop is running in this window",
                 color = Slate300,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
@@ -623,6 +622,8 @@ fun DraggableDesktopShortcut(
     iconSize: IconSizeMode,
     showLabel: Boolean,
     accentColor: Color,
+    // Real launcher icon of the pinned phone app, when the shortcut points at one.
+    appIconDrawable: Drawable? = null,
     onMove: (Float, Float) -> Unit,
     onDrop: (Float, Float) -> Unit,
     onClick: () -> Unit,
@@ -634,6 +635,7 @@ fun DraggableDesktopShortcut(
 
     val icon = when (shortcut.windowType) {
         WindowType.BROWSER -> Icons.Default.Language
+        WindowType.LINUX_DESKTOP -> Icons.Default.Computer
         WindowType.DISTRO_STORE -> Icons.Default.Apps
         WindowType.PERSONALIZE -> Icons.Default.Palette
         WindowType.TERMINAL -> Icons.Default.Terminal
@@ -805,12 +807,24 @@ fun DraggableDesktopShortcut(
                     .border(1.dp, iconTint.copy(alpha = 0.55f), RoundedCornerShape(shapeRadius)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = shortcut.title,
-                    tint = iconTint,
-                    modifier = Modifier.size(sizeDp * 0.55f)
-                )
+                val realIcon = appIconDrawable
+                if (realIcon != null) {
+                    Image(
+                        bitmap = remember(realIcon) {
+                            realIcon.toBitmap(width = 96, height = 96).asImageBitmap()
+                        },
+                        contentDescription = shortcut.title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(sizeDp * 0.72f)
+                    )
+                } else {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = shortcut.title,
+                        tint = iconTint,
+                        modifier = Modifier.size(sizeDp * 0.55f)
+                    )
+                }
             }
             if (showLabel) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -832,6 +846,13 @@ fun DesktopQuickDistroWidget(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
+    val context = LocalContext.current
+    val version = remember(uiState.containerStatus) {
+        runCatching { com.example.engine.LinuxRuntime.container(context).version() }
+            .getOrDefault(com.example.model.DistroCatalog.alpine.version)
+    }
+    val running = uiState.containerStatus == com.example.viewmodel.ContainerStatus.RUNNING
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -848,35 +869,44 @@ fun DesktopQuickDistroWidget(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(imageVector = Icons.Default.Apps, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Active Linux OS", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "Linux system", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "8 Available", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = if (running) "running" else "stopped",
+                        color = if (running) PhonixGreen else Slate400,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     Spacer(modifier = Modifier.width(4.dp))
                     IconButton(
                         onClick = { viewModel.toggleDesktopWidget("distro", false) },
                         modifier = Modifier.size(20.dp)
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close Distro Card", tint = Slate400, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Close, contentDescription = "Close Linux card", tint = Slate400, modifier = Modifier.size(14.dp))
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
-            Text(text = uiState.currentDistro.name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
-            Text(text = uiState.currentDistro.desktopEnvironment, color = Slate400, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = "Alpine Linux " + version, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = "proot userspace, no root, no partition",
+                color = Slate400,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
             Button(
-                onClick = { viewModel.toggleWindow(WindowType.DISTRO_STORE) },
+                onClick = { viewModel.toggleWindow(WindowType.LINUX_DESKTOP) },
                 modifier = Modifier.fillMaxWidth().height(30.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                 shape = RoundedCornerShape(6.dp)
             ) {
-                Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Download Distros", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Open Linux desktop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -907,8 +937,8 @@ fun DesktopSystemWidget(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "${uiState.telemetry.batteryTempC.toInt()}°C",
-                        color = if (uiState.telemetry.batteryTempC > 40f) PhonixRed else PhonixGreen,
+                        text = "${uiState.telemetry.hottestZoneC.toInt()}°C",
+                        color = if (uiState.telemetry.hottestZoneC >= 75f) PhonixRed else PhonixGreen,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Black
                     )
@@ -1012,9 +1042,9 @@ fun DesktopContextMenu(
             )
             HorizontalDivider(color = Slate800, modifier = Modifier.padding(vertical = 3.dp))
             ContextMenuItem(title = "Personalize Desktop & Colors", icon = Icons.Default.Palette, onClick = onPersonalize)
-            ContextMenuItem(title = "Download Linux Distros (8 OS)", icon = Icons.Default.Apps, onClick = onOpenDistroStore)
+            ContextMenuItem(title = "Linux system (Alpine)", icon = Icons.Default.Apps, onClick = onOpenDistroStore)
             ContextMenuItem(title = "Open Web Browser", icon = Icons.Default.Language, onClick = onOpenBrowser)
-            ContextMenuItem(title = "Open Terminal (bash)", icon = Icons.Default.Terminal, onClick = onOpenTerminal)
+            ContextMenuItem(title = "Open Terminal", icon = Icons.Default.Terminal, onClick = onOpenTerminal)
             ContextMenuItem(title = "Close All Windows", icon = Icons.Default.Close, onClick = onCloseAllWindows)
             HorizontalDivider(color = Slate800, modifier = Modifier.padding(vertical = 3.dp))
             ContextMenuItem(title = "Close Menu", icon = Icons.Default.Close, onClick = onDismiss)
@@ -1182,7 +1212,8 @@ fun DesktopWindowFrame(
             ) {
                 when (window.type) {
                     WindowType.BROWSER -> BrowserWindowContent(uiState, viewModel)
-                    WindowType.DISTRO_STORE -> DistroDownloaderWindowContent(uiState, viewModel)
+                    WindowType.LINUX_DESKTOP -> LinuxDesktopWindowContent(viewModel)
+                    WindowType.DISTRO_STORE -> LinuxSystemWindowContent(uiState, viewModel)
                     WindowType.PERSONALIZE -> PersonalizeWindowContent(uiState, viewModel)
                     WindowType.TERMINAL -> TerminalWindowContent(uiState, viewModel)
                     WindowType.SERVER_MANAGER -> ServerManagerWindowContent(uiState, viewModel)
@@ -1201,155 +1232,84 @@ fun DesktopWindowFrame(
 // -------------------------------------------------------------
 // BROWSER WINDOW CONTENT
 // -------------------------------------------------------------
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserWindowContent(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
-    var history by remember { mutableStateOf(listOf("https://github.com/phonix-os/linux-arm64")) }
-    var historyIndex by remember { mutableStateOf(0) }
-    var urlInput by remember { mutableStateOf("https://github.com/phonix-os/linux-arm64") }
-    var currentUrl by remember { mutableStateOf("https://github.com/phonix-os/linux-arm64") }
-    var activeTabTitle by remember { mutableStateOf("GitHub: Phonix Linux ARM64") }
-    var isReloading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val startUrl = "https://duckduckgo.com"
+    var urlInput by remember { mutableStateOf(startUrl) }
+    var loading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(isReloading) {
-        if (isReloading) {
-            kotlinx.coroutines.delay(350L)
-            isReloading = false
-        }
-    }
+    // A real browser: the window is a WebView, so it renders the page it says it is on.
+    val webView = remember {
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    loading = true
+                    if (url != null) urlInput = url
+                }
 
-    fun navigateTo(url: String, title: String? = null) {
-        val target = if (url.startsWith("http://") || url.startsWith("https://")) url
-        else "https://duckduckgo.com/?q=${url.replace(" ", "+")}"
-        currentUrl = target
-        urlInput = target
-        activeTabTitle = title ?: target.removePrefix("https://").removePrefix("http://").take(24)
-        val newHistory = history.take(historyIndex + 1) + target
-        history = newHistory
-        historyIndex = newHistory.size - 1
-    }
-
-    val bookmarks = listOf(
-        Pair("GitHub", "https://github.com/phonix-os/linux-arm64"),
-        Pair("Nginx Host", "http://localhost:8080"),
-        Pair("Python API", "http://localhost:5000"),
-        Pair("OpenSSH (:2222)", "http://localhost:2222"),
-        Pair("Samba (:4455)", "http://localhost:4455"),
-        Pair("Pi-hole Admin", "http://localhost/admin"),
-        Pair("Debian Packages", "https://packages.debian.org"),
-        Pair("DuckDuckGo", "https://duckduckgo.com")
-    )
-
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0F172A))) {
-        // Tab Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF090D16))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                    .background(Color(0xFF1E293B))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Language, contentDescription = null, tint = PhonixBlueLight, modifier = Modifier.size(12.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = activeTabTitle, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(Slate700.copy(alpha = 0.6f))
-                            .clickable {
-                                val win = uiState.windows.find { it.type == WindowType.BROWSER }
-                                if (win != null) viewModel.closeWindow(win.id)
-                            }
-                            .testTag("browser_tab_close_btn"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close tab", tint = Color.White, modifier = Modifier.size(10.dp))
-                    }
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    loading = false
+                    if (url != null) urlInput = url
                 }
             }
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(
-                onClick = {
-                    navigateTo("https://duckduckgo.com", "New Tab")
-                },
-                modifier = Modifier.size(24.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "New Tab", tint = Slate400, modifier = Modifier.size(14.dp))
-            }
+            loadUrl(startUrl)
         }
+    }
 
-        // Navigation Bar & URL Address Bar
+    DisposableEffect(webView) {
+        onDispose { webView.destroy() }
+    }
+
+    fun navigateTo(raw: String) {
+        val target = when {
+            raw.isBlank() -> startUrl
+            raw.startsWith("http://") || raw.startsWith("https://") -> raw
+            raw.contains(".") && !raw.contains(" ") -> "https://" + raw
+            else -> "https://duckduckgo.com/?q=" + android.net.Uri.encode(raw)
+        }
+        urlInput = target
+        webView.loadUrl(target)
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0F172A))) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF1E293B))
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val canGoBack = historyIndex > 0
-            val canGoForward = historyIndex < history.size - 1
-
-            IconButton(
-                onClick = {
-                    if (canGoBack) {
-                        historyIndex--
-                        currentUrl = history[historyIndex]
-                        urlInput = currentUrl
-                        activeTabTitle = currentUrl.removePrefix("https://").removePrefix("http://").take(24)
-                    }
-                },
-                enabled = canGoBack,
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = if (canGoBack) Slate300 else Slate600, modifier = Modifier.size(16.dp))
+            IconButton(onClick = { if (webView.canGoBack()) webView.goBack() }, modifier = Modifier.size(26.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Slate300, modifier = Modifier.size(15.dp))
+            }
+            IconButton(onClick = { if (webView.canGoForward()) webView.goForward() }, modifier = Modifier.size(26.dp)) {
+                Icon(Icons.Default.ArrowForward, contentDescription = "Forward", tint = Slate300, modifier = Modifier.size(15.dp))
+            }
+            IconButton(onClick = { webView.reload() }, modifier = Modifier.size(26.dp)) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = "Reload",
+                    tint = if (loading) PhonixGreen else Slate300,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            IconButton(onClick = { navigateTo(startUrl) }, modifier = Modifier.size(26.dp)) {
+                Icon(Icons.Default.Home, contentDescription = "Home", tint = PhonixCyan, modifier = Modifier.size(15.dp))
             }
 
-            IconButton(
-                onClick = {
-                    if (canGoForward) {
-                        historyIndex++
-                        currentUrl = history[historyIndex]
-                        urlInput = currentUrl
-                        activeTabTitle = currentUrl.removePrefix("https://").removePrefix("http://").take(24)
-                    }
-                },
-                enabled = canGoForward,
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(Icons.Default.ArrowForward, contentDescription = "Forward", tint = if (canGoForward) Slate300 else Slate600, modifier = Modifier.size(16.dp))
-            }
-
-            IconButton(
-                onClick = { isReloading = true },
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = if (isReloading) PhonixGreen else Slate300, modifier = Modifier.size(16.dp))
-            }
-
-            IconButton(
-                onClick = { navigateTo("http://localhost:8080", "Localhost Nginx Home") },
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(Icons.Default.Home, contentDescription = "Home", tint = PhonixCyan, modifier = Modifier.size(16.dp))
-            }
-
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(4.dp))
 
             OutlinedTextField(
                 value = urlInput,
                 onValueChange = { urlInput = it },
-                modifier = Modifier.weight(1f).height(42.dp),
+                modifier = Modifier.weight(1f).height(40.dp),
                 textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp),
                 singleLine = true,
                 shape = RoundedCornerShape(20.dp),
@@ -1360,154 +1320,24 @@ fun BrowserWindowContent(
                     unfocusedBorderColor = Slate700
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = {
-                    navigateTo(urlInput)
-                }),
-                leadingIcon = {
-                    Icon(
-                        imageVector = if (currentUrl.startsWith("https://")) Icons.Default.OpenInBrowser else Icons.Default.Language,
-                        contentDescription = null,
-                        tint = if (currentUrl.startsWith("https://") || currentUrl.contains("localhost")) PhonixGreen else Slate400,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
+                keyboardActions = KeyboardActions(onGo = { navigateTo(urlInput) })
             )
 
             Spacer(modifier = Modifier.width(6.dp))
-            Button(
-                onClick = { navigateTo(urlInput) },
-                modifier = Modifier.height(34.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
-                shape = RoundedCornerShape(17.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
-            ) {
-                Text("Go", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
+
+            Text(
+                text = "Go",
+                color = PhonixBlueLight,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { navigateTo(urlInput) }.padding(horizontal = 6.dp, vertical = 4.dp)
+            )
         }
 
-        // Bookmark Bar
-        val bookmarkScroll = rememberScrollState()
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF131D31))
-                .horizontalScroll(bookmarkScroll)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            bookmarks.forEach { (title, url) ->
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color(0xFF1E293B))
-                        .clickable { navigateTo(url, title) }
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(text = title, color = Slate300, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-        }
-
-        // Web Page Content Area
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF070B14))
-                .verticalScroll(rememberScrollState())
-                .padding(14.dp)
-        ) {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Slate900),
-                    border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(PhonixBlue, Slate700)))
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier.size(24.dp).clip(CircleShape).background(PhonixBlue),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (currentUrl.contains("localhost") || currentUrl.contains("127.0.0.1")) "Local Microservices Console" else "Phonix Web Navigation Engine",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "URL: $currentUrl", color = PhonixBlueLight, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    }
-                }
-
-                if (currentUrl.contains("8080") || currentUrl.contains("nginx")) {
-                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Welcome to Nginx HTTP Daemon!", color = PhonixGreen, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                "Serving from /var/www/html via ARM64 Nginx daemon on port 8080. Accessible across LAN at http://${uiState.localIpAddress}:8080.",
-                                color = Slate300,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                } else if (currentUrl.contains("5000") || currentUrl.contains("python")) {
-                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Python 3 Micro-service Active", color = PhonixCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                "Running /home/phonix/server.py on port 5000. Ready to handle HTTP requests, telemetry queries, and IoT automation webhooks.",
-                                color = Slate300,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                } else if (currentUrl.contains("2222") || currentUrl.contains("ssh")) {
-                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("OpenSSH Remote Daemon", color = PhonixAmber, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                "Port 2222 is active. Connect from your PC terminal via:\nssh phonix@${uiState.localIpAddress} -p 2222",
-                                color = Slate300,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                } else if (currentUrl.contains("4455") || currentUrl.contains("samba")) {
-                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Samba Windows File Share (NAS)", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                "Shared folder /home/phonix/shared is mounted. On Windows PC, open File Explorer and enter:\\\\${uiState.localIpAddress}\\shared",
-                                color = Slate300,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                } else {
-                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("VirGL Hardware-Accelerated Rendering", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                "Phonix OS includes hardware-accelerated web browsing with support for HTML5, CSS3, JavaScript, and WebGL through VirGL GLES 3D drivers. Optimized for both external monitors and handheld touchscreens.",
-                                color = Slate400,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        AndroidView(
+            factory = { webView },
+            modifier = Modifier.weight(1f).fillMaxWidth()
+        )
     }
 }
 
@@ -1515,129 +1345,80 @@ fun BrowserWindowContent(
 // DISTRO DOWNLOADER & MANAGER WINDOW
 // -------------------------------------------------------------
 @Composable
-fun DistroDownloaderWindowContent(
+fun LinuxSystemWindowContent(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
+    val context = LocalContext.current
+    val version = remember(uiState.containerStatus) {
+        runCatching { com.example.engine.LinuxRuntime.container(context).version() }
+            .getOrDefault(com.example.model.DistroCatalog.alpine.version)
+    }
+
     Column(modifier = Modifier.fillMaxSize().background(Slate950).padding(12.dp)) {
-        Row(
+        Text("Linux system", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Alpine " + version + " aarch64 - the distribution Phonix actually ships",
+            color = Slate400,
+            fontSize = 10.sp
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2530)),
+            border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(PhonixCyan, Slate800)))
         ) {
-            Column {
-                Text("Linux Distro Download Center", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text("8 official ARM64 rootfs distributions ready for 1-click download", color = Slate400, fontSize = 10.sp)
-            }
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(PhonixBlue.copy(alpha = 0.2f))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text("Current: ${uiState.currentDistro.name}", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("How it runs", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(
+                    "proot gives the guest its own root filesystem inside app storage. No partition, no " +
+                        "bootloader change, no root: Android keeps running underneath and the phone apps " +
+                        "still work.",
+                    color = Slate300,
+                    fontSize = 10.sp,
+                    lineHeight = 15.sp
+                )
+                Text("Bundled: busybox, icewm, xterm", color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(uiState.availableDistros) { distro ->
-                DistroDownloaderCard(distro = distro, isCurrent = uiState.currentDistro.id == distro.id, viewModel = viewModel)
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Other systems", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(
+                    "Not available yet. Ubuntu, Debian, Arch, Kali, Fedora and the rest would each need " +
+                        "their own tested rootfs and display stack, so Phonix does not offer a download " +
+                        "button for them. Packages for this guest are real, though:",
+                    color = Slate300,
+                    fontSize = 10.sp,
+                    lineHeight = 15.sp
+                )
+                Text("apk add <package>   |   apk search <name>", color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
-    }
-}
 
-@Composable
-fun DistroDownloaderCard(
-    distro: LinuxDistro,
-    isCurrent: Boolean,
-    viewModel: PhonixViewModel
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = if (isCurrent) Color(0xFF0F253E) else Slate900),
-        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.horizontalGradient(listOf(if (isCurrent) PhonixBlueLight else Slate800, Slate800)))
-    ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+        Spacer(modifier = Modifier.weight(1f))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { viewModel.toggleWindow(WindowType.TERMINAL) },
+                colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                modifier = Modifier.height(30.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(distro.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        if (isCurrent) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(PhonixGreen)
-                                    .padding(horizontal = 5.dp, vertical = 2.dp)
-                            ) {
-                                Text("ACTIVE", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                            }
-                        }
-                    }
-                    Text("${distro.base} • ${distro.desktopEnvironment}", color = Slate400, fontSize = 10.sp, maxLines = 1)
-                }
-
-                Text(text = "${distro.downloadSizeMb} MB", color = PhonixAmber, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Text("Terminal", fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
-
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(distro.description, color = Slate300, fontSize = 10.sp)
-
-            if (distro.isDownloading) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Downloading rootfs archive...", color = PhonixCyan, fontSize = 10.sp)
-                    Text("${(distro.downloadProgress * 100).toInt()}% (${distro.downloadSpeedMbps.toInt()} MB/s)", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                LinearProgressIndicator(
-                    progress = { distro.downloadProgress },
-                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
-                    color = PhonixCyan,
-                    trackColor = Slate800
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+            Button(
+                onClick = { viewModel.toggleWindow(WindowType.LINUX_DESKTOP) },
+                colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                modifier = Modifier.height(30.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)
             ) {
-                if (!distro.isInstalled && !distro.isDownloading) {
-                    Button(
-                        onClick = { viewModel.downloadDistro(distro.id) },
-                        modifier = Modifier.height(28.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(12.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Download & Install (${distro.downloadSizeMb}MB)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                } else if (distro.isInstalled) {
-                    if (!isCurrent) {
-                        Button(
-                            onClick = { viewModel.switchAndBootDistro(distro) },
-                            modifier = Modifier.height(28.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = PhonixGreen),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Black)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Switch & Boot OS", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    } else {
-                        Text("✓ Currently Running", color = PhonixGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+                Text("Linux desktop", fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -2069,10 +1850,11 @@ fun PhonixStartMenu(
             Spacer(modifier = Modifier.height(6.dp))
 
             val allMenuItems = listOf(
+                Triple("Linux Desktop (real X11 apps)", Icons.Default.Computer, PhonixGreen) to WindowType.LINUX_DESKTOP,
                 Triple("Web Browser (Chromium/Firefox)", Icons.Default.Language, PhonixBlueLight) to WindowType.BROWSER,
-                Triple("Linux Distro Downloader (8 OS)", Icons.Default.Apps, PhonixAmber) to WindowType.DISTRO_STORE,
+                Triple("Linux system", Icons.Default.Apps, PhonixAmber) to WindowType.DISTRO_STORE,
                 Triple("Personalize Desktop & Displays", Icons.Default.Palette, Color(0xFFA855F7)) to WindowType.PERSONALIZE,
-                Triple("Terminal (bash)", Icons.Default.Terminal, TerminalGreen) to WindowType.TERMINAL,
+                Triple("Terminal", Icons.Default.Terminal, TerminalGreen) to WindowType.TERMINAL,
                 Triple("Server Suite Hub", Icons.Default.Dns, PhonixCyan) to WindowType.SERVER_MANAGER,
                 Triple("Resource Monitor (htop)", Icons.Default.Speed, PhonixGreen) to WindowType.RESOURCE_MONITOR,
                 Triple("VirGL 3D Benchmark", Icons.Default.PlayArrow, Color(0xFFF43F5E)) to WindowType.BENCHMARK,
@@ -2160,7 +1942,7 @@ fun TerminalWindowContent(
             .background(TerminalBlack)
             .padding(8.dp)
     ) {
-        val quickCmds = listOf("neofetch", "htop", "free -m", "df -h", "ip a", "glxinfo", "virgl_test", "clear")
+        val quickCmds = listOf("uname -a", "apk info", "df -h", "free -m", "ls /", "uptime", "clear")
         val scrollState = rememberScrollState()
         Row(
             modifier = Modifier
@@ -2213,7 +1995,7 @@ fun TerminalWindowContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "phonix@desktop:~$ ",
+                text = "root@alpine:~# ",
                 color = TerminalGreen,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
@@ -2284,41 +2066,58 @@ fun ServerManagerWindowContent(
 // -------------------------------------------------------------
 @Composable
 fun ResourceMonitorWindowContent(uiState: PhonixUiState) {
+    val t = uiState.telemetry
     Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Real-Time Hardware Monitor", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text("CPU Utilization: ${uiState.telemetry.cpuPercent}%", color = PhonixBlueLight, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                LinearProgressIndicator(
-                    progress = { uiState.telemetry.cpuPercent / 100f },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color = PhonixBlueLight,
-                    trackColor = Slate800
-                )
+        Text("Live device readings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        if (!t.hasReading) {
+            Text("Reading the sensors...", color = Slate400, fontSize = 11.sp)
+        } else {
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("CPU core frequency utilisation: ${t.cpuPercent}%", color = PhonixBlueLight, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    LinearProgressIndicator(
+                        progress = { t.cpuPercent / 100f },
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                        color = PhonixBlueLight,
+                        trackColor = Slate800
+                    )
+                    Text(
+                        "Average of each core's current clock against its maximum; Android does not expose /proc/stat to apps.",
+                        color = Slate400,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp
+                    )
+                }
             }
-        }
 
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text("RAM: ${uiState.telemetry.ramUsedMb} MB / ${uiState.telemetry.ramTotalMb} MB", color = PhonixCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                LinearProgressIndicator(
-                    progress = { (uiState.telemetry.ramUsedMb.toFloat() / uiState.telemetry.ramTotalMb).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color = PhonixCyan,
-                    trackColor = Slate800
-                )
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("RAM: ${t.ramUsedMb} MB / ${t.ramTotalMb} MB", color = PhonixCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    LinearProgressIndicator(
+                        progress = { if (t.ramTotalMb > 0) (t.ramUsedMb.toFloat() / t.ramTotalMb).coerceIn(0f, 1f) else 0f },
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                        color = PhonixCyan,
+                        trackColor = Slate800
+                    )
+                    Text("From /proc/meminfo (MemTotal minus MemAvailable).", color = Slate400, fontSize = 9.sp)
+                }
             }
-        }
 
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text("Motherboard Temperature: ${uiState.telemetry.batteryTempC.toInt()}°C", color = PhonixGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    text = if (uiState.isBatteryRemovedDirectPower) "Battery Removed: Direct DC Power via USB-C Dock" else "Battery Mode",
-                    color = Slate400,
-                    fontSize = 10.sp
-                )
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text(
+                        text = if (t.hottestZoneC > 0f) "Hottest thermal zone: ${t.hottestZoneC.toInt()}°C" else "Hottest thermal zone: -",
+                        color = if (t.hottestZoneC >= 75f) PhonixRed else PhonixGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Read from /sys/class/thermal. Vendors label these zones differently, so this is the warmest one, not a specific core.",
+                        color = Slate400,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp
+                    )
+                }
             }
         }
     }
@@ -2336,24 +2135,31 @@ fun BenchmarkWindowContent(
         modifier = Modifier.fillMaxSize().padding(12.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("VirGL 3D GLES Hardware Acceleration Benchmark", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        Text("Scores 3D shader pipeline & Adreno / Mali GPU performance", color = Slate400, fontSize = 10.sp)
+        Text("Container benchmark", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Text(
+            "Runs dd inside the Alpine guest and times a shell loop. Real numbers, no score.",
+            color = Slate400,
+            fontSize = 10.sp,
+            lineHeight = 14.sp
+        )
 
         Button(
-            onClick = { viewModel.run3dGpuBenchmark() },
+            onClick = { viewModel.runContainerBenchmark() },
             enabled = !uiState.isBenchmarkRunning,
             colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue)
         ) {
-            Text(if (uiState.isBenchmarkRunning) "Running Benchmark..." else "Start glmark2-es2 Benchmark")
+            Text(if (uiState.isBenchmarkRunning) "Measuring..." else "Run benchmark")
         }
 
-        if (uiState.benchmarkScore > 0) {
-            Text("Score: ${uiState.benchmarkScore} pts", color = PhonixGreen, fontWeight = FontWeight.Black, fontSize = 16.sp)
-        }
-
-        LazyColumn(modifier = Modifier.height(180.dp).background(TerminalBlack).padding(6.dp)) {
-            items(uiState.benchmarkLog) { log ->
-                Text(log, color = Slate300, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(TerminalBlack)
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            uiState.benchmarkLog.forEach { line ->
+                Text(line, color = Slate300, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
     }
@@ -2361,13 +2167,24 @@ fun BenchmarkWindowContent(
 
 @Composable
 fun FileExplorerWindowContent() {
-    val folders = listOf("/bin", "/etc", "/home/phonix", "/root", "/usr", "/var", "/sdcard/PhonixShare")
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(10.dp)) {
-        items(folders) { path ->
-            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Folder, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(path, color = Color.White, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    val paths = listOf("/", "/etc", "/root", "/tmp", "/usr/share/novnc", "/var")
+    Column(modifier = Modifier.fillMaxSize().padding(10.dp)) {
+        Text("Guest filesystem", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        Text(
+            "These paths exist inside the Alpine container. Browsing happens in the Terminal (busybox ls), " +
+                "or install a file manager with apk add.",
+            color = Slate400,
+            fontSize = 10.sp,
+            lineHeight = 14.sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        LazyColumn {
+            items(paths) { path ->
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Folder, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(path, color = Color.White, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                }
             }
         }
     }
@@ -2375,33 +2192,84 @@ fun FileExplorerWindowContent() {
 
 @Composable
 fun NotepadWindowContent() {
-    var text by remember { mutableStateOf("# Phonix OS Notes\n\n- Phone running as headless mini PC\n- Direct USB-C power active\n- VirGL hardware acceleration active\n- 8 Linux distributions supported") }
-    TextField(
-        value = text,
-        onValueChange = { text = it },
-        modifier = Modifier.fillMaxSize(),
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = TerminalBlack,
-            unfocusedContainerColor = TerminalBlack,
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White
+    var text by remember { mutableStateOf("") }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            "Scratch pad for this session. It is not saved anywhere yet.",
+            color = Slate400,
+            fontSize = 9.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
-    )
+        TextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier.fillMaxSize(),
+            placeholder = { Text("Type here...", color = Slate600, fontSize = 12.sp) },
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = TerminalBlack,
+                unfocusedContainerColor = TerminalBlack,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            )
+        )
+    }
 }
 
 @Composable
 fun AboutWindowContent(uiState: PhonixUiState) {
+    val context = LocalContext.current
+    val guest = remember {
+        runCatching { com.example.engine.LinuxRuntime.container(context).version() }.getOrNull()
+    }
     Column(
-        modifier = Modifier.fillMaxSize().padding(14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        modifier = Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Image(painter = painterResource(id = R.drawable.img_phoenix_logo), contentDescription = null, modifier = Modifier.size(80.dp))
-        Spacer(modifier = Modifier.height(10.dp))
+        Image(painter = painterResource(id = R.drawable.img_phoenix_logo), contentDescription = null, modifier = Modifier.size(64.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text("Phonix OS", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
-        Text("Turn smartphones into powerful Mini PCs", color = Slate400, fontSize = 11.sp)
+        Text("A desktop for recycled Android phones", color = Slate400, fontSize = 11.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("This device", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                AboutRow("Model", android.os.Build.MODEL)
+                AboutRow("Android", android.os.Build.VERSION.RELEASE + " (API " + android.os.Build.VERSION.SDK_INT + ")")
+                AboutRow("ABI", android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "-")
+                AboutRow("Kernel", System.getProperty("os.version") ?: "-")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Linux guest", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                AboutRow("Distribution", if (guest != null) "Alpine " + guest else "not installed")
+                AboutRow(
+                    "Container",
+                    if (uiState.containerStatus == com.example.viewmodel.ContainerStatus.RUNNING) "running" else "stopped"
+                )
+                AboutRow("Method", "proot, unrooted")
+            }
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
-        Text("Kernel: 5.15.148-phonix-arm64", color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-        Text("Active Distro: ${uiState.currentDistro.name}", color = PhonixAmber, fontSize = 10.sp)
+        Text(
+            "Phonix is an interface over Android, not a replacement for it. Nothing here modifies the " +
+                "bootloader or the partition table.",
+            color = Slate400,
+            fontSize = 10.sp,
+            lineHeight = 14.sp
+        )
+    }
+}
+
+@Composable
+private fun AboutRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = Slate400, fontSize = 10.sp)
+        Text(value, color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
     }
 }
