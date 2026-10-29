@@ -233,6 +233,39 @@ fun ServerCenterScreen(
         }
 
         Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1B08)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, PhonixAmber.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Some servers cannot run here", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    "Pi-hole (DNS port 53) and SMB file sharing (port 445) are missing from this list " +
+                        "on purpose. Both need a privileged port below 1024, and Android does not let an " +
+                        "app - even one running this container - bind those without root. Installing " +
+                        "the package would look like it worked and then fail to listen. The Privacy Hub " +
+                        "walks through running Pi-hole on a spare Pi or old PC instead.",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
+                Button(
+                    onClick = { viewModel.toggleWindow(WindowType.PRIVACY) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text("Open Privacy Hub", fontSize = 11.sp)
+                }
+            }
+        }
+
+        Card(
             colors = CardDefaults.cardColors(containerColor = Slate900),
             modifier = Modifier
                 .fillMaxWidth()

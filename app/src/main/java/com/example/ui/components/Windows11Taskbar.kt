@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Widgets
@@ -124,6 +125,7 @@ fun Windows11Taskbar(
                 WindowType.BENCHMARK -> Icons.Default.Speed
                 WindowType.NOTEPAD -> Icons.Default.Code
                 WindowType.PERSONALIZE -> Icons.Default.Palette
+                WindowType.PRIVACY -> Icons.Default.Security
                 else -> Icons.Default.Computer
             }
 
@@ -134,6 +136,7 @@ fun Windows11Taskbar(
                 WindowType.FILE_EXPLORER -> Color(0xFFFBBF24)
                 WindowType.SERVER_MANAGER -> Color(0xFFA855F7)
                 WindowType.BENCHMARK -> PhonixRed
+                WindowType.PRIVACY -> PhonixGreen
                 else -> PhonixBlueLight
             }
 

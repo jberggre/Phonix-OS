@@ -198,6 +198,16 @@ data class DesktopShortcut(
                 isNativeApp = true
             ),
             DesktopShortcut(
+                id = "sc_privacy",
+                title = "Privacy Hub",
+                windowType = WindowType.PRIVACY,
+                gridCol = 2,
+                gridRow = 2,
+                posX = 216f,
+                posY = 196f,
+                customColor = DesktopAccentColor.EMERALD_LINUX
+            ),
+            DesktopShortcut(
                 id = "sc_personalize",
                 title = "Personalize",
                 windowType = WindowType.PERSONALIZE,

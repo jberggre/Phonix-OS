@@ -86,6 +86,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Speed
@@ -644,6 +645,7 @@ fun DraggableDesktopShortcut(
         WindowType.FILE_EXPLORER -> Icons.Default.Folder
         WindowType.BENCHMARK -> Icons.Default.PlayArrow
         WindowType.NOTEPAD -> Icons.Default.Code
+        WindowType.PRIVACY -> Icons.Default.Security
         else -> Icons.Default.Computer
     }
 
@@ -656,6 +658,7 @@ fun DraggableDesktopShortcut(
         WindowType.RESOURCE_MONITOR -> Color(0xFF34D399)
         WindowType.FILE_EXPLORER -> Color(0xFFFBBF24)
         WindowType.BENCHMARK -> Color(0xFFF43F5E)
+        WindowType.PRIVACY -> PhonixGreen
         else -> PhonixBlueLight
     }
 
@@ -1141,6 +1144,7 @@ fun DesktopWindowFrame(
                         WindowType.RESOURCE_MONITOR -> Icons.Default.Speed
                         WindowType.FILE_EXPLORER -> Icons.Default.Folder
                         WindowType.BENCHMARK -> Icons.Default.PlayArrow
+                        WindowType.PRIVACY -> Icons.Default.Security
                         else -> Icons.Default.Computer
                     }
                     Icon(
@@ -1221,6 +1225,7 @@ fun DesktopWindowFrame(
                     WindowType.FILE_EXPLORER -> FileExplorerWindowContent()
                     WindowType.BENCHMARK -> BenchmarkWindowContent(uiState, viewModel)
                     WindowType.NOTEPAD -> NotepadWindowContent()
+                    WindowType.PRIVACY -> PrivacyHubWindowContent(viewModel)
                     WindowType.ABOUT -> AboutWindowContent(uiState)
                     else -> TerminalWindowContent(uiState, viewModel)
                 }

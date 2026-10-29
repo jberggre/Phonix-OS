@@ -12,6 +12,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Lets Phonix paint its own wallpaper onto the device so DeX/lock screen match the desktop -->
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <!-- Granted once by provision.sh; lets the Privacy Hub write Private DNS directly instead
+         of only sending the customer to the Settings screen. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <supports-screens
         android:smallScreens="true"

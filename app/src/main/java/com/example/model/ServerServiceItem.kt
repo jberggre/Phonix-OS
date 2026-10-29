@@ -28,8 +28,6 @@ data class ServerServiceItem(
         get() = when (id) {
             "nginx_web" -> "nginx"
             "openssh" -> "ssh-keygen -A && /usr/sbin/sshd"
-            "samba_nas" -> "smbd -D"
-            "pihole_dns" -> "dnsmasq"
             else -> apkPackage
         }
 
@@ -62,27 +60,9 @@ object DefaultServerCatalog {
             description = "Encrypted shell from your laptop. Needs a key generated inside the guest first.",
             internalPath = "/etc/ssh"
         ),
-        ServerServiceItem(
-            id = "samba_nas",
-            name = "Samba File Share",
-            category = "Storage",
-            port = 445,
-            protocol = "SMB",
-            apkPackage = "samba",
-            processName = "smbd",
-            description = "Share a guest directory with Windows and macOS over the network.",
-            internalPath = "/srv/phonix"
-        ),
-        ServerServiceItem(
-            id = "pihole_dns",
-            name = "Pi-hole DNS Sink",
-            category = "Network",
-            port = 53,
-            protocol = "DNS",
-            apkPackage = "dnsmasq",
-            processName = "dnsmasq",
-            description = "Network-wide DNS filtering once configured. Not a one-tap install.",
-            internalPath = "/etc/dnsmasq.d"
-        )
+        // SMB (445) and DNS (53) are not listed here on purpose: both need a privileged port,
+        // and Android's kernel refuses to let this app's UID bind anything below 1024 even
+        // inside the container. Adding the package is easy; making it reachable is impossible
+        // without root. The Privacy Hub explains the Pi-hole path that actually works.
     )
 }
