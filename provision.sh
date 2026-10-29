@@ -232,6 +232,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 2b. secure settings
+# ---------------------------------------------------------------------------
+# The Privacy Hub can only write Android's Private DNS fields if it holds this
+# development permission. There is no runtime dialog for it; adb grants it once.
+head1 "secure settings"
+if q dumpsys package "$APK_PKG" 2>/dev/null | grep -q "WRITE_SECURE_SETTINGS: granted=true"; then
+  skip "WRITE_SECURE_SETTINGS already granted"
+elif q pm list packages | grep -qx "package:$APK_PKG"; then
+  act "pm grant $APK_PKG android.permission.WRITE_SECURE_SETTINGS" \
+      "$ADB" -s "$SERIAL" shell pm grant "$APK_PKG" android.permission.WRITE_SECURE_SETTINGS
+else
+  warn "skipping: Phonix is not installed"
+fi
+
+# ---------------------------------------------------------------------------
 # 3. device owner
 # ---------------------------------------------------------------------------
 head1 "device owner"

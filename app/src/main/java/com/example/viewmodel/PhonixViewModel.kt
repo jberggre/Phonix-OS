@@ -446,8 +446,16 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 type = type,
                 posX = (24f + (count * 20f)).coerceAtMost(100f),
                 posY = (24f + (count * 20f)).coerceAtMost(120f),
-                width = if (type == WindowType.BROWSER) 400f else 360f,
-                height = if (type == WindowType.BROWSER) 380f else 340f,
+                width = when (type) {
+                    WindowType.BROWSER -> 400f
+                    WindowType.PRIVACY -> 470f
+                    else -> 360f
+                },
+                height = when (type) {
+                    WindowType.BROWSER -> 380f
+                    WindowType.PRIVACY -> 540f
+                    else -> 340f
+                },
                 // The Linux desktop is the point of the product, so it opens full size instead
                 // of as a small window the customer has to resize before it looks like a PC.
                 isMaximized = type == WindowType.LINUX_DESKTOP,

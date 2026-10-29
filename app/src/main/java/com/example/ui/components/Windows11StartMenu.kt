@@ -181,6 +181,12 @@ fun Windows11StartMenu(
                 viewModel.toggleWindow(WindowType.SERVER_MANAGER)
             },
             StartMenuItem(
+                "app_privacy", "Privacy Hub", "Ad blocking & Pi-hole guide",
+                Icons.Default.Security, PhonixGreen
+            ) {
+                viewModel.toggleWindow(WindowType.PRIVACY)
+            },
+            StartMenuItem(
                 "app_monitor", "Resource Monitor", "Live battery & CPU readings",
                 Icons.Default.Speed, PhonixCyan
             ) {

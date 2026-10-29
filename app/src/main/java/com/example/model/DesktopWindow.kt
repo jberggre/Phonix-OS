@@ -11,6 +11,7 @@ enum class WindowType(val defaultTitle: String, val iconName: String) {
     FILE_EXPLORER("Phonix File Manager", "folder"),
     APP_STORE("Software & Server Stacks", "store"),
     SETTINGS("Control Panel", "settings"),
+    PRIVACY("Privacy Hub", "shield"),
     NOTEPAD("Notepad / Editor", "note"),
     BENCHMARK("Container Benchmark", "speed"),
     ABOUT("About Phonix OS", "info")
