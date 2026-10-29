@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
-import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
@@ -22,36 +21,66 @@ object DesktopAutoLaunch {
 
     private const val TAG = "PhonixAutoLaunch"
 
+    /** Vendor category under which Samsung publishes the DeX desktop workspace. */
+    private const val SAMSUNG_DESKTOP_CATEGORY = "com.samsung.android.hardware.display.category.DESKTOP"
+
     /**
-     * The display the customer is actually looking at, or null when no monitor is attached.
+     * The desktop workspace the monitor is showing, or null while it does not exist yet.
      *
      * On Samsung this is NOT the HDMI output. DeX renders its workspace on a virtual display
      * named "Desktop" and presents that onto the HDMI screen, so only the virtual one carries
      * the composed picture. A window placed on the physical HDMI display (which does appear in
-     * DISPLAY_CATEGORY_PRESENTATION) is drawn underneath DeX's presentation and is invisible:
-     * measured on the S10, launching there left the monitor showing Samsung's launcher while
-     * Phonix ran happily on a display nobody could see. So the "Desktop" workspace wins.
+     * DISPLAY_CATEGORY_PRESENTATION) is drawn underneath DeX's presentation: measured on the
+     * S10, launching there left the monitor showing Samsung's launcher while Phonix ran happily
+     * on a display nobody could see.
      *
-     * On phones with a different desktop implementation the name will not match, so the fallback
-     * is the largest app-visible display that is on. That is still the desktop workspace rather
-     * than the raw output, because the workspace is the display apps are composed onto.
+     * It also does not exist for the first seconds after the cable is plugged in, which is why
+     * callers must treat null as "wait", not as "launch somewhere else". Starting Phonix on the
+     * HDMI output and moving it later is worse than not starting it: DeX stops the move with a
+     * "This app is already running on another display" dialog that needs a mouse click, so the
+     * unit would sit at a prompt forever.
      */
-    fun externalDisplay(context: Context): Display? {
+    fun workspaceDisplay(context: Context): Display? {
         val manager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
             ?: return null
 
-        val candidates = manager.displays.filter { it.displayId != Display.DEFAULT_DISPLAY }
-        if (candidates.isEmpty()) return null
+        // Samsung does not expose the DeX workspace in getDisplays(): the plain call only returns
+        // the built-in screen and the HDMI output on this S10, which is why launching at the HDMI
+        // display looked "successful" while DeX covered it. The workspace is published under a
+        // vendor display category instead (Samsung DeX app-optimisation guide).
+        runCatching {
+            manager.getDisplays(SAMSUNG_DESKTOP_CATEGORY)
+                .firstOrNull { it.displayId != Display.DEFAULT_DISPLAY && it.state == Display.STATE_ON }
+        }.getOrNull()?.let { return it }
 
-        candidates.firstOrNull { it.name.equals("Desktop", ignoreCase = true) && it.state == Display.STATE_ON }
-            ?.let { return it }
-
-        val public = candidates.filter { (it.flags and Display.FLAG_PRIVATE) == 0 }
-        return public
-            .filter { it.state == Display.STATE_ON }
-            .maxByOrNull(::areaOf)
-            ?: public.maxByOrNull(::areaOf)
+        // Fallback: some builds do include it in the normal list under this name.
+        return manager.displays
+            .filter { it.displayId != Display.DEFAULT_DISPLAY && (it.flags and Display.FLAG_PRIVATE) == 0 }
+            .firstOrNull { it.state == Display.STATE_ON && it.name.equals("Desktop", ignoreCase = true) }
     }
+
+    /**
+     * The physical monitor output, if one is attached.
+     *
+     * Only for the case where no workspace ever appears (a phone that simply mirrors to HDMI).
+     * Launching here while a desktop exists puts the window under DeX's presentation, invisible.
+     */
+    fun physicalDisplay(context: Context): Display? {
+        val manager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            ?: return null
+        return manager.displays
+            .filter { it.displayId != Display.DEFAULT_DISPLAY }
+            .filter { (it.flags and Display.FLAG_PRIVATE) == 0 }
+            .filter { it.state == Display.STATE_ON && !it.name.equals("Desktop", ignoreCase = true) }
+            .maxByOrNull(::areaOf)
+    }
+
+    /** Workspace if it exists, otherwise the physical output (mirroring phones only). */
+    fun externalDisplay(context: Context): Display? =
+        workspaceDisplay(context) ?: physicalDisplay(context)
+
+    /** True when a monitor is attached, in any form. */
+    fun hasExternalDisplay(context: Context): Boolean = externalDisplay(context) != null
 
     /** Pixel area of a display, used only to rank candidates. */
     private fun areaOf(display: Display): Long {
@@ -61,7 +90,15 @@ object DesktopAutoLaunch {
         return metrics.widthPixels.toLong() * metrics.heightPixels
     }
 
-    fun hasExternalDisplay(context: Context): Boolean = externalDisplay(context) != null
+    /** Every display this app is allowed to see, for logs when a monitor has no workspace. */
+    fun describeDisplays(context: Context): String {
+        val category = runCatching {
+            val manager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            manager?.getDisplays(SAMSUNG_DESKTOP_CATEGORY)?.joinToString { "${it.displayId}:${it.name}" }
+                ?: "?"
+        }.getOrElse { "error ${it.message}" }
+        return displayNames(context) + " | dex-category: " + category
+    }
 
     private fun displayNames(context: Context): String {
         val manager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager

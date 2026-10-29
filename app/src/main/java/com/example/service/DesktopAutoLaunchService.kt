@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.util.DesktopAutoLaunch
@@ -31,6 +32,9 @@ class DesktopAutoLaunchService : Service(), DisplayManager.DisplayListener {
     private lateinit var displayManager: DisplayManager
     private val handler = Handler(Looper.getMainLooper())
     private var launchedForDisplayId: Int? = null
+
+    /** When a monitor was first seen without a workspace on it, for the wait/fallback below. */
+    private var monitorSeenAt = 0L
 
     private val launchRunnable = Runnable { launchIfPossible() }
 
@@ -87,14 +91,46 @@ class DesktopAutoLaunchService : Service(), DisplayManager.DisplayListener {
     // --- internals ----------------------------------------------------------------
 
     private fun launchIfPossible() {
-        val display = DesktopAutoLaunch.externalDisplay(this)
-        if (display == null) {
+        val workspace = DesktopAutoLaunch.workspaceDisplay(this)
+        val physical = DesktopAutoLaunch.physicalDisplay(this)
+        if (workspace == null && physical == null) {
+            monitorSeenAt = 0L
             Log.i(TAG, "no external display yet")
             return
         }
-        if (launchedForDisplayId == display.displayId) return
-        launchedForDisplayId = display.displayId
+
+        val target = workspace ?: run {
+            if (monitorSeenAt == 0L) monitorSeenAt = SystemClock.elapsedRealtime()
+            val waitedMs = SystemClock.elapsedRealtime() - monitorSeenAt
+
+            // DeX builds its workspace display a few seconds after the HDMI link comes up, and
+            // starting on the raw output first is a trap: the window is composed underneath
+            // DeX's presentation, and moving it later makes DeX stop with a "This app is already
+            // running on another display" dialog that needs a mouse. So on Samsung, wait for the
+            // workspace however long it takes. Only a phone that genuinely mirrors to HDMI (no
+            // DeX) falls back, and only after the grace period.
+            if (IS_SAMSUNG || waitedMs < WORKSPACE_GRACE_MS) {
+                Log.i(
+                    TAG,
+                    "monitor present but no workspace yet (${waitedMs}ms), waiting; visible: " +
+                        DesktopAutoLaunch.describeDisplays(this)
+                )
+                scheduleRetry(WORKSPACE_POLL_MS)
+                return
+            }
+            physical
+        }
+        if (target == null) return
+
+        monitorSeenAt = 0L
+        if (launchedForDisplayId == target.displayId) return
+        launchedForDisplayId = target.displayId
         DesktopAutoLaunch.launchDesktop(this)
+    }
+
+    private fun scheduleRetry(delayMs: Long) {
+        handler.removeCallbacks(launchRunnable)
+        handler.postDelayed(launchRunnable, delayMs)
     }
 
     private fun startAsForeground() {
@@ -128,6 +164,14 @@ class DesktopAutoLaunchService : Service(), DisplayManager.DisplayListener {
         private const val NOTIFICATION_ID = 4701
         private const val INITIAL_LAUNCH_DELAY_MS = 2_500L
         private const val DISPLAY_SETTLE_DELAY_MS = 1_500L
+
+        /** How often to look again while the monitor is up but DeX has not built its workspace. */
+        private const val WORKSPACE_POLL_MS = 1_000L
+
+        /** Grace period before a non-Samsung phone falls back to a plain mirrored output. */
+        private const val WORKSPACE_GRACE_MS = 15_000L
+
+        private val IS_SAMSUNG = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
 
         fun start(context: Context) {
             val intent = Intent(context, DesktopAutoLaunchService::class.java)
