@@ -1,6 +1,7 @@
 package com.example.engine
 
 import android.content.Context
+import android.os.Build
 import android.system.ErrnoException
 import android.system.Os
 import java.io.BufferedReader
@@ -8,6 +9,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 
 /**
@@ -209,6 +211,14 @@ class LinuxShellSession(
         }
     }
 
+    /**
+     * Asks the guest shell to exit, then makes sure the proot tracer is gone before returning.
+     *
+     * `Process.destroy()` only sends SIGTERM and returns without waiting, so it is a request, not
+     * a guarantee: a guest that ignores it, or is still busy, outlives the "stopped" runtime and
+     * the next start adds a second shell. The short wait first lets `exit` shut down cleanly, then
+     * the forced kill makes it certain.
+     */
     fun close() {
         closed = true
         try {
@@ -216,9 +226,27 @@ class LinuxShellSession(
             stdin.flush()
         } catch (_: Throwable) {
         }
-        try {
-            process.destroy()
+        val exited = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                process.waitFor(2, TimeUnit.SECONDS)
+            } else {
+                // Older devices have no timed wait; destroy() is all we have.
+                process.destroy()
+                true
+            }
         } catch (_: Throwable) {
+            false
+        }
+        if (!exited) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    process.destroyForcibly()
+                    process.waitFor(2, TimeUnit.SECONDS)
+                } else {
+                    process.destroy()
+                }
+            } catch (_: Throwable) {
+            }
         }
     }
 

@@ -217,8 +217,10 @@ State of the unit when it was powered off on 2026-10-29:
 
 Order for tomorrow:
 
-1. Re-pair ADB: Developer options → Wireless debugging → *Pair with code*, then
-   `adb pair <ip:port> <code>` and `adb connect <ip:port>`.
+1. Connect ADB. **USB works and is easier**: with the phone on USB tethering it enumerated as
+   `R38M200YNRA` with no pairing. Only fall back to
+   Developer options → Wireless debugging → *Pair with code* + `adb pair <ip:port> <code>` if the
+   cable is not available.
 2. **Browser shortcut check** (5 min): launch Phonix, close the browser window that opens on the
    desktop, confirm a *Phonix Browser* icon is visible at the top left, click it, confirm the
    window reopens. This was compiled and installed but never clicked — the phone went offline
@@ -235,6 +237,57 @@ Order for tomorrow:
    Phonix X11 bridge works outside Alpine.
 7. **Thermal soak** while all of the above is installed, with the planned fan housing if it has
    arrived.
+
+## Support notes (verified on hardware)
+
+### 2026-10-29 — "One UI is crashing" was not a crash
+
+Report: the phone would not open, One UI appeared to be crashing.
+
+What the device shows:
+
+- Boot at 08:37:32. `com.android.systemui` has been up since 08:37:40 and One UI Home
+  (`com.sec.android.app.launcher`, pid 2623) since 08:37:42, with **no restart** — a crash loop
+  would show a new start time and a fresh pid.
+- No `am_crash` or `am_anr` events in the events buffer, and no `system_app_crash` in dropbox for
+  the day. The only `system_server_wtf` entries are benign: a JobScheduler bucket mismatch for
+  Google Wallet, and ConnectivityService's known network-agent `BUG:` line.
+- At 08:40:28 Samsung's Galaxy Finder (uid 10059) sent a `MAIN`/`LAUNCHER` intent to
+  `com.facebook.katana/.LoginActivity`. Facebook then opened its own
+  `SimpleLoginActivity` → `FbExperimentalLoggedOutBloksActivity`, which is the full-screen Meta
+  Terms and Privacy Policy page with a single *Continue* button.
+
+That page is what was covering the screen; it is not a One UI failure and it has no obvious exit
+besides Home. Force-stopping Facebook and Galaxy Finder and pressing Home holds the launcher for
+45 s+ — nothing relaunches either of them.
+
+**Correction to the first reading of this.** Galaxy Finder did not launch Facebook on its own. The
+launcher (uid 10142) started `GalaxyFinderActivity` at 08:40:18, and the Facebook intent came from
+Galaxy Finder ten seconds later — the signature of someone opening the app search and tapping a
+result. The `galaxyfinder:appservice` churn is the system's `package_changed` broadcasts restarting
+a bound service, not a crash loop. There is nothing to disable here; the earlier suggestion to
+disable Galaxy Finder was wrong.
+
+Two facts worth keeping for support:
+
+- **The device-owner package cannot be force-stopped.** `am force-stop com.aistudio.phonix.vpxmkr`
+  reports success, but ActivityManager logs `Ignoring request to force stop protected package`.
+  Recovery is the in-app Reboot/Shutdown control or a real reboot, so those must keep working.
+- **The guest shell at boot is the runtime, not a leak.** `LinuxServerService` starts it on
+  `BOOT_COMPLETED` and holds a partial wake lock so servers survive. It measured 3.2 MB RSS plus a
+  60 KB shell. The real cost is the wake lock, which is deliberate for a 24/7 appliance.
+
+Fixed in this change: `LinuxShellSession.close()` wrote `exit` and then called `Process.destroy()`,
+which only sends SIGTERM and returned at once without waiting. It now waits up to two seconds for
+the shell to exit and force-kills the tracer if it does not, so a stop cannot leave a guest running
+behind a UI that says stopped.
+
+If it recurs, capture evidence before rebooting — logs do not survive a power cycle:
+
+```bash
+adb logcat -b events -d | grep -aE 'am_crash|am_anr' | tail -20
+adb shell dumpsys dropbox | grep 2026- | grep -ai crash
+```
 
 ## Sources
 
