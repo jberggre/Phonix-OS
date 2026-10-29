@@ -74,6 +74,13 @@
                 -->
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+
+            <!--
+                DeX caption bar: not removable from the app. Samsung's documented
+                com.samsung.android.dex.launchwidth/launchheight=0 and the optional
+                transient_bar_delay key were both added, measured on the unit, and had no
+                effect, so they are not carried. See docs/LINUX.md.
+            -->
         </activity>
 
         <service
