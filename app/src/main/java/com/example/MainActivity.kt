@@ -3,6 +3,7 @@ package com.example
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -50,7 +51,13 @@ class MainActivity : ComponentActivity() {
         // No forced orientation: on DeX an orientation-locked activity is confined to a
         // phone-shaped window, which is exactly what we are trying to escape. The desktop
         // adapts to whatever window the window manager gives us.
-        enableEdgeToEdge()
+        //
+        // Explicitly dark: the default keeps light system-bar icons whenever the device is in
+        // light mode, which paints white status/navigation icons onto the near-black desktop.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
 
         // Paint the Phonix wallpaper behind everything Samsung draws, so the phone home,
         // lock screen and (where the platform mirrors it) DeX match the desktop.
@@ -222,6 +229,10 @@ class MainActivity : ComponentActivity() {
         val bars = WindowInsetsCompat.Type.navigationBars() or WindowInsetsCompat.Type.statusBars()
         if (immersive) {
             windowInsetsController.hide(bars)
+            // DeX's own window title bar is NOT removable from here: measured on One UI 4, the
+            // dark window theme, forced fullscreen windowing, captionBar() insets and the legacy
+            // immersive flags all leave it in place. It is system decor, drawn outside our window.
+            // One UI 8 added a hidden immersive mode; this hardware does not have it.
             // DeX draws its own caption bar above a maximised window (app icon, title,
             // minimise/maximise/close) and the status-bar hide does not remove it. Asking for
             // the caption bar to go as well is the one supported way to get a clean screen; a
