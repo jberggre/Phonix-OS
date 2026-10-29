@@ -44,6 +44,35 @@ These are real readings from this unit, not estimates:
 Re-run these after changing the rootfs or the X11 package list; the numbers above are the
 reference for the current build.
 
+## First boot after a factory reset: the one click we cannot script
+
+A reset unit has no Phonix, no USB debugging and DeX auto-start **off** (it is off by default).
+Connect HDMI and the monitor shows Samsung's "Start" screen. Nothing of ours can appear
+there: an app cannot draw on that display until DeX is already running, so no amount of
+Phonix code removes this first click. It has to be clicked once, with a mouse, per unit.
+
+That makes the click a build step, not a customer step: do it **before the phone goes into
+the shell**, because once the panel is gone the only input left is the USB mouse the unit ships
+with. A keyboard works too (Tab, Enter).
+
+After the one click, in this order:
+
+1. Finish the setup wizard (skip the Samsung account and the restore prompt).
+2. Turn on DeX auto-start, so the prompt never returns:
+   Settings → Advanced features → Samsung DeX → *Auto start when HDMI is connected*
+   (One UI 5 and newer: Settings → Connected devices → Samsung DeX).
+3. Developer options → *Stay awake* on, *USB debugging* on; plug into the technician PC.
+4. Run `provision.sh` — installs the APK, makes Phonix device owner, grants the secure-settings
+   permission, then the unit is a sealed appliance again.
+
+Support script for exactly this situation: if a customer reports a black monitor after a reset,
+ask them to plug a USB mouse into the hub. That is the whole fix.
+
+Note the one normal-looking oddity: while DeX is active the phone's own panel goes dark. That is
+Samsung saving power, not a fault. If the panel stays dark after a power-button press *and* a
+mouse click on the monitor does nothing, then the panel or its flex is the fault, and the unit
+needs the mouse to be usable at all.
+
 ## The provisioning stick
 
 A stick that does the work when plugged into a phone is a good idea, but the constraint is
