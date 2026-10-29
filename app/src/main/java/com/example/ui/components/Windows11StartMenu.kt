@@ -13,6 +13,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -237,7 +239,8 @@ fun Windows11StartMenu(
 
     Surface(
         modifier = modifier
-            .widthIn(min = 360.dp, max = 560.dp)
+            .widthIn(min = 320.dp, max = 560.dp)
+            .heightIn(max = 520.dp)
             .shadow(24.dp, RoundedCornerShape(16.dp))
             .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             .testTag("windows_11_start_menu"),
@@ -245,7 +248,9 @@ fun Windows11StartMenu(
         color = Slate900.copy(alpha = 0.95f)
     ) {
         Column(
-            modifier = Modifier.padding(18.dp)
+            modifier = Modifier
+                .padding(18.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             // 1. Search Bar (Windows 11 Centered Pill)
             OutlinedTextField(

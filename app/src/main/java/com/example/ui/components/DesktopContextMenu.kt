@@ -478,7 +478,7 @@ private fun WallpaperContextMenuView(
             )
             ContextMenuItem(
                 icon = Icons.Default.Refresh,
-                title = "Reset Default Shortcuts",
+                title = "Align Shortcuts to Bottom-Left",
                 tint = Slate400,
                 onClick = onResetShortcuts
             )

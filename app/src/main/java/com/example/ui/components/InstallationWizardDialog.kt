@@ -43,7 +43,16 @@ import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Warning
+import com.example.model.MiniPcProfile
+import com.example.model.PreferredBrowser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -143,11 +152,11 @@ fun InstallationWizardDialog(
                     ) { step ->
                         when (step) {
                             0 -> Step0DeviceAssessment(uiState, viewModel)
-                            1 -> Step1DebloatOptimization(uiState, viewModel)
-                            2 -> Step2DistroSelection(uiState, viewModel)
-                            3 -> Step3StoragePartitioning(uiState, viewModel)
-                            4 -> Step4HardwareAcceleration(uiState, viewModel)
-                            5 -> Step5ServerSuite(uiState, viewModel)
+                            1 -> Step1ProfileSelection(uiState, viewModel)
+                            2 -> Step2LinuxChoice(uiState, viewModel)
+                            3 -> Step3BrowserSelection(uiState, viewModel)
+                            4 -> Step4DebloatOptimization(uiState, viewModel)
+                            5 -> Step5ScreenRescue(uiState, viewModel)
                             6 -> Step6AutomatedDeployment(uiState, viewModel, onDismiss)
                             else -> Step0DeviceAssessment(uiState, viewModel)
                         }
@@ -178,13 +187,13 @@ fun WizardHeader(
     onClose: () -> Unit
 ) {
     val stepTitles = listOf(
-        "Step 1: This phone and its power",
-        "Step 2: Cleanup",
-        "Step 3: Choose a Linux system",
-        "Step 4: Storage",
-        "Step 5: Cooling and graphics",
-        "Step 6: Servers and games",
-        "Step 7: Finish setup"
+        "Step 1: Hardware & Direct Power",
+        "Step 2: Choose Your Primary Use Case",
+        "Step 3: Linux Subsystem (Keep vs Lean)",
+        "Step 4: Default Web Browser",
+        "Step 5: Privacy Debloat & Chrome",
+        "Step 6: Display 0 Rescue (Shattered Screen)",
+        "Step 7: Finish Setup & Launch Desktop"
     )
 
     Row(
@@ -351,114 +360,10 @@ fun Step0DeviceAssessment(
 }
 
 // -------------------------------------------------------------
-// STEP 1: System Debloat & RAM Reclamation (NEW!)
+// STEP 1: What will you use this mini PC for? (Profile Selection)
 // -------------------------------------------------------------
 @Composable
-fun Step1DebloatOptimization(
-    uiState: PhonixUiState,
-    viewModel: PhonixViewModel
-) {
-    val selected = uiState.debloatPackages.filter { it.isEnabled }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F223D)),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth().border(1.dp, PhonixCyan, RoundedCornerShape(10.dp))
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CleaningServices, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Pre-installation cleanup", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Text(
-                    text = "Android does not let one app uninstall or disable another. Pick what you want " +
-                        "gone here and Phonix copies the exact adb commands for a technician to run from a " +
-                        "PC with USB debugging; you can also remove them in Settings > Apps.",
-                    color = Slate200,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp
-                )
-
-                HorizontalDivider(color = Slate800)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Selected to remove:", color = Slate400, fontSize = 12.sp)
-                    Text(
-                        text = "${selected.size} packages",
-                        color = PhonixCyan,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                Button(
-                    onClick = { viewModel.copyDebloatCommand() },
-                    colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
-                    modifier = Modifier.height(38.dp)
-                ) {
-                    Text("Copy adb uninstall command", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                Text(
-                    "Phonix never claims to have removed an app it did not touch.",
-                    color = Slate400,
-                    fontSize = 10.sp
-                )
-            }
-        }
-
-        Text(
-            text = "Packages to remove:",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        uiState.debloatPackages.forEach { pkg ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = if (pkg.isEnabled) Color(0xFF0F1B2B) else Slate900),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth().border(1.dp, if (pkg.isEnabled) PhonixCyan else Slate800, RoundedCornerShape(10.dp))
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(pkg.displayName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text(pkg.packageName, color = PhonixBlueLight, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                        Text(pkg.description, color = Slate400, fontSize = 10.sp)
-                    }
-
-                    Switch(
-                        checked = pkg.isEnabled,
-                        onCheckedChange = { viewModel.toggleDebloatPackage(pkg.packageName) },
-                        colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
-                    )
-                }
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// STEP 2: Linux Distribution Selection
-// -------------------------------------------------------------
-@Composable
-fun Step2DistroSelection(
+fun Step1ProfileSelection(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
@@ -469,14 +374,19 @@ fun Step2DistroSelection(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = "Choose Your Linux Subsystem:",
+            text = "What is the primary mission for this mini PC?",
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold
         )
+        Text(
+            text = "Your choice automatically configures cooling, background services, and storage recommendations.",
+            color = Slate400,
+            fontSize = 11.sp
+        )
 
-        DistroCatalog.distros.forEach { distro ->
-            val isSelected = uiState.currentDistro.id == distro.id
+        MiniPcProfile.entries.forEach { profile ->
+            val isSelected = uiState.oobeConfig.profile == profile
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = if (isSelected) Color(0xFF0C3256) else Slate900
@@ -489,16 +399,16 @@ fun Step2DistroSelection(
                         color = if (isSelected) PhonixCyan else Slate800,
                         shape = RoundedCornerShape(10.dp)
                     )
-                    .clickable { viewModel.selectDistro(distro) }
+                    .clickable { viewModel.selectOobeProfile(profile) }
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = distro.name,
+                            text = profile.title,
                             color = Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
@@ -517,9 +427,8 @@ fun Step2DistroSelection(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "Target: ${distro.targetUse}", color = PhonixBlueLight, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                    Text(text = distro.description, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
+                    Text(text = profile.subtitle, color = PhonixCyan, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = profile.description, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
                 }
             }
         }
@@ -527,132 +436,15 @@ fun Step2DistroSelection(
 }
 
 // -------------------------------------------------------------
-// STEP 3: Storage Partitioning & Swap
+// STEP 2: Linux Subsystem Choice (Keep vs. Lean Mode)
 // -------------------------------------------------------------
 @Composable
-fun Step3StoragePartitioning(
+fun Step2LinuxChoice(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
-    LaunchedEffect(Unit) { viewModel.refreshStorage() }
-    val storage = uiState.storage
-    val usedBytes = (storage.totalBytes - storage.freeBytes).coerceAtLeast(0L)
+    val keepLinux = uiState.oobeConfig.enableLinuxDesktop
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        Column {
-            Text(
-                text = "Storage",
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Nothing is repartitioned - here is what is actually on the device",
-                color = PhonixCyan,
-                fontSize = 10.sp
-            )
-        }
-
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (storage.totalBytes <= 0L) {
-                    Text("Reading the filesystem...", color = Slate400, fontSize = 11.sp)
-                } else {
-                    Text(
-                        text = "App storage: ${formatBytesWizard(usedBytes)} used of ${formatBytesWizard(storage.totalBytes)}",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(22.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                    ) {
-                        val usedWeight = if (storage.totalBytes > 0) (usedBytes.toFloat() / storage.totalBytes).coerceAtLeast(0.05f) else 0.05f
-                        val freeWeight = (1f - usedWeight).coerceAtLeast(0.05f)
-                        Box(modifier = Modifier.weight(usedWeight).fillMaxHeight().background(Slate700), contentAlignment = Alignment.Center) {
-                            Text("used", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Box(modifier = Modifier.weight(freeWeight).fillMaxHeight().background(PhonixGreen), contentAlignment = Alignment.Center) {
-                            Text("free", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Text(
-                        text = "Free: ${formatBytesWizard(storage.freeBytes)}",
-                        color = PhonixGreen,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Linux guest: " + if (storage.guestBytes > 0) formatBytesWizard(storage.guestBytes) else "not installed yet",
-                        color = PhonixCyan,
-                        fontSize = 11.sp
-                    )
-                    if (storage.guestPath.isNotEmpty()) {
-                        Text(
-                            text = storage.guestPath,
-                            color = Slate400,
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-            }
-        }
-
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Why there is no allocation step", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "Phonix keeps the Linux guest in a directory inside app storage. No partition table is " +
-                        "touched, no ext4 image is created, no swap partition is made, and uninstalling the " +
-                        "app removes all of it. Earlier versions of this screen offered sliders for those " +
-                        "things; they were never real, so they are gone.",
-                    color = Slate300,
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp
-                )
-                Text(
-                    "Growth is limited by the free space shown above - packages you install count against it.",
-                    color = Slate400,
-                    fontSize = 10.sp,
-                    lineHeight = 14.sp
-                )
-            }
-        }
-    }
-}
-
-private fun formatBytesWizard(bytes: Long): String {
-    if (bytes <= 0L) return "-"
-    val gb = bytes / (1024.0 * 1024.0 * 1024.0)
-    return if (gb >= 1.0) String.format(java.util.Locale.ROOT, "%.1f GB", gb)
-    else String.format(java.util.Locale.ROOT, "%.0f MB", bytes / (1024.0 * 1024.0))
-}
-
-// -------------------------------------------------------------
-// STEP 4: Active Cooling & GPU Acceleration
-// -------------------------------------------------------------
-@Composable
-fun Step4HardwareAcceleration(
-    uiState: PhonixUiState,
-    viewModel: PhonixViewModel
-) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -660,50 +452,103 @@ fun Step4HardwareAcceleration(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Cooling and graphics",
+            text = "Do you want the Linux subsystem installed?",
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold
         )
         Text(
-            "Pick the build you are making. This is guidance, not a setting: an unrooted app cannot " +
-                "change CPU clocks, bypass throttling or swap GPU drivers, and the Linux guest draws " +
-                "with software rendering (Xvfb) rather than the phone GPU.",
-            color = Slate400,
-            fontSize = 10.sp,
+            text = "Phonix can run an isolated Alpine Linux userland with a full command line, compilers, and X11 apps. You can keep it or select Ultra-Lean Mode to maximize phone storage.",
+            color = Slate300,
+            fontSize = 11.sp,
             lineHeight = 15.sp
         )
 
-        CoolingMode.entries.forEach { mode ->
-            val isSelected = uiState.coolingState.activeMode == mode
-            Card(
-                colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFF0C3256) else Slate900),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, if (isSelected) PhonixCyan else Slate800, RoundedCornerShape(10.dp))
-                    .clickable { viewModel.setCoolingMode(mode) }
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(mode.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        if (isSelected) {
-                            Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(16.dp))
-                        }
+        // Option A: Keep Full Linux (~550 MB)
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = if (keepLinux) Color(0xFF0F261C) else Slate900
+            ),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = if (keepLinux) 2.dp else 1.dp,
+                    color = if (keepLinux) PhonixGreen else Slate800,
+                    shape = RoundedCornerShape(10.dp)
+                )
+                .clickable { viewModel.toggleOobeLinuxSubsystem(true) }
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Computer, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(22.dp))
+                        Text("Keep Alpine Linux Subsystem (Active)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text(mode.subtitle, color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    Text(mode.description, color = Slate300, fontSize = 10.sp, lineHeight = 15.sp)
+                    if (keepLinux) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(18.dp))
+                    }
                 }
+                Text("Storage Impact: ~550 MB", color = PhonixAmber, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Provides full Alpine Linux PRoot userland, apk package manager, terminal compilers (Python/GCC/Rust), local VS Code Web, and background servers.",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+            }
+        }
+
+        // Option B: Ultra-Lean Android Mode (Strip Linux)
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = if (!keepLinux) Color(0xFF1E293B) else Slate900
+            ),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = if (!keepLinux) 2.dp else 1.dp,
+                    color = if (!keepLinux) PhonixCyan else Slate800,
+                    shape = RoundedCornerShape(10.dp)
+                )
+                .clickable { viewModel.toggleOobeLinuxSubsystem(false) }
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.CleaningServices, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(22.dp))
+                        Text("Ultra-Lean Android Mode (Save 550 MB)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (!keepLinux) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Text("Storage Impact: 0 MB (Reclaims ~550 MB Flash)", color = PhonixGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Purges guest Linux files to maximize internal storage for your files and Android games. You can always re-fetch and re-install Linux later from the App Store.",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
             }
         }
     }
 }
 
 // -------------------------------------------------------------
-// STEP 5: Server Suite & x86 Gaming
+// STEP 3: Default Web Browser Selection
 // -------------------------------------------------------------
 @Composable
-fun Step5ServerSuite(
+fun Step3BrowserSelection(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
@@ -714,48 +559,214 @@ fun Step5ServerSuite(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = "Select Server Daemons & Gaming Services:",
+            text = "Select your default web browser for Phonix OS:",
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold
         )
+        Text(
+            text = "Phonix acts as your private workstation. Choose which browser powers your web links and desktop shortcuts.",
+            color = Slate400,
+            fontSize = 11.sp
+        )
 
-        uiState.serverServices.forEach { service ->
-            Row(
+        PreferredBrowser.entries.forEach { browser ->
+            val isSelected = uiState.oobeConfig.preferredBrowser == browser
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isSelected) Color(0xFF0C3256) else Slate900
+                ),
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Slate900)
-                    .border(1.dp, Slate800, RoundedCornerShape(8.dp))
-                    .padding(10.dp),
+                    .border(
+                        width = if (isSelected) 2.dp else 1.dp,
+                        color = if (isSelected) PhonixCyan else Slate800,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable { viewModel.selectOobeBrowser(browser) }
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Language, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(20.dp))
+                            Text(browser.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
+                        if (isSelected) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    Text(browser.subtitle, color = Slate300, fontSize = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// STEP 4: Privacy Debloat & Chrome Options
+// -------------------------------------------------------------
+@Composable
+fun Step4DebloatOptimization(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    val selected = uiState.debloatPackages.filter { it.isEnabled }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Google Chrome Debloat Card
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = if (uiState.oobeConfig.debloatChrome) Color(0xFF0F261C) else Color(0xFF1E293B)
+            ),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth().border(1.dp, if (uiState.oobeConfig.debloatChrome) PhonixGreen else PhonixCyan, RoundedCornerShape(10.dp))
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(service.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Port :${service.port} (${service.protocol})", color = PhonixCyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text("Debloat Google Chrome", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Disable Chrome from the desktop and route all web queries to your chosen private browser.", color = Slate300, fontSize = 10.sp)
                 }
+                Switch(
+                    checked = uiState.oobeConfig.debloatChrome,
+                    onCheckedChange = { viewModel.toggleOobeDebloatChrome(it) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
+                )
+            }
+        }
 
+        // OEM Bloatware Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CleaningServices, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("OEM & Carrier Bloatware", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    "Selected: ${selected.size} packages. Generates safe adb command to disable carrier telemetry and background Samsung daemons.",
+                    color = Slate300,
+                    fontSize = 10.sp
+                )
                 Button(
-                    onClick = { viewModel.toggleServerService(service.id) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (service.isInstalled) Slate800 else PhonixAmber
-                    ),
-                    modifier = Modifier.height(30.dp)
+                    onClick = { viewModel.copyDebloatCommand() },
+                    colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                    modifier = Modifier.height(34.dp)
                 ) {
-                    Text(
-                        text = when {
-                            service.isRunning -> "running"
-                            service.isInstalled -> "installed"
-                            else -> "install"
-                        },
-                        color = if (service.isInstalled) Color.White else Color.Black,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
+                    Text("Copy adb Command to Clipboard", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Text("Select bloat packages to disable:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+
+        uiState.debloatPackages.take(5).forEach { pkg ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = if (pkg.isEnabled) Color(0xFF0F1B2B) else Slate900),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().border(1.dp, if (pkg.isEnabled) PhonixCyan else Slate800, RoundedCornerShape(8.dp))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(pkg.displayName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(pkg.packageName, color = PhonixBlueLight, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                    }
+                    Switch(
+                        checked = pkg.isEnabled,
+                        onCheckedChange = { viewModel.toggleDebloatPackage(pkg.packageName) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
                     )
                 }
             }
         }
+    }
+}
+
+// -------------------------------------------------------------
+// STEP 5: Shattered Screen Rescue Walkthrough
+// -------------------------------------------------------------
+@Composable
+fun Step5ScreenRescue(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth().border(1.dp, PhonixAmber, RoundedCornerShape(10.dp))
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(24.dp))
+                    Text("Display 0 Rescue for Shattered Screens", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    "Galaxy S10 motherboards harvested from phones with unusable cracked screens are enclosed inside this mini PC shell. Phonix includes a dedicated rescue window so you never get locked out.",
+                    color = Slate200,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("How to Control the Broken Screen:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("1.", color = PhonixCyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text("Permission Popups: Any Android dialogs that appear strictly on the internal phone display can be viewed and tapped inside the rescue window.", color = Slate300, fontSize = 11.sp)
+                }
+
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("2.", color = PhonixCyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text("Direct Touch Forwarding: Clicking the virtual phone screen forwards touch coordinates (0 to 1080x2280) to the physical digitizer.", color = Slate300, fontSize = 11.sp)
+                }
+
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("3.", color = PhonixCyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text("Virtual Hardware Keys: Enclosed physical buttons (Power, Home, Back, Recents) are available right on the window's bottom navigation bar.", color = Slate300, fontSize = 11.sp)
+                }
+            }
+        }
+
+        Text(
+            "Access the Phone Screen window anytime from the 'Phone Screen' desktop shortcut or from the Phonix Start Menu.",
+            color = PhonixAmber,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 

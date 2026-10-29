@@ -68,6 +68,7 @@ data class DesktopShortcut(
     val gridRow: Int = 0,
     val posX: Float = 0f,
     val posY: Float = 0f,
+    val hasCustomPosition: Boolean = false,
     val customSize: IconSizeMode? = null,
     val customShape: ShortcutShape = ShortcutShape.SQUIRCLE,
     val customColor: DesktopAccentColor? = null,
@@ -88,35 +89,38 @@ data class DesktopShortcut(
             windowType = WindowType.BROWSER,
             posX = posX,
             posY = posY,
+            hasCustomPosition = true,
             launchPackage = app.packageName,
             isNativeApp = true,
             customShape = ShortcutShape.SQUIRCLE
         )
 
+        // Default shortcut layout placed strictly in the BOTTOM-LEFT QUADRANT.
+        // Leaves the top half of the screen clear for the Phoenix wallpaper emblem,
+        // and keeps the right side open for desktop vitals and quick widgets.
         fun getDefaultShortcuts(): List<DesktopShortcut> = listOf(
+            // Column 0 (Left-most, Col 0, posX = 20f)
             DesktopShortcut(
                 id = "sc_store",
                 title = "App Store",
                 windowType = WindowType.APP_STORE,
                 gridCol = 0,
                 gridRow = 0,
-                posX = 24f,
-                posY = 20f,
+                posX = 20f,
+                posY = 280f,
                 customColor = DesktopAccentColor.CYBER_CYAN,
                 launchPackage = "com.android.vending",
                 isPinnedToTaskbar = true,
                 isAppStore = true
             ),
-            // Phonix's own browser window, not Chrome. It has to be launchable from the
-            // desktop: once the window was closed there was no way back to it.
             DesktopShortcut(
                 id = "sc_browser",
                 title = "Phonix Browser",
                 windowType = WindowType.BROWSER,
                 gridCol = 0,
                 gridRow = 1,
-                posX = 24f,
-                posY = 108f,
+                posX = 20f,
+                posY = 368f,
                 customColor = DesktopAccentColor.CYBER_CYAN,
                 isPinnedToTaskbar = true
             ),
@@ -126,8 +130,8 @@ data class DesktopShortcut(
                 windowType = WindowType.FILE_EXPLORER,
                 gridCol = 0,
                 gridRow = 2,
-                posX = 24f,
-                posY = 196f,
+                posX = 20f,
+                posY = 456f,
                 customColor = DesktopAccentColor.AMBER_EMBER,
                 launchPackage = "com.google.android.documentsui",
                 isPinnedToTaskbar = true,
@@ -139,21 +143,23 @@ data class DesktopShortcut(
                 windowType = WindowType.BROWSER,
                 gridCol = 0,
                 gridRow = 3,
-                posX = 24f,
-                posY = 284f,
+                posX = 20f,
+                posY = 544f,
                 customColor = DesktopAccentColor.PURPLE_NEBULA,
                 launchPackage = "com.google.android.apps.photos",
                 isPinnedToTaskbar = false,
                 isNativeApp = true
             ),
+
+            // Column 1 (posX = 110f)
             DesktopShortcut(
                 id = "sc_terminal",
                 title = "Phonix Terminal",
                 windowType = WindowType.TERMINAL,
                 gridCol = 1,
                 gridRow = 0,
-                posX = 120f,
-                posY = 20f,
+                posX = 110f,
+                posY = 280f,
                 customColor = DesktopAccentColor.EMERALD_LINUX,
                 isPinnedToTaskbar = true
             ),
@@ -163,8 +169,8 @@ data class DesktopShortcut(
                 windowType = WindowType.DISTRO_STORE,
                 gridCol = 1,
                 gridRow = 1,
-                posX = 120f,
-                posY = 108f,
+                posX = 110f,
+                posY = 368f,
                 customColor = DesktopAccentColor.CYBER_CYAN,
                 isPinnedToTaskbar = true
             ),
@@ -174,8 +180,8 @@ data class DesktopShortcut(
                 windowType = WindowType.SERVER_MANAGER,
                 gridCol = 1,
                 gridRow = 2,
-                posX = 120f,
-                posY = 196f,
+                posX = 110f,
+                posY = 456f,
                 customColor = DesktopAccentColor.PURPLE_NEBULA
             ),
             DesktopShortcut(
@@ -184,38 +190,75 @@ data class DesktopShortcut(
                 windowType = WindowType.RESOURCE_MONITOR,
                 gridCol = 1,
                 gridRow = 3,
-                posX = 120f,
-                posY = 284f,
+                posX = 110f,
+                posY = 544f,
                 customColor = DesktopAccentColor.CYBER_CYAN
             ),
+
+            // Column 2 (posX = 200f)
             DesktopShortcut(
-                id = "sc_settings",
-                title = "Settings",
-                windowType = WindowType.SETTINGS,
+                id = "sc_ai",
+                title = "Cyberdeck AI",
+                windowType = WindowType.AI_ASSISTANT,
                 gridCol = 2,
                 gridRow = 0,
-                posX = 216f,
-                posY = 20f,
-                isNativeApp = true
+                posX = 200f,
+                posY = 280f,
+                customColor = DesktopAccentColor.PURPLE_NEBULA,
+                isPinnedToTaskbar = true
+            ),
+            DesktopShortcut(
+                id = "sc_vscode",
+                title = "VS Code Web",
+                windowType = WindowType.VS_CODE,
+                gridCol = 2,
+                gridRow = 1,
+                posX = 200f,
+                posY = 368f,
+                customColor = DesktopAccentColor.ELECTRIC_BLUE,
+                isPinnedToTaskbar = false
+            ),
+            DesktopShortcut(
+                id = "sc_mirror",
+                title = "Phone Screen",
+                windowType = WindowType.PHONE_MIRROR,
+                gridCol = 2,
+                gridRow = 2,
+                posX = 200f,
+                posY = 456f,
+                customColor = DesktopAccentColor.AMBER_EMBER,
+                isPinnedToTaskbar = true
             ),
             DesktopShortcut(
                 id = "sc_privacy",
                 title = "Privacy Hub",
                 windowType = WindowType.PRIVACY,
                 gridCol = 2,
-                gridRow = 2,
-                posX = 216f,
-                posY = 196f,
+                gridRow = 3,
+                posX = 200f,
+                posY = 544f,
                 customColor = DesktopAccentColor.EMERALD_LINUX
+            ),
+
+            // Column 3 (posX = 290f)
+            DesktopShortcut(
+                id = "sc_settings",
+                title = "Settings",
+                windowType = WindowType.SETTINGS,
+                gridCol = 3,
+                gridRow = 0,
+                posX = 290f,
+                posY = 280f,
+                isNativeApp = true
             ),
             DesktopShortcut(
                 id = "sc_personalize",
                 title = "Personalize",
                 windowType = WindowType.PERSONALIZE,
-                gridCol = 2,
+                gridCol = 3,
                 gridRow = 1,
-                posX = 216f,
-                posY = 108f
+                posX = 290f,
+                posY = 368f
             )
         )
     }

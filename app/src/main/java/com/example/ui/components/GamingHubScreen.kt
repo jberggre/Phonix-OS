@@ -110,8 +110,9 @@ fun GamingHubScreen(
                 }
                 Text(
                     text = "These run natively on Android, on the phone's own GPU, exactly as they do on " +
-                        "the phone. Pressing Install opens the store listing; Play only appears once the " +
-                        "package is actually installed. No frame rate is promised.",
+                        "the phone. If Google Play is signed out on this device (common on dedicated DeX stations), " +
+                        "open-source titles provide a 'Direct / F-Droid' button to install the APK directly " +
+                        "via the browser with zero Google sign-in needed. No frame rate is promised.",
                     color = Slate300,
                     fontSize = 11.sp,
                     lineHeight = 16.sp
@@ -130,6 +131,9 @@ fun GamingHubScreen(
                 entry = entry,
                 isInstalled = installed.contains(entry.packageId),
                 onInstall = { AppLaunchHelper.openPlayListing(context, entry.packageId) },
+                onDirectDownload = (entry.fdroidUrl ?: entry.directUrl)?.let { url ->
+                    { AppLaunchHelper.launchWebBrowser(context, url) }
+                },
                 onPlay = { AppLaunchHelper.launchNativeApp(context, entry.packageId) }
             )
         }
@@ -153,6 +157,9 @@ fun GamingHubScreen(
                 entry = entry,
                 isInstalled = installed.contains(entry.packageId),
                 onInstall = { AppLaunchHelper.openPlayListing(context, entry.packageId) },
+                onDirectDownload = (entry.fdroidUrl ?: entry.directUrl)?.let { url ->
+                    { AppLaunchHelper.launchWebBrowser(context, url) }
+                },
                 onPlay = { AppLaunchHelper.launchNativeApp(context, entry.packageId) }
             )
         }
@@ -271,6 +278,7 @@ private fun GameCard(
     entry: GameEntry,
     isInstalled: Boolean,
     onInstall: () -> Unit,
+    onDirectDownload: (() -> Unit)? = null,
     onPlay: () -> Unit
 ) {
     Card(
@@ -314,14 +322,33 @@ private fun GameCard(
                     Text("Play", color = PhonixGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             } else {
-                OutlinedButton(
-                    onClick = onInstall,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(32.dp)
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(Icons.Default.Download, contentDescription = null, tint = Slate300, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Install", color = Slate300, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    OutlinedButton(
+                        onClick = onInstall,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, tint = Slate300, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Play Store", color = Slate300, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (onDirectDownload != null) {
+                        OutlinedButton(
+                            onClick = onDirectDownload,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(28.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = PhonixCyan),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Language, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Direct / F-Droid", color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }

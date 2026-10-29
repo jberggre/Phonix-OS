@@ -31,6 +31,11 @@ enum class MiniPcProfile(val title: String, val subtitle: String, val descriptio
         title = "Ultra-Lean Zero Bloat",
         subtitle = "Max Storage & Free RAM",
         description = "Bypasses all non-essential phone services to maximize flash longevity and RAM for heavy multitasking."
+    ),
+    CYBERDECK_DEV(
+        title = "Cyberdeck & Developer Station",
+        subtitle = "Terminal, VS Code, Python & AI",
+        description = "Full Linux development toolchain with offline AI assistant and Alpine musl compilers."
     )
 }
 
@@ -115,6 +120,12 @@ enum class DesktopThemePreset(val title: String, val description: String) {
     OLED_OBSIDIAN("AMOLED Obsidian", "Pure black background for maximum contrast and zero backlight bleed")
 }
 
+enum class PreferredBrowser(val title: String, val subtitle: String, val packageName: String?) {
+    PHONIX_BROWSER("Phonix Browser", "Private desktop WebView, zero tracking, lightweight", null),
+    FIREFOX("Mozilla Firefox", "Full extensions, tracking protection & open web engine", "org.mozilla.firefox"),
+    CHROMIUM("Chromium", "Open-source Chromium engine for web apps", "org.chromium.chrome")
+}
+
 data class OobeSetupConfig(
     val deviceName: String = "Phonix-MiniPC",
     val profile: MiniPcProfile = MiniPcProfile.EVERYDAY_DESKTOP,
@@ -126,6 +137,9 @@ data class OobeSetupConfig(
         AppCategory.LINUX_TERMINAL,
         AppCategory.HARDWARE_MONITOR
     ),
+    val enableLinuxDesktop: Boolean = true,
+    val preferredBrowser: PreferredBrowser = PreferredBrowser.PHONIX_BROWSER,
+    val debloatChrome: Boolean = false,
     val enableAggressiveDebloat: Boolean = true,
     val themePreset: DesktopThemePreset = DesktopThemePreset.WINDOWS_11_DARK,
     val taskbarCentered: Boolean = true

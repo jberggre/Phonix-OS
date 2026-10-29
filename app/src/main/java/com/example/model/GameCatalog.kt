@@ -21,7 +21,9 @@ data class GameEntry(
     val blurb: String,
     val licence: String,
     val price: String,
-    val kind: GameKind = GameKind.GAME
+    val kind: GameKind = GameKind.GAME,
+    val fdroidUrl: String? = null,
+    val directUrl: String? = null
 )
 
 /**
@@ -40,7 +42,9 @@ object GameCatalog {
             blurb = "Conveyor-fed factories, turrets and waves. Mouse-driven, so it suits a desk " +
                 "better than a phone. Runs natively on Android — no Linux layer involved.",
             licence = "GPL-3.0",
-            price = "Free, open source"
+            price = "Free, open source",
+            fdroidUrl = "https://f-droid.org/packages/io.anuke.mindustry/",
+            directUrl = "https://github.com/Anuken/Mindustry/releases"
         ),
         GameEntry(
             packageId = "com.shatteredpixel.shatteredpixeldungeon",
@@ -49,7 +53,9 @@ object GameCatalog {
             blurb = "Turn-based, one click at a time, and short sessions. The least demanding " +
                 "game on this list on the battery and the GPU.",
             licence = "GPL-3.0",
-            price = "Free, open source"
+            price = "Free, open source",
+            fdroidUrl = "https://f-droid.org/packages/com.shatteredpixel.shatteredpixeldungeon/",
+            directUrl = "https://github.com/00-Evan/shattered-pixel-dungeon/releases"
         ),
         GameEntry(
             packageId = "com.unciv.app",
@@ -58,7 +64,9 @@ object GameCatalog {
             blurb = "Open-source Civilization-style empire building. Long games, low hardware " +
                 "demand, and it reads well on a 1080p monitor.",
             licence = "MPL-2.0",
-            price = "Free, open source"
+            price = "Free, open source",
+            fdroidUrl = "https://f-droid.org/packages/com.unciv.app/",
+            directUrl = "https://github.com/yairm210/Unciv/releases"
         ),
         GameEntry(
             packageId = "org.openttd.sdl",
@@ -67,7 +75,8 @@ object GameCatalog {
             blurb = "The open-source Transport Tycoon Deluxe. Built for a mouse and a big screen, " +
                 "which is exactly what this machine has.",
             licence = "GPL-2.0",
-            price = "Free, open source"
+            price = "Free, open source",
+            directUrl = "https://github.com/OpenTTD/OpenTTD/releases"
         ),
         GameEntry(
             packageId = "org.supertuxkart.stk",
@@ -76,7 +85,8 @@ object GameCatalog {
             blurb = "Open-source kart racing. Comfortable with a gamepad; keyboard works too. " +
                 "This is the heaviest 3D title here.",
             licence = "GPL-3.0",
-            price = "Free, open source"
+            price = "Free, open source",
+            directUrl = "https://supertuxkart.net/Downloads"
         ),
         GameEntry(
             packageId = "com.yodo1.crossyroad",
@@ -125,7 +135,9 @@ object GameCatalog {
                 "dumps or freely licensed homebrew. Save states and shaders work as they normally do.",
             licence = "GPL-3.0",
             price = "Free, open source",
-            kind = GameKind.EMULATOR
+            kind = GameKind.EMULATOR,
+            fdroidUrl = "https://f-droid.org/packages/com.retroarch/",
+            directUrl = "https://buildbot.libretro.com/stable/"
         ),
         GameEntry(
             packageId = "org.ppsspp.ppsspp",
@@ -135,7 +147,8 @@ object GameCatalog {
                 "one; there is also a paid build in the same store.",
             licence = "GPL-2.0-or-later",
             price = "Free, open source",
-            kind = GameKind.EMULATOR
+            kind = GameKind.EMULATOR,
+            directUrl = "https://www.ppsspp.org/download/"
         )
     )
 
