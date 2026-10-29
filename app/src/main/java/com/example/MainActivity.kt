@@ -183,7 +183,9 @@ class MainActivity : ComponentActivity() {
      */
     private fun moveToDesktopDisplayIfNeeded() {
         if (relocateAttempted) return
-        val target = DesktopAutoLaunch.externalDisplay(this) ?: return
+        // Only ever move onto a real workspace. Moving onto the bare HDMI output would put the
+        // window under DeX's presentation and provoke DeX's cross-display restart dialog.
+        val target = DesktopAutoLaunch.workspaceDisplay(this) ?: return
         val current = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display?.displayId
             else @Suppress("DEPRECATION") windowManager.defaultDisplay.displayId
