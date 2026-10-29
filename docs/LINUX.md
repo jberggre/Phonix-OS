@@ -98,11 +98,17 @@ asset (a fake "Nov 23 16:30" clock), so no false time appears on the Linux deskt
 - **DeX home cannot host widgets.** `dumpsys appwidget` shows only the phone launcher has a
   widget host; Samsung's DeX launcher has none. Phonix's own desktop is the widget surface.
 - **DeX's window title bar cannot be hidden by an app.** The strip along the top of a maximised
-  window (back arrow, pin, minimise/maximise/close) is system decor drawn outside the app's
-  window. Measured on One UI 4: a dark window theme, forced fullscreen windowing,
-  `captionBar()` insets and the legacy immersive flags all leave it in place, and it stays light
-  against the dark desktop. One UI 8 has a hidden immersive mode; this hardware does not. Treat
-  ~40 px of chrome as part of the product, or design the top of the desktop to sit under it.
+  window (back arrow, pin, minimise/maximise/close) is system decor drawn by DeX around the app.
+  Measured on this One UI 4 unit, none of these change it: a dark window theme, forced
+  fullscreen windowing (`--windowingMode 1`), `captionBar()` insets, the legacy immersive flags,
+  `com.samsung.android.dex.launchwidth/launchheight=0`, or `transient_bar_delay`. It also stays
+  light against the dark desktop. Research confirms there is no documented Samsung/Android/Knox
+  switch for it: the Android docs say a system caption bar survives immersive apps, and Knox's
+  `DexManager` has no window-decoration API. One UI 8 adds a user-operated *Immersive* mode
+  (maximise, then long-press maximise) but that is not on this hardware and has no app API.
+  Treat ~40 px of chrome as part of the product, or design the top of the desktop to sit under it.
+- **Kiosk and DeX do not combine.** Knox documents that DeX is not supported in kiosk/lock-task
+  mode, so lock-task cannot be used to strip DeX's chrome either.
 - **DeX wallpaper is separate** from the phone wallpaper and needs Samsung's own
   "Set as Samsung DeX wallpaper" confirmation once per unit. The app sets the phone's home
   wallpaper (`WallpaperManager`), but `setBitmap` rejects the extra desktop flag with "Must
