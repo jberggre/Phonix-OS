@@ -15,6 +15,9 @@ import com.example.engine.TerminalLine
 import com.example.model.DefaultServerCatalog
 import com.example.model.DesktopWindow
 import com.example.model.DistroCatalog
+import com.example.model.LinuxAppCatalog
+import com.example.model.LinuxAppEntry
+import com.example.model.LinuxAppStatus
 import com.example.model.LinuxDistro
 import com.example.model.ServerServiceItem
 import com.example.model.StorageState
@@ -36,12 +39,14 @@ import com.example.model.DesktopContextMenuData
 import com.example.model.ShortcutShape
 import com.example.model.ShortcutBgStyle
 import com.example.model.InstalledAppInfo
+import com.example.model.NetworkLinkState
 import com.example.model.OobeSetupConfig
 import com.example.model.AppCategory
 import com.example.model.MiniPcProfile
 import com.example.model.DesktopThemePreset
 import com.example.util.AppLaunchHelper
 import com.example.util.DeviceTelemetry
+import com.example.util.NetworkOnboarding
 import android.graphics.Rect
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -58,13 +63,19 @@ import java.net.NetworkInterface
 import java.util.Locale
 import java.util.UUID
 
+private const val KEY_NETWORK_ONBOARDED = "network_onboarded"
+
+/** Marker echoed by the guest's package probe; parsed back out of the shell output. */
+private const val HAVE_PREFIX = "PHONIX_HAVE:"
+
 enum class AppNavTab(val title: String, val icon: String) {
     DESKTOP("Phonix Desktop", "desktop"),
     COOLING_POWER("Thermals & Power", "bolt"),
     GAMING("Games", "gamepad"),
     SERVERS("Servers", "dns"),
     PARTITIONS("Storage", "storage"),
-    DISTROS("Linux System", "apps")
+    DISTROS("Linux System", "apps"),
+    APPS("PC Apps", "store")
 }
 
 enum class ContainerStatus {
@@ -156,7 +167,17 @@ data class PhonixUiState(
     val oobeConfig: OobeSetupConfig = OobeSetupConfig(),
     val installedApps: List<InstalledAppInfo> = emptyList(),
     val isAddAppDialogOpen: Boolean = false,
-    val addAppSearchQuery: String = ""
+    val addAppSearchQuery: String = "",
+    // Network onboarding. Link state is read from the platform, never assumed.
+    val network: NetworkLinkState = NetworkLinkState(),
+    val showNetworkSetup: Boolean = false,
+    val networkBusy: Boolean = false,
+    val networkMessage: String? = null,
+    // PC apps installed inside the guest. null means "not asked yet", never "missing".
+    val linuxApps: List<LinuxAppStatus> = LinuxAppCatalog.apps.map { LinuxAppStatus(it) },
+    val linuxAppsProbing: Boolean = false,
+    val linuxAppBusyPackage: String? = null,
+    val linuxAppLog: List<String> = emptyList()
 )
 
 enum class BootTarget {
@@ -258,6 +279,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     val uiState: StateFlow<PhonixUiState> = _uiState.asStateFlow()
 
     private var telemetryJob: Job? = null
+    private var networkWatcher: AutoCloseable? = null
     private var maxZIndex: Float = 3f
 
     init {
@@ -271,6 +293,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         loadInstalledApps(application)
         LinuxRuntime.addListener(linuxOutput)
         bootstrapLinux()
+        NetworkOnboarding.allowSsidReadback(application)
+        refreshNetwork(allowFirstRunPrompt = true)
+        // Every link change (join, drop, Ethernet plugged in) refreshes the header and screen.
+        networkWatcher = NetworkOnboarding.watch(application) { refreshNetwork() }
+        refreshLinuxApps()
     }
 
     /**
@@ -278,6 +305,175 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * Until it is ready the built-in emulator answers commands, so a slow first-run unpack
      * never leaves the desktop without a terminal.
      */
+    /**
+     * Reads the live link state and, on a freshly provisioned unit with no network, opens the
+     * setup screen by itself. The prompt is one-shot per unit: dismissing it records the
+     * choice, so a machine that is deliberately offline is not nagged at every boot.
+     */
+    private fun refreshNetwork(allowFirstRunPrompt: Boolean = false) {
+        val app = getApplication<Application>()
+        val link = NetworkOnboarding.currentState(app)
+        _uiState.update { current ->
+            val prompt = allowFirstRunPrompt && !link.online &&
+                !app.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
+                    .getBoolean(KEY_NETWORK_ONBOARDED, false)
+            current.copy(network = link, showNetworkSetup = current.showNetworkSetup || prompt)
+        }
+    }
+
+    fun openNetworkSetup() {
+        refreshNetwork()
+        _uiState.update { it.copy(showNetworkSetup = true, networkMessage = null) }
+    }
+
+    fun dismissNetworkSetup() {
+        getApplication<Application>()
+            .getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_NETWORK_ONBOARDED, true).apply()
+        _uiState.update { it.copy(showNetworkSetup = false, networkMessage = null) }
+    }
+
+    fun checkNetworkAgain() = refreshNetwork()
+
+    fun openAndroidWifiSettings() {
+        if (!NetworkOnboarding.openWifiSettings(getApplication())) {
+            _uiState.update {
+                it.copy(networkMessage = "Android would not open its Wi-Fi settings on this unit.")
+            }
+        }
+    }
+
+    /**
+     * Saves the network through the platform and waits for Android to validate it.
+     *
+     * The wait is deliberate: addNetwork only writes a configuration, it does not prove the
+     * password is right. Success is reported from the platform's validated state, never from
+     * the return value of the write, so the customer never sees "connected" while offline.
+     */
+    fun connectToWifi(ssid: String, password: String) {
+        if (_uiState.value.networkBusy) return
+        _uiState.update { it.copy(networkBusy = true, networkMessage = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            NetworkOnboarding.allowSsidReadback(app)
+            when (val result = NetworkOnboarding.connectWifi(app, ssid, password)) {
+                is NetworkOnboarding.ConnectResult.Rejected ->
+                    _uiState.update { it.copy(networkBusy = false, networkMessage = result.reason) }
+
+                is NetworkOnboarding.ConnectResult.Configured -> {
+                    _uiState.update {
+                        it.copy(networkMessage = "Saved $ssid. Waiting for Android to join it...")
+                    }
+                    val deadline = System.currentTimeMillis() + 30_000
+                    var online = false
+                    while (System.currentTimeMillis() < deadline) {
+                        delay(1_000)
+                        val link = NetworkOnboarding.currentState(app)
+                        _uiState.update { it.copy(network = link) }
+                        if (link.online) {
+                            online = true
+                            break
+                        }
+                    }
+                    if (online) {
+                        app.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
+                            .edit().putBoolean(KEY_NETWORK_ONBOARDED, true).apply()
+                        _uiState.update {
+                            it.copy(
+                                networkBusy = false,
+                                networkMessage = null,
+                                showNetworkSetup = false
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                networkBusy = false,
+                                networkMessage = "The network was saved, but Android has not confirmed " +
+                                    "internet access yet. Check the password, or open Android's Wi-Fi settings."
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Asks the guest which packages are really installed. Until it answers, every entry stays
+     * `installed = null` and the UI says "not checked" rather than claiming either way.
+     */
+    fun refreshLinuxApps() {
+        if (!LinuxRuntime.isRunning) return
+        _uiState.update { it.copy(linuxAppsProbing = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val probe = LinuxRuntime.run(linuxProbeCommand(), timeoutMs = 20_000)
+            if (probe == null) {
+                _uiState.update {
+                    it.copy(
+                        linuxAppsProbing = false,
+                        linuxAppLog = listOf("The container did not answer the package probe.")
+                    )
+                }
+                return@launch
+            }
+            val installed = probe.lineSequence()
+                .filter { it.startsWith(HAVE_PREFIX) }
+                .map { it.removePrefix(HAVE_PREFIX).trim() }
+                .toSet()
+            _uiState.update { state ->
+                state.copy(
+                    linuxAppsProbing = false,
+                    linuxApps = state.linuxApps.map { status ->
+                        status.copy(installed = installed.contains(status.entry.packageName))
+                    }
+                )
+            }
+        }
+    }
+
+    /** Runs the real `apk add` in the guest and reports its own output, including failures. */
+    fun installLinuxApp(entry: LinuxAppEntry) {
+        if (_uiState.value.linuxAppBusyPackage != null) return
+        _uiState.update {
+            it.copy(
+                linuxAppBusyPackage = entry.packageName,
+                linuxAppLog = listOf("apk add --no-cache ${entry.packageName}")
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (!LinuxRuntime.isRunning) LinuxRuntime.start(getApplication())
+                val output = LinuxRuntime.run(
+                    "apk add --no-cache ${entry.packageName} 2>&1",
+                    timeoutMs = 600_000
+                )
+                val tail = output?.lines()?.filter { it.isNotBlank() }?.takeLast(14).orEmpty()
+                _uiState.update {
+                    it.copy(
+                        linuxAppBusyPackage = null,
+                        linuxAppLog = tail.ifEmpty {
+                            listOf("No output. The container may not be running; press Start container.")
+                        }
+                    )
+                }
+                refreshLinuxApps()
+            } catch (t: Throwable) {
+                _uiState.update {
+                    it.copy(
+                        linuxAppBusyPackage = null,
+                        linuxAppLog = listOf("Install failed: ${t.javaClass.simpleName}: ${t.message}")
+                    )
+                }
+            }
+        }
+    }
+
+    private fun linuxProbeCommand(): String =
+        LinuxAppCatalog.apps.joinToString("; ") { entry ->
+            "apk info -e ${entry.packageName} >/dev/null 2>&1 && echo $HAVE_PREFIX${entry.packageName}"
+        }
+
     private fun bootstrapLinux() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -1425,18 +1621,18 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
 
-            if (categories.contains(AppCategory.WEB_BROWSER)) {
-                addShortcut(
-                    DesktopShortcut(
-                        id = "sc_browser",
-                        title = "Google Chrome / Web",
-                        windowType = WindowType.BROWSER,
-                        launchPackage = "com.android.chrome",
-                        isPinnedToTaskbar = true,
-                        isNativeApp = true
-                    )
+            // Always present, even if the customer trimmed the browser category: this is the
+            // Phonix WebView window, and before this it had no shortcut at all — closing it
+            // left no way to open it again for the rest of the session.
+            addShortcut(
+                DesktopShortcut(
+                    id = "sc_browser",
+                    title = "Phonix Browser",
+                    windowType = WindowType.BROWSER,
+                    customColor = DesktopAccentColor.CYBER_CYAN,
+                    isPinnedToTaskbar = true
                 )
-            }
+            )
 
             if (categories.contains(AppCategory.FILE_MANAGER)) {
                 addShortcut(
@@ -1770,6 +1966,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         // Detach only: the container belongs to the runtime, not to this activity.
+        networkWatcher?.close()
         LinuxRuntime.removeListener(linuxOutput)
         super.onCleared()
     }

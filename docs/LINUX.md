@@ -34,11 +34,46 @@ Verified on a Galaxy S10 (SM-G973U, Android 12) over DeX:
 - `apk update` and `apk add htop` install from the network (DNS comes from the phone).
 - `free -m` sees the real 7.4 GB, `nproc` the real CPU set.
 - The container survives the desktop being closed (foreground service + wake lock).
-- Xvfb + x11vnc + websockify/noVNC install and serve the desktop over loopback.
+- Xvfb + x11vnc + websockify/noVNC install and serve the desktop over loopback. Reinstalled
+  from scratch on 2026-10-29 after the app data was wiped: `apk` reported `OK: 400 MiB in 184
+  packages`, and IceWM, xterm and the Phonix wallpaper came up on the monitor
+  (`screenshots/linux-02-desktop.png`).
 - IceWM and an xterm come up with the desktop, in the Phonix theme (see below), with DejaVu Xft
   fonts and the Phonix wallpaper on the X root.
 - Packages install from the network (`apk add nginx` works), which is also what the Servers
   screen does when you press Install — it runs the real command and then probes `apk`/`pidof`.
+
+## PC software (the PC Apps tab)
+
+The **PC Apps** tab installs desktop programs into the guest with one click. It runs
+`apk add --no-cache <package>` in the live shell and shows that command's own output. A package
+is only marked *Installed* after `apk info -e` confirms it, so the badge reflects the package
+manager rather than the button that was pressed.
+
+The catalogue is limited to packages that exist in Alpine 3.24's aarch64 repositories, and each
+download size is read from that release's `APKINDEX`, not estimated:
+
+| Package | Download |
+|---|---|
+| `firefox` | 93 MB |
+| `chromium` | 146 MB |
+| `thunderbird` | 93 MB |
+| `libreoffice-writer` / `-calc` | 4 MB / 10 MB (plus the shared LibreOffice runtime) |
+| `gimp` | 20 MB |
+| `inkscape` | 8 MB |
+| `vlc` / `mpv` | 6 MB / 1 MB |
+| `audacity` | 9 MB |
+| `geany` / `python3` / `git` | 5 MB / 8 MB / 4 MB |
+| `htop` | 1 MB |
+
+Verified on the unit on 2026-10-29: `mpv` installed from the tab and the probe then reported it
+installed; `python3` already shows as installed because it is part of the Alpine base.
+
+**What this is not:** x86-64 Windows programs. The guest is aarch64 musl Linux, and no Wine,
+Box64 or x86 emulator is installed. A `.exe` will not open. Alpine does carry a Wine build for
+ARM64 Windows binaries, but that is a different, unmeasured path and Phonix does not advertise
+it. Software that needs a GPU (Blender's viewport, games) will be slow: Xvfb is a software
+framebuffer.
 
 ## The Linux Desktop window
 

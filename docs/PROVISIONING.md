@@ -75,6 +75,41 @@ Samsung saving power, not a fault. If the panel stays dark after a power-button 
 mouse click on the monitor does nothing, then the panel or its flex is the fault, and the unit
 needs the mouse to be usable at all.
 
+## Network onboarding (first run, and after a customer moves house)
+
+A unit only knows the Wi-Fi it was provisioned on, and a factory reset erases it. Phonix now has
+its own network screen so the customer does not need a phone screen to fix that:
+
+- The app opens **Connect Phonix** by itself on a unit that has never been online. After that it
+  is one click away: the collapsed top notch shows `ONLINE` or `OFFLINE` with a Wi-Fi icon, and
+  clicking it opens the screen again.
+- Typing the SSID and password saves a **real Android network** through
+  `WifiManager.addNetwork`. Android 10 restricted Wi-Fi configuration to system apps and DPCs;
+  `provision.sh` makes Phonix the device owner, so the restriction does not apply. The saved
+  network belongs to the platform, survives reboots and is used by every app, not just Phonix.
+- Success is reported from `ConnectivityManager`'s **validated** state, not from the write. If
+  the password is wrong the app says so instead of showing a green tick.
+- **Wired Ethernet is a first-class path.** Plug an Ethernet adapter into the USB-C hub and the
+  screen says *Wired connected* and never asks for Wi-Fi. This is the simplest option for the
+  housing build.
+- **Android's own picker is always offered**, because it lists nearby networks instead of asking
+  the customer to type a name. Wi-Fi scanning requires location permission (and location
+  services) that Phonix deliberately does not turn on, so the in-app form takes the SSID by hand
+  and the system screen is the list-view alternative.
+
+Why not `WifiNetworkSpecifier`: it creates an **app-scoped** connection that the platform tears
+ down when the requesting process dies, and it asks for approval on screen each time. On an
+ appliance that reboots unattended and must serve SSH/Syncthing for days, that would drop the
+ machine's network whenever the app is killed. `WifiNetworkSuggestion` persists, but Android 12
+ does not auto-approve suggestions for a device owner, so it still needs a user tap on a
+ notification that may not land on the monitor.
+
+**What has been verified on hardware (2026-10-29):** the screen renders and reads live state on
+DeX (`screenshots/wifi-02-setup.png`), the device owner silently granted the SSID readback
+permission, and the Android-settings button is wired. The *save-and-join* path has **not** been
+exercised end to end, because joining a different network would drop the bench's wireless ADB
+mid-test. Test it on a spare unit with a known hotspot before promising it.
+
 ## Bench traps found on the first real unit
 
 - **A preload can hold an account that blocks device owner.** After the factory reset this

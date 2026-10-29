@@ -216,7 +216,36 @@ object AppLaunchHelper {
         }
     }
 
-    private fun isPackageInstalled(context: Context, packageName: String): Boolean {
+    /**
+     * Opens the store page for one package, falling back to the web listing.
+     *
+     * The Play Store is addressed explicitly: `market://` alone also matches Samsung's Galaxy
+     * Store, which turns every Install press into an "Open with" chooser on this hardware.
+     */
+    fun openPlayListing(context: Context, packageId: String): Boolean {
+        val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        if (isPackageInstalled(context, "com.android.vending")) {
+            try {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageId"))
+                        .setPackage("com.android.vending")
+                        .addFlags(flags)
+                )
+                return true
+            } catch (_: Exception) {
+            }
+        }
+        try {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageId")).addFlags(flags)
+            )
+            return true
+        } catch (_: Exception) {
+        }
+        return launchWebBrowser(context, "https://play.google.com/store/apps/details?id=$packageId")
+    }
+
+    fun isPackageInstalled(context: Context, packageName: String): Boolean {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
