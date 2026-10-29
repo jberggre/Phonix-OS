@@ -97,6 +97,12 @@ asset (a fake "Nov 23 16:30" clock), so no false time appears on the Linux deskt
   the next step.
 - **DeX home cannot host widgets.** `dumpsys appwidget` shows only the phone launcher has a
   widget host; Samsung's DeX launcher has none. Phonix's own desktop is the widget surface.
+- **DeX's window title bar cannot be hidden by an app.** The strip along the top of a maximised
+  window (back arrow, pin, minimise/maximise/close) is system decor drawn outside the app's
+  window. Measured on One UI 4: a dark window theme, forced fullscreen windowing,
+  `captionBar()` insets and the legacy immersive flags all leave it in place, and it stays light
+  against the dark desktop. One UI 8 has a hidden immersive mode; this hardware does not. Treat
+  ~40 px of chrome as part of the product, or design the top of the desktop to sit under it.
 - **DeX wallpaper is separate** from the phone wallpaper and needs Samsung's own
   "Set as Samsung DeX wallpaper" confirmation once per unit. The app sets the phone's home
   wallpaper (`WallpaperManager`), but `setBitmap` rejects the extra desktop flag with "Must

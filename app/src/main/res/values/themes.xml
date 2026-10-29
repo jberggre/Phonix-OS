@@ -1,5 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar" />
+    <!--
+      Dark at the window level, not just in Compose.
+
+      The Compose theme has always been dark, but the Activity's window theme was
+      Theme.DeviceDefault, which is a light theme on Samsung. DeX colours the window
+      caption bar it wraps around an app from that window theme, so the desktop ended up
+      with a white strip along the top of a near-black screen. Everything the platform
+      draws on our behalf (caption bar, status/navigation bar appearance, the window
+      background behind the first frame) now comes from a dark theme.
+    -->
+    <style name="Theme.MyApplication" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/phonix_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:colorBackground">@color/phonix_background</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
 </resources>
