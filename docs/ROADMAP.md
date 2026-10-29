@@ -5,6 +5,9 @@ Written 2026-10-29. Each section answers a question the owner asked, records wha
 the end. Nothing here was tested on the unit unless it says so; the phone was offline for this
 work.
 
+For the current work queue — what is proven, what is unverified and what to do next — read
+[docs/HANDOFF.md](HANDOFF.md) first. This page is the research behind those items.
+
 ## Summary
 
 | Question | Verdict | Effort |
@@ -204,6 +207,9 @@ customer point it at a GGUF on internal storage or SD. Start with 1.5B Q4_K_M. D
 - Sustained thermal behaviour under the above loads.
 
 ## Bench checklist for the next session
+
+The live version of this list, with the evidence for each item, is in
+[docs/HANDOFF.md](HANDOFF.md) §3 and §6. Kept here for the record.
 
 State of the unit when it was powered off on 2026-10-29:
 
