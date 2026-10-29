@@ -158,7 +158,7 @@ data class DesktopShortcut(
             ),
             DesktopShortcut(
                 id = "sc_distro",
-                title = "Linux Distro Store",
+                title = "Linux System",
                 windowType = WindowType.DISTRO_STORE,
                 gridCol = 1,
                 gridRow = 1,

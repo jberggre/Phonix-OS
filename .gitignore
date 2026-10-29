@@ -16,3 +16,6 @@
 local.properties
 .env
 debug.keystore
+
+# Local captures from device testing (138 MB of debug screenshots)
+/screenshots/

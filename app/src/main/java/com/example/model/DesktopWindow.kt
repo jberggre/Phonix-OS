@@ -1,17 +1,18 @@
 package com.example.model
 
 enum class WindowType(val defaultTitle: String, val iconName: String) {
-    BROWSER("Phonix Web Browser (Chromium / Firefox)", "browser"),
-    DISTRO_STORE("Linux Distro Downloader & Hub", "distro"),
+    BROWSER("Phonix Browser", "browser"),
+    LINUX_DESKTOP("Linux Desktop (X11)", "linux"),
+    DISTRO_STORE("Linux System", "distro"),
     PERSONALIZE("Desktop Personalization & Themes", "brush"),
-    TERMINAL("Phonix Terminal (bash)", "terminal"),
-    SERVER_MANAGER("Server Control Center", "server"),
-    RESOURCE_MONITOR("System Resource Monitor (htop)", "monitor"),
+    TERMINAL("Phonix Terminal", "terminal"),
+    SERVER_MANAGER("Servers", "server"),
+    RESOURCE_MONITOR("Resource Monitor", "monitor"),
     FILE_EXPLORER("Phonix File Manager", "folder"),
     APP_STORE("Software & Server Stacks", "store"),
     SETTINGS("Control Panel", "settings"),
     NOTEPAD("Notepad / Editor", "note"),
-    BENCHMARK("VirGL 3D Benchmark", "speed"),
+    BENCHMARK("Container Benchmark", "speed"),
     ABOUT("About Phonix OS", "info")
 }
 

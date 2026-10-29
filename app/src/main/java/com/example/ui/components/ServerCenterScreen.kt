@@ -1,16 +1,8 @@
 package com.example.ui.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,62 +17,57 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.FolderShared
-import androidx.compose.material.icons.filled.Http
-import androidx.compose.material.icons.filled.OpenInBrowser
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.ServerServiceItem
-import com.example.ui.theme.PhonixBlue
-import com.example.ui.theme.PhonixBlueLight
+import com.example.model.WindowType
+import com.example.ui.theme.PhonixAmber
 import com.example.ui.theme.PhonixCyan
 import com.example.ui.theme.PhonixGreen
-import com.example.ui.theme.PhonixRed
-import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
+import com.example.viewmodel.ContainerStatus
 import com.example.viewmodel.PhonixUiState
 import com.example.viewmodel.PhonixViewModel
 
+/**
+ * Server suite.
+ *
+ * Every service used to be listed as running with a switch that only flipped a boolean in the
+ * UI. Now the state comes from the guest (does the package exist, is the process alive) and the
+ * action installs the real Alpine package. Starting a daemon is left to the user, in the
+ * terminal, where they can see what it prints.
+ */
 @Composable
 fun ServerCenterScreen(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
+    LaunchedEffect(Unit) { viewModel.refreshServerStates() }
+    val ip = uiState.localIpAddress
     val uptimeHours = uiState.uptimeSeconds / 3600
     val uptimeMins = (uiState.uptimeSeconds % 3600) / 60
-    val uptimeSecs = uiState.uptimeSeconds % 60
 
     Column(
         modifier = modifier
@@ -90,278 +77,186 @@ fun ServerCenterScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top Server Overview Banner
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(PhonixGreen)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "24/7 Linux Server Engine Active",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF0F223D))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            text = "${uptimeHours}h ${uptimeMins}m ${uptimeSecs}s",
-                            color = PhonixCyan,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                HorizontalDivider(color = Slate800)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Local Network (LAN) Endpoint:", color = Slate400, fontSize = 11.sp)
-                        Text(
-                            text = "http://${uiState.localIpAddress}:8080",
-                            color = PhonixGreen,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    Row {
-                        IconButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("Server URL", "http://${uiState.localIpAddress}:8080")
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "Copied URL to clipboard!", Toast.LENGTH_SHORT).show()
-                            }
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL", tint = Slate200)
-                        }
-
-                        IconButton(
-                            onClick = {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://${uiState.localIpAddress}:8080"))
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {}
-                            }
-                        ) {
-                            Icon(Icons.Default.OpenInBrowser, contentDescription = "Open in Browser", tint = PhonixCyan)
-                        }
-                    }
-                }
+            Column {
+                Text("Server Suite", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Packages and processes inside the Alpine guest", color = Slate400, fontSize = 12.sp)
             }
-        }
-
-        // Quick Preset Configurations
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("1-Click Server Presets:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // NAS Preset
-                    Button(
-                        onClick = {
-                            viewModel.toggleService("samba_nas")
-                            viewModel.toggleService("nginx_web")
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C3256)),
-                        modifier = Modifier.weight(1f).height(38.dp)
-                    ) {
-                        Text("Home NAS", fontSize = 11.sp)
-                    }
-
-                    // Dev Stack
-                    Button(
-                        onClick = {
-                            viewModel.toggleService("node_api")
-                            viewModel.toggleService("python_flask")
-                            viewModel.toggleService("openssh")
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF065F46)),
-                        modifier = Modifier.weight(1f).height(38.dp)
-                    ) {
-                        Text("Dev Stack", fontSize = 11.sp)
-                    }
-
-                    // Ad-Blocker
-                    Button(
-                        onClick = { viewModel.toggleService("pihole_dns") },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B1D54)),
-                        modifier = Modifier.weight(1f).height(38.dp)
-                    ) {
-                        Text("Ad-Blocker", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-
-        // Services List
-        Text(
-            text = "Background Server Daemons (${uiState.serverServices.count { it.isRunning }} Active):",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        uiState.serverServices.forEach { service ->
-            ServerServiceCard(
-                service = service,
-                localIp = uiState.localIpAddress,
-                onToggle = { viewModel.toggleService(service.id) }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-    }
-}
-
-@Composable
-fun ServerServiceCard(
-    service: ServerServiceItem,
-    localIp: String,
-    onToggle: () -> Unit
-) {
-    val context = LocalContext.current
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (service.isRunning) Color(0xFF0F1B2B) else Slate900
-        ),
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                1.dp,
-                if (service.isRunning) Color(0x3338BDF8) else Slate800,
-                RoundedCornerShape(10.dp)
-            )
-    ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            Button(
+                onClick = { viewModel.refreshServerStates() },
+                colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                modifier = Modifier.height(32.dp)
             ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Refresh", fontSize = 11.sp)
+            }
+        }
+
+        Card(colors = CardDefaults.cardColors(containerColor = Slate900), shape = RoundedCornerShape(10.dp)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
+                    Spacer(
                         modifier = Modifier
-                            .size(10.dp)
+                            .size(8.dp)
                             .clip(CircleShape)
-                            .background(if (service.isRunning) PhonixGreen else PhonixRed)
+                            .background(if (uiState.containerStatus == ContainerStatus.RUNNING) PhonixGreen else Slate600)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = service.name,
+                        text = "Container: " + when (uiState.containerStatus) {
+                            ContainerStatus.RUNNING -> "running"
+                            ContainerStatus.STARTING -> "starting"
+                            ContainerStatus.RESTARTING -> "restarting"
+                            ContainerStatus.STOPPED -> "stopped"
+                        },
                         color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = ":${service.port}",
-                        color = PhonixCyan,
                         fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold
                     )
                 }
-
-                Switch(
-                    checked = service.isRunning,
-                    onCheckedChange = { onToggle() },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = PhonixGreen,
-                        uncheckedThumbColor = Slate400,
-                        uncheckedTrackColor = Slate800
-                    )
+                Text(
+                    text = "LAN address: " + if (ip.isBlank()) "no IPv4 interface found" else ip,
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = if (uiState.uptimeSeconds > 0)
+                        "Device uptime: ${uptimeHours}h ${uptimeMins}m"
+                    else "Device uptime: reading...",
+                    color = Slate400,
+                    fontSize = 11.sp
+                )
+                Text(
+                    "The guest shares the phone's network. Anything you start on a port is reachable at " +
+                        "the address above from the same LAN, once Android's firewall allows it.",
+                    color = Slate400,
+                    fontSize = 10.sp,
+                    lineHeight = 15.sp
                 )
             }
+        }
 
-            Text(
-                text = service.description,
-                color = Slate300,
-                fontSize = 11.sp,
-                lineHeight = 15.sp
-            )
-
-            // Connection instruction snippet
-            val connectionSnippet = when (service.id) {
-                "openssh" -> "ssh phonix@$localIp -p ${service.port}"
-                "samba_nas" -> "\\\\$localIp\\shared  (Map in Windows File Explorer)"
-                "nginx_web" -> "http://$localIp:${service.port}"
-                "pihole_dns" -> "DNS: $localIp:53  |  Admin: http://$localIp:${service.port}/admin"
-                else -> "http://$localIp:${service.port}"
-            }
-
-            Row(
+        uiState.serverServices.forEach { service ->
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Slate950)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .border(1.dp, Slate800, RoundedCornerShape(10.dp)),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                shape = RoundedCornerShape(10.dp)
             ) {
-                Text(
-                    text = connectionSnippet,
-                    color = if (service.isRunning) PhonixCyan else Slate400,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Spacer(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        when {
+                                            service.isRunning -> PhonixGreen
+                                            service.isInstalled -> PhonixCyan
+                                            else -> Slate600
+                                        }
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(service.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            text = when {
+                                service.isRunning -> "running"
+                                service.isInstalled -> "installed"
+                                else -> "not installed"
+                            },
+                            color = when {
+                                service.isRunning -> PhonixGreen
+                                service.isInstalled -> PhonixCyan
+                                else -> Slate400
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
 
-                IconButton(
-                    onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val clip = ClipData.newPlainText("Connection Command", connectionSnippet)
-                        clipboard.setPrimaryClip(clip)
-                        Toast.makeText(context, "Copied connection command!", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Copy",
-                        tint = Slate400,
-                        modifier = Modifier.size(14.dp)
+                    Text(
+                        text = "port ${service.port} · ${service.category} · apk package: ${service.apkPackage}",
+                        color = Slate400,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
                     )
+                    Text(service.description, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { viewModel.toggleServerService(service.id) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (service.isInstalled) Slate800 else PhonixAmber
+                            ),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text(
+                                text = if (service.isInstalled) "Show start command" else "Install package",
+                                color = if (service.isInstalled) Color.White else Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Button(
+                            onClick = { viewModel.toggleWindow(WindowType.TERMINAL) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text("Terminal", fontSize = 11.sp)
+                        }
+                    }
+
+                    if (service.isInstalled) {
+                        Text(
+                            text = service.startHint,
+                            color = PhonixCyan,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
             }
         }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Slate700, RoundedCornerShape(10.dp)),
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = Slate400, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Why install instead of toggle", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    "There is no service manager in this container: proot has no init, so a daemon is " +
+                        "just a process you start. Installing the package here runs the real apk command; " +
+                        "starting it is yours to do, and the state shown above comes from actually finding " +
+                        "the process.",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }

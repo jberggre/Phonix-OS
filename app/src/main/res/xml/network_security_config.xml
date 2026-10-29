@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    noVNC is served by websockify inside the container on loopback. Plain HTTP is correct
+    there (there is no certificate authority for 127.0.0.1, and nothing leaves the device),
+    but cleartext stays disabled for every other host.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

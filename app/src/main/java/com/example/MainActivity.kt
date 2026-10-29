@@ -1,6 +1,5 @@
 package com.example
 
-import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -35,6 +34,8 @@ import com.example.ui.components.PhonixTopBar
 import com.example.ui.components.PartitionManagerScreen
 import com.example.ui.components.ServerCenterScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.example.service.DesktopAutoLaunchService
+import com.example.util.WallpaperProvisioner
 import com.example.ui.theme.Slate950
 import com.example.viewmodel.AppNavTab
 import com.example.viewmodel.PhonixViewModel
@@ -45,17 +46,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        try {
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        } catch (_: Exception) {
-        }
+        // No forced orientation: on DeX an orientation-locked activity is confined to a
+        // phone-shaped window, which is exactly what we are trying to escape. The desktop
+        // adapts to whatever window the window manager gives us.
         enableEdgeToEdge()
+
+        // Paint the Phonix wallpaper behind everything Samsung draws, so the phone home,
+        // lock screen and (where the platform mirrors it) DeX match the desktop.
+        // Off the main thread: decoding the wallpaper is expensive on a cold start.
+        Thread { WallpaperProvisioner.applyOnce(applicationContext) }.start()
 
         try {
             // Configure Immersive Desktop Mode (hides system navigation gesture bar & status bar for full PC feel)
             setImmersiveDesktopMode(true)
         } catch (_: Exception) {
         }
+
+        // The desktop is a window onto a monitor, so make sure something is always watching
+        // for one: BootReceiver starts this at power-on, this covers a manual launch.
+        DesktopAutoLaunchService.start(applicationContext)
 
         setContent {
             MyApplicationTheme {
@@ -158,13 +167,31 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setImmersiveDesktopMode(immersive: Boolean) {
+        // Draw edge to edge: without this the window still reserves the phone's status bar
+        // strip at the top, which on DeX is a band of Samsung chrome over the desktop.
+        WindowCompat.setDecorFitsSystemWindows(window, !immersive)
         val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
         windowInsetsController.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        // Hide the status bar as well as the navigation bar: on DeX the status bar is
+        // Samsung's, it sits across the top of the monitor and covers the desktop. In
+        // immersive mode the app is allowed to take that space, which is what makes the
+        // maximised window look like a real desktop instead of an app with a phone bar.
+        val bars = WindowInsetsCompat.Type.navigationBars() or WindowInsetsCompat.Type.statusBars()
         if (immersive) {
-            windowInsetsController.hide(WindowInsetsCompat.Type.navigationBars())
+            windowInsetsController.hide(bars)
+            // DeX draws its own caption bar above a maximised window (app icon, title,
+            // minimise/maximise/close) and the status-bar hide does not remove it. Asking for
+            // the caption bar to go as well is the one supported way to get a clean screen; a
+            // window manager that does not implement it simply ignores the request.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    windowInsetsController.hide(WindowInsetsCompat.Type.captionBar())
+                } catch (_: Exception) {
+                }
+            }
         } else {
-            windowInsetsController.show(WindowInsetsCompat.Type.navigationBars())
+            windowInsetsController.show(bars)
         }
     }
 }

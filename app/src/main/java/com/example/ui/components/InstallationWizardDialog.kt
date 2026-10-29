@@ -60,6 +60,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,9 +72,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.example.model.DesktopResolution
+import com.example.model.CoolingMode
 import com.example.model.DistroCatalog
-import com.example.model.GpuDriverType
 import com.example.ui.theme.PhonixAmber
 import com.example.ui.theme.PhonixBlue
 import com.example.ui.theme.PhonixBlueLight
@@ -178,13 +178,13 @@ fun WizardHeader(
     onClose: () -> Unit
 ) {
     val stepTitles = listOf(
-        "Step 1: Phone Model & Battery-Free Power",
-        "Step 2: System Debloat & RAM Reclamation",
-        "Step 3: Choose Linux Distribution",
-        "Step 4: Storage Partitioning & Swap",
-        "Step 5: Active Cooling & GPU Setup",
-        "Step 6: 24/7 Server & Gaming Suite",
-        "Step 7: One-Click Automated Deploy"
+        "Step 1: This phone and its power",
+        "Step 2: Cleanup",
+        "Step 3: Choose a Linux system",
+        "Step 4: Storage",
+        "Step 5: Cooling and graphics",
+        "Step 6: Servers and games",
+        "Step 7: Finish setup"
     )
 
     Row(
@@ -287,7 +287,10 @@ fun Step0DeviceAssessment(
                 }
 
                 Text(
-                    text = "Removing the internal battery completely eliminates 100% of thermal swelling and fire hazards for permanent 24/7 server and mini PC use. It also frees up physical space inside the phone chassis for larger copper heatsinks!",
+                    text = "A battery that is always charging is the part most likely to age badly in a 24/7 " +
+                        "build. Removing it and feeding the board from a regulated supply avoids that, and a " +
+                        "good copper pad and heatsink keep the SoC from throttling. Do this only if you are " +
+                        "comfortable working on the hardware.",
                     color = Slate200,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
@@ -303,67 +306,45 @@ fun Step0DeviceAssessment(
         }
 
         Text(
-            text = "Select Your Target Phone Model:",
+            text = "This device",
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold
         )
 
-        DeviceProfileCatalog.profiles.forEach { profile ->
-            val isSelected = uiState.selectedDeviceProfile.id == profile.id
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isSelected) Color(0xFF0C3256) else Slate900
-                ),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        width = if (isSelected) 2.dp else 1.dp,
-                        color = if (isSelected) PhonixCyan else Slate800,
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                    .clickable { viewModel.selectDeviceProfile(profile) }
-                    .testTag("device_profile_${profile.id}")
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.PhoneAndroid,
-                                contentDescription = null,
-                                tint = if (isSelected) PhonixCyan else Slate400,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = profile.name,
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        if (isSelected) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(PhonixGreen)
-                                    .size(20.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "SoC: ${profile.chip}", color = PhonixBlueLight, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Text(text = "RAM: ${profile.ramGb} GB | Storage: ${profile.totalStorageGb.toInt()} GB", color = Slate400, fontSize = 11.sp)
-                }
+        // Read from the phone rather than asking the user to pick a model: the app can see the
+        // real model, RAM and free storage, so it shows those instead of a spec sheet.
+        val telemetry = uiState.telemetry
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Android " + android.os.Build.VERSION.RELEASE + " · " + (android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64"),
+                    color = PhonixBlueLight,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = if (telemetry.ramTotalMb > 0) "RAM: ${telemetry.ramTotalMb} MB" else "RAM: reading...",
+                    color = Slate400,
+                    fontSize = 11.sp
+                )
+                Text(
+                    text = if (uiState.storage.totalBytes > 0)
+                        "Storage: ${(uiState.storage.freeBytes / (1024L * 1024L * 1024L))} GB free of ${(uiState.storage.totalBytes / (1024L * 1024L * 1024L))} GB"
+                    else "Storage: reading...",
+                    color = Slate400,
+                    fontSize = 11.sp
+                )
+                Text(
+                    "If this is not the phone you thought you were provisioning, stop now.",
+                    color = PhonixAmber,
+                    fontSize = 10.sp
+                )
             }
         }
     }
@@ -377,7 +358,7 @@ fun Step1DebloatOptimization(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
-    val totalRamReclaimed = uiState.debloatPackages.filter { it.isEnabled }.sumOf { it.estimatedRamSavedMb }
+    val selected = uiState.debloatPackages.filter { it.isEnabled }
 
     Column(
         modifier = Modifier
@@ -385,21 +366,22 @@ fun Step1DebloatOptimization(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // RAM Reclamation Hero
         Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2B1E)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F223D)),
             shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth().border(1.dp, PhonixGreen, RoundedCornerShape(10.dp))
+            modifier = Modifier.fillMaxWidth().border(1.dp, PhonixCyan, RoundedCornerShape(10.dp))
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CleaningServices, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Default.CleaningServices, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(24.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Pre-Installation System Debloat", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("Pre-installation cleanup", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Text(
-                    text = "Disables background OEM and carrier bloatware before installing Linux. This reclaims crucial physical RAM and permanently disables background thermal throttlers like Samsung Game Optimizing Service (GOS).",
+                    text = "Android does not let one app uninstall or disable another. Pick what you want " +
+                        "gone here and Phonix copies the exact adb commands for a technician to run from a " +
+                        "PC with USB debugging; you can also remove them in Settings > Apps.",
                     color = Slate200,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
@@ -412,20 +394,33 @@ fun Step1DebloatOptimization(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Estimated RAM Reclaimed for Linux:", color = Slate400, fontSize = 12.sp)
+                    Text("Selected to remove:", color = Slate400, fontSize = 12.sp)
                     Text(
-                        text = "+$totalRamReclaimed MB",
-                        color = PhonixGreen,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black,
+                        text = "${selected.size} packages",
+                        color = PhonixCyan,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
                 }
+
+                Button(
+                    onClick = { viewModel.copyDebloatCommand() },
+                    colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                    modifier = Modifier.height(38.dp)
+                ) {
+                    Text("Copy adb uninstall command", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    "Phonix never claims to have removed an app it did not touch.",
+                    color = Slate400,
+                    fontSize = 10.sp
+                )
             }
         }
 
         Text(
-            text = "Select Background Bloatware to Strip:",
+            text = "Packages to remove:",
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold
@@ -443,18 +438,7 @@ fun Step1DebloatOptimization(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(pkg.displayName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFF065F46))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("+${pkg.estimatedRamSavedMb}MB", color = Color(0xFF6EE7B7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        Text(pkg.displayName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         Text(pkg.packageName, color = PhonixBlueLight, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                         Text(pkg.description, color = Slate400, fontSize = 10.sp)
                     }
@@ -550,7 +534,10 @@ fun Step3StoragePartitioning(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
-    val part = uiState.partitionConfig
+    LaunchedEffect(Unit) { viewModel.refreshStorage() }
+    val storage = uiState.storage
+    val usedBytes = (storage.totalBytes - storage.freeBytes).coerceAtLeast(0L)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -559,90 +546,103 @@ fun Step3StoragePartitioning(
     ) {
         Column {
             Text(
-                text = "DeX-Style Container Storage & zRAM Memory:",
+                text = "Storage",
                 color = Color.White,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Zero-Partition Safe Overlay • Directly reuses installed Chrome & Files to save 4GB+ storage",
+                text = "Nothing is repartitioned - here is what is actually on the device",
                 color = PhonixCyan,
                 fontSize = 10.sp
             )
         }
 
-        // Visual Partition Breakdown Bar
         Card(
             colors = CardDefaults.cardColors(containerColor = Slate900),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    text = "Internal Storage: ${part.totalDeviceStorageGb.toInt()} GB",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(28.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                ) {
-                    val androidWeight = (part.androidSystemUsedGb / part.totalDeviceStorageGb).coerceAtLeast(0.1f)
-                    val linuxWeight = (part.allocatedLinuxGb / part.totalDeviceStorageGb).coerceAtLeast(0.1f)
-                    val swapWeight = (part.allocatedSwapGb / part.totalDeviceStorageGb).coerceAtLeast(0.04f)
-                    val freeWeight = (part.freeStorageGb / part.totalDeviceStorageGb).coerceAtLeast(0.05f)
-
-                    Box(modifier = Modifier.weight(androidWeight).fillMaxHeight().background(Slate700), contentAlignment = Alignment.Center) {
-                        Text("Android", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (storage.totalBytes <= 0L) {
+                    Text("Reading the filesystem...", color = Slate400, fontSize = 11.sp)
+                } else {
+                    Text(
+                        text = "App storage: ${formatBytesWizard(usedBytes)} used of ${formatBytesWizard(storage.totalBytes)}",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(22.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                    ) {
+                        val usedWeight = if (storage.totalBytes > 0) (usedBytes.toFloat() / storage.totalBytes).coerceAtLeast(0.05f) else 0.05f
+                        val freeWeight = (1f - usedWeight).coerceAtLeast(0.05f)
+                        Box(modifier = Modifier.weight(usedWeight).fillMaxHeight().background(Slate700), contentAlignment = Alignment.Center) {
+                            Text("used", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(modifier = Modifier.weight(freeWeight).fillMaxHeight().background(PhonixGreen), contentAlignment = Alignment.Center) {
+                            Text("free", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
-                    Box(modifier = Modifier.weight(linuxWeight).fillMaxHeight().background(PhonixBlue), contentAlignment = Alignment.Center) {
-                        Text("Linux EXT4", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    }
-                    Box(modifier = Modifier.weight(swapWeight).fillMaxHeight().background(PhonixAmber), contentAlignment = Alignment.Center) {
-                        Text("zRAM", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    }
-                    Box(modifier = Modifier.weight(freeWeight).fillMaxHeight().background(PhonixGreen), contentAlignment = Alignment.Center) {
-                        Text("Free", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(
+                        text = "Free: ${formatBytesWizard(storage.freeBytes)}",
+                        color = PhonixGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Linux guest: " + if (storage.guestBytes > 0) formatBytesWizard(storage.guestBytes) else "not installed yet",
+                        color = PhonixCyan,
+                        fontSize = 11.sp
+                    )
+                    if (storage.guestPath.isNotEmpty()) {
+                        Text(
+                            text = storage.guestPath,
+                            color = Slate400,
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
             }
         }
 
-        // Linux Container Size Slider
-        Column {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Linux Container Size:", color = Color.White, fontSize = 13.sp)
-                Text("${part.allocatedLinuxGb.toInt()} GB", color = PhonixCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Why there is no allocation step", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Phonix keeps the Linux guest in a directory inside app storage. No partition table is " +
+                        "touched, no ext4 image is created, no swap partition is made, and uninstalling the " +
+                        "app removes all of it. Earlier versions of this screen offered sliders for those " +
+                        "things; they were never real, so they are gone.",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
+                Text(
+                    "Growth is limited by the free space shown above - packages you install count against it.",
+                    color = Slate400,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp
+                )
             }
-            Slider(
-                value = part.allocatedLinuxGb,
-                onValueChange = { viewModel.updatePartitionSizes(it, part.allocatedSwapGb) },
-                valueRange = 4f..32f,
-                steps = 6,
-                colors = SliderDefaults.colors(thumbColor = PhonixCyan, activeTrackColor = PhonixBlue)
-            )
-        }
-
-        // Swap Allocation Slider
-        Column {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("zRAM Compressed Swap:", color = Color.White, fontSize = 13.sp)
-                Text("${part.allocatedSwapGb.toInt()} GB", color = PhonixAmber, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
-            Slider(
-                value = part.allocatedSwapGb,
-                onValueChange = { viewModel.updatePartitionSizes(part.allocatedLinuxGb, it) },
-                valueRange = 1f..4f,
-                steps = 2,
-                colors = SliderDefaults.colors(thumbColor = PhonixAmber, activeTrackColor = Color(0xFFD97706))
-            )
         }
     }
+}
+
+private fun formatBytesWizard(bytes: Long): String {
+    if (bytes <= 0L) return "-"
+    val gb = bytes / (1024.0 * 1024.0 * 1024.0)
+    return if (gb >= 1.0) String.format(java.util.Locale.ROOT, "%.1f GB", gb)
+    else String.format(java.util.Locale.ROOT, "%.0f MB", bytes / (1024.0 * 1024.0))
 }
 
 // -------------------------------------------------------------
@@ -653,9 +653,6 @@ fun Step4HardwareAcceleration(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
-    val hw = uiState.hwConfig
-    val cooling = uiState.coolingState
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -663,48 +660,39 @@ fun Step4HardwareAcceleration(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Active Cooling & GPU Setup:",
+            text = "Cooling and graphics",
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold
         )
+        Text(
+            "Pick the build you are making. This is guidance, not a setting: an unrooted app cannot " +
+                "change CPU clocks, bypass throttling or swap GPU drivers, and the Linux guest draws " +
+                "with software rendering (Xvfb) rather than the phone GPU.",
+            color = Slate400,
+            fontSize = 10.sp,
+            lineHeight = 15.sp
+        )
 
-        // Motherboard Cooling Mode
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F261C)),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth().border(1.dp, PhonixGreen, RoundedCornerShape(10.dp))
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Speed, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Motherboard Heatsink Mode: ACTIVE", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
-                Text(
-                    text = "Enables sustained 2.45 GHz maximum clocks without thermal throttling. Perfect for your custom copper heatsink and 5V fan setup.",
-                    color = Slate200,
-                    fontSize = 11.sp
-                )
-            }
-        }
-
-        // GPU Driver Cards
-        GpuDriverType.values().forEach { driver ->
-            val isSelected = hw.gpuDriver == driver
+        CoolingMode.entries.forEach { mode ->
+            val isSelected = uiState.coolingState.activeMode == mode
             Card(
                 colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFF0C3256) else Slate900),
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth().border(1.dp, if (isSelected) PhonixCyan else Slate800, RoundedCornerShape(10.dp)).clickable { viewModel.setGpuDriver(driver) }
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, if (isSelected) PhonixCyan else Slate800, RoundedCornerShape(10.dp))
+                    .clickable { viewModel.setCoolingMode(mode) }
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(driver.label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(mode.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         if (isSelected) {
                             Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(16.dp))
                         }
                     }
-                    Text(driver.description, color = Slate400, fontSize = 10.sp)
+                    Text(mode.subtitle, color = PhonixCyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text(mode.description, color = Slate300, fontSize = 10.sp, lineHeight = 15.sp)
                 }
             }
         }
@@ -748,11 +736,24 @@ fun Step5ServerSuite(
                     Text("Port :${service.port} (${service.protocol})", color = PhonixCyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
 
-                Switch(
-                    checked = service.isRunning,
-                    onCheckedChange = { viewModel.toggleService(service.id) },
-                    colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
-                )
+                Button(
+                    onClick = { viewModel.toggleServerService(service.id) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (service.isInstalled) Slate800 else PhonixAmber
+                    ),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text(
+                        text = when {
+                            service.isRunning -> "running"
+                            service.isInstalled -> "installed"
+                            else -> "install"
+                        },
+                        color = if (service.isInstalled) Color.White else Color.Black,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
@@ -774,7 +775,7 @@ fun Step6AutomatedDeployment(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text(
-            text = "Ready to Debloat, Partition & Deploy Phonix OS!",
+            text = "Ready to debloat and set up Phonix?",
             color = Color.White,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold

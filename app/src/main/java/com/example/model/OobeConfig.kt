@@ -93,7 +93,7 @@ enum class AppCategory(
     LINUX_DISTROS(
         id = "cat_distros",
         title = "Linux Distro Hub",
-        subtitle = "1-Click Ubuntu, Debian, Arch & Kali container downloads",
+        subtitle = "Alpine Linux inside the app: no partition, no root",
         estStorageMb = 180,
         isDefault = false,
         isHostPhoneApp = false
