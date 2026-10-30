@@ -5,11 +5,34 @@ Phone Screen as a real view. This page is the **work queue**. Read
 [VERIFICATION.md](VERIFICATION.md) for the evidence behind every claim, [ROADMAP.md](ROADMAP.md)
 for the research and sources, and [PROVISIONING.md](PROVISIONING.md) before touching the unit.
 
+## B4 glass round (2026-10-30, S10)
+
+- **B5 and B6 are done in the committed tree.** B6 restores the open-window layout per 8 dp
+  desktop size, so the portrait and landscape layouts are stored separately.
+- **1920x1080 at 160 dpi:** dragged Terminal to the right, bottom and top-left edges, resized on
+  both axes, and kept the caption, close button and grip reachable every time.
+- **Live change to 640 dpi with the window open:** the window normalised into the work area above
+  the taskbar; the right-edge drag and a horizontal resize passed. The 640 dpi desktop is only
+  about 172.5 dp tall, so the 180 dp window minimum makes the window full-height; vertical
+  movement is therefore pinned to the work area.
+- **Two B4 defects found on glass and fixed in `13d4f9b`:** the resize grip keyed its gesture on
+  the window's own width/height, so the first resize recomposed and cancelled the drag; and the
+  window bounds included the 50 dp taskbar, so a full-height window covered the bar at 640 dpi.
+  The work area now excludes the bar and the grip stays above it.
+- **Open host-chrome issue:** at 640 dpi the expanded `AutoHidingTopBar` overflows, hiding its
+  collapse button. Its collapsed hit area also overlaps the top of a full-height window's title
+  bar, so title drags near the top are captured by the bar. That is outside `WindowGeometry`; a
+  touch-outside dismissal or a scrollable action row is still needed.
+- Verification: `assembleDebug` + `testDebugUnitTest` green, **38 tests, 0 failures**. The APK was
+  installed over the device-owner build with the shared debug keystore. The S10 was restored to
+  `1080x2280`/420 dpi, rotation 0, accelerometer and proximity on; the Linux guest was stopped and
+  no screen mirror was started.
+
 ## Where the tree stands
 
-- **Current worktree:** uncommitted 1.2 compatibility implementation (`versionCode 3`). It now
-  builds and tests green: `assembleDebug` plus `testDebugUnitTest` pass with **21 tests**, and it was
-  installed in place over 1.1 (versionCode 2) on the S10 bench unit under the shared debug keystore.
+- **Current worktree:** committed and pushed at `13d4f9b` (`versionCode 3`, `versionName 1.2`). It
+  builds and tests green: `assembleDebug` plus `testDebugUnitTest` pass with **38 tests**, and it
+  was installed in place over the device-owner build on the S10 under the shared debug keystore.
 - Changes add fold posture and connected-display reporting, adaptive shortcut/window geometry,
   saved opt-in device behavior, an OOBE compatibility/setup step, and focused classifier/geometry/
   preference/version tests. `git diff --check` passes; this is only a whitespace check.
