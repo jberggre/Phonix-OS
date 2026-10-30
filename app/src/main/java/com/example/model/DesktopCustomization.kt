@@ -198,7 +198,7 @@ data class DesktopShortcut(
             // Column 2 (posX = 200f)
             DesktopShortcut(
                 id = "sc_ai",
-                title = "Cyberdeck AI",
+                title = "Local AI",
                 windowType = WindowType.AI_ASSISTANT,
                 gridCol = 2,
                 gridRow = 0,
@@ -219,15 +219,14 @@ data class DesktopShortcut(
                 isPinnedToTaskbar = false
             ),
             DesktopShortcut(
-                id = "sc_mirror",
-                title = "Phone Screen",
-                windowType = WindowType.PHONE_MIRROR,
+                id = "sc_about",
+                title = "About Phonix OS",
+                windowType = WindowType.ABOUT,
                 gridCol = 2,
                 gridRow = 2,
                 posX = 200f,
                 posY = 456f,
-                customColor = DesktopAccentColor.AMBER_EMBER,
-                isPinnedToTaskbar = true
+                customColor = DesktopAccentColor.CYBER_CYAN
             ),
             DesktopShortcut(
                 id = "sc_privacy",
@@ -259,6 +258,16 @@ data class DesktopShortcut(
                 gridRow = 1,
                 posX = 290f,
                 posY = 368f
+            ),
+            DesktopShortcut(
+                id = "sc_phone_screen",
+                title = "Phone Screen",
+                windowType = WindowType.PHONE_MIRROR,
+                gridCol = 3,
+                gridRow = 2,
+                posX = 290f,
+                posY = 456f,
+                customColor = DesktopAccentColor.CYBER_CYAN
             )
         )
     }

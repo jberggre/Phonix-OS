@@ -4,6 +4,13 @@ Phonix runs a real Alpine Linux userspace inside the app. No root, no repartitio
 second OS install, and Android keeps working exactly as Samsung shipped it — which is what
 lets a recycled Galaxy act as a mini PC without giving up the phone apps.
 
+**Bench status (2026-10-29, 16:29 build):** the app was updated in place and kept its data, where
+the guest and X11 stack live. The guest was started for the local-AI work: `llama-server` was
+installed from Alpine community, the pinned 1.5B Q4_K_M model was downloaded and hash-verified,
+and it answered at 8.2–17.2 tok/s. The X11 window itself was not re-run in this round (no monitor
+attached), so those claims remain prior hardware results. The container-stop path and 24 h soak
+remain unverified. Current app-level gaps are in [VERIFICATION.md](VERIFICATION.md) §11.
+
 ## What is actually running
 
 `proot` (a ptrace-based syscall emulator) makes the guest believe it is chrooted and running
@@ -24,6 +31,10 @@ Runtime code:
 - `engine/LinuxRuntime.kt` — process-wide owner of the shell. The desktop attaches a listener;
   `LinuxServerService` keeps the process alive so closing the desktop does not kill the machine.
 - `engine/LinuxDesktop.kt` — starts Xvfb + x11vnc + websockify/noVNC inside the guest.
+- `engine/LocalAiEngine.kt` — installs `llama-server`, downloads/verifies the GGUF, starts the
+  loopback server, streams chat, and stops it.
+- `service/ScreenMirror.kt` — MediaProjection capture for the read-only Phone Screen window; it
+  does not run inside the guest.
 - `ui/components/LinuxDesktopWindow.kt` — the window; a WebView onto `127.0.0.1:6080`.
 
 ## What works today
@@ -42,6 +53,27 @@ Verified on a Galaxy S10 (SM-G973U, Android 12) over DeX:
   fonts and the Phonix wallpaper on the X root.
 - Packages install from the network (`apk add nginx` works), which is also what the Servers
   screen does when you press Install — it runs the real command and then probes `apk`/`pidof`.
+
+## Local model server
+
+The Local AI window installs `llama-server` into the guest on first use:
+
+```sh
+apk add --no-cache llama-server
+llama-server -m /root/models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
+  --host 127.0.0.1 --port 8081 -c 4096 -t 4
+```
+
+The model is **not in the APK** and is not started at boot. It is stored in the app-private guest
+root at `/root/models`, uses about 1.0 GB on disk and ~1.3 GB RAM while loaded, and serves an
+OpenAI-compatible endpoint on loopback only. `/health` is the readiness gate; the app never turns
+the badge green from the launch command. Stop with the pid file, not a broad `pkill` pattern.
+
+Measured: Qwen2.5 1.5B Q4_K_M, SHA-256
+`1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370`, 8.2 tok/s on a 185-token
+water answer and 17.2 tok/s on a short one. The first water answer was fluent but conflated boiling
+with SODIS; after the safety prompt was strengthened, the final answer recommended a one-minute
+boil. The curated notes remain the safety reference.
 
 ## PC software (the PC Apps tab)
 
@@ -161,6 +193,8 @@ Phonix's own code is unaffected, but these binaries are shipped inside the APK:
 | `libtalloc` | LGPL-3.0 | Dynamic library, replaceable; keep its licence notice. |
 | `libandroid-shmem` | MIT | Include copyright notice. |
 | noVNC | MPL-2.0 | Unmodified, served from the guest. |
+| `llama.cpp` / `llama-server` | MIT | Optional runtime package installed from Alpine, not bundled. |
+| Qwen2.5 1.5B weights | Apache-2.0 | Downloaded at the customer’s request, not shipped in the APK. |
 
 A `THIRD-PARTY-NOTICES` file with links to each project's source satisfies the common case;
 check with counsel before volume shipping.

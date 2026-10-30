@@ -1,7 +1,70 @@
 # Provisioning a unit, and the numbers worth keeping
 
-Two things live here: the per-unit record we should keep (for QA and for honest marketing
-numbers), and the design for a USB provisioning stick that can do this without a PC.
+Three things live here: the current build/sign/install recipe (so a new session can put a build
+on the unit without rediscovering it), the per-unit record we should keep (for QA and for honest
+marketing numbers), and the design for a USB provisioning stick that can do this without a PC.
+Current measured results and the work queue are in [VERIFICATION.md](VERIFICATION.md).
+
+## Current build, signing and install (2026-10-29)
+
+**On the unit now:** Phonix **1.1**, `versionCode 2`. The original 1.1 was installed with
+`adb install -r` over the 1.0 build; the current build was installed at **16:58:38 on 2026-10-29**,
+also as `versionCode 2`. Identify it by that install time, not the version string. Device owner is
+still `com.example.receiver.PhonixDeviceAdminReceiver`. The installs overwrote the app but kept
+its data and device owner; the Alpine guest lives in that data. The current build also has the
+real 1.5B model installed in the guest and the real read-only Phone Screen. The model server and
+mirror were both stopped at the end of the session.
+
+**Toolchain on this bench machine** (it survives in `%LOCALAPPDATA%/Temp/phonix-toolchain`):
+
+| Piece | Path |
+|---|---|
+| JDK 21 | `%LOCALAPPDATA%/Temp/phonix-toolchain/jdk-21.0.12.1+1` |
+| Gradle 9.3.1 | `%LOCALAPPDATA%/Temp/phonix-toolchain/gradle-9.3.1/bin/gradle` |
+| Android SDK 36.1.0 | `%LOCALAPPDATA%/Temp/phonix-toolchain/sdk` |
+| adb | `.tools/platform-tools/adb.exe` in the working checkout (or `sdk/platform-tools`) |
+
+There is no Gradle wrapper JAR in the repository, so use the installed Gradle above rather than
+`./gradlew`:
+
+```bash
+export JAVA_HOME="$LOCALAPPDATA/Temp/phonix-toolchain/jdk-21.0.12.1+1"
+export ANDROID_HOME="$LOCALAPPDATA/Temp/phonix-toolchain/sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+"$LOCALAPPDATA/Temp/phonix-toolchain/gradle-9.3.1/bin/gradle" --offline --no-daemon assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+A clean offline build took 7m17s (39 tasks) from a warm Gradle cache. The P0 follow-up was
+incremental: `:app:compileDebugKotlin` 2m57s, then `assembleDebug` 1m42s. The current AI/mirror
+build took `:app:compileDebugKotlin` 1m52s and `assembleDebug` 4m21s (final rebuild 3m43s); the APK is 31,685,535
+bytes at `app/build/outputs/apk/debug/app-debug.apk`. `:app:testDebugUnitTest` passed when run
+online (4m27s).
+
+**The signing key is not in the repository and must not be lost.** `app/build.gradle.kts` uses
+`debugConfig` with `storeFile = file("${rootDir}/debug.keystore")`; `debug.keystore` is
+gitignored. The current app is signed by a debug certificate with SHA-256
+`7d2b6c3d85f5519e5628a922bbebf1bb3981dd2400a7037fe83938b1cec0b5da`. A matching copy was
+recovered from a prior Freebuff worktree at
+`~/.config/freebuff-desktop/local-projects/*/threads/*/debug.keystore`. Copy it to the worktree
+root before building, and keep a backup outside the repository.
+
+Why it matters: the package is **device owner**. A new APK signed with a different key fails with
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and the old package cannot be uninstalled while it is device
+owner. If the key is lost, the only ways out are the in-app decommission/reset (which wipes the
+guest) or a factory reset. Never run `adb uninstall com.aistudio.phonix.vpxmkr` on a provisioned
+unit.
+
+Verify after installing:
+
+```bash
+adb shell dumpsys package com.aistudio.phonix.vpxmkr | grep -E 'versionName|versionCode'
+adb shell dumpsys device_policy | grep 'admin='
+```
+
+Expected: `versionName=1.1`, `versionCode=2`, and the Phonix admin still listed. For the current
+build, the installed package's `lastUpdateTime` is `2026-10-29 16:58:38`; use that to distinguish
+it from the earlier 1.1 APKs.
 
 ## Per-unit record
 
@@ -20,6 +83,9 @@ Keep one row per phone. These are the fields that matter, where they come from, 
 | Measured disk throughput | the Benchmark window (`dd` inside the guest) | A real performance number, not a synthetic score |
 | Idle and load temperature | `/sys/class/thermal` via the Thermals screen | Thermal claim per cooling build |
 | RAM used idle / with desktop open | `free -m` in the guest | Which phones are comfortable |
+| Local model health + tok/s | `curl http://127.0.0.1:8081/health`, then one chat | The only honest local-AI number |
+| Local model size + hash | `sha256sum` under `files/linux/alpine/root/models` | Detects a corrupt/prefilled model |
+| Phone Screen consent + first frame | UI consent flow; `logcat -s PhonixScreenMirror:I` | Proves capture, not a painted mock |
 | DeX display mode + resolution | `dumpsys display` (`Desktop` virtual display) | Proof the monitor path works |
 | DeX wallpaper set | visual check | It is manual per unit (see `LINUX.md`) |
 | Debloat commands run | the list copied by the wizard | What was removed, for support |
@@ -29,7 +95,10 @@ Store it as CSV keyed by serial. A simple sheet is enough until volume justifies
 
 ### Baseline measured on the S10 (SM-G973U, Android 12, 2026-10-29)
 
-These are real readings from this unit, not estimates:
+Current bench unit: serial **R38M200YNRA**, app **1.1 (versionCode 2)**, device owner, phone
+panel `1080x2280` at 420 dpi (physical `1440x3040`), rotation locked portrait. The readings
+below are from this unit; the 1.1 bench session did not re-measure disk/RAM or attach a monitor.
+These are real readings, not estimates:
 
 - RAM: 7,461 MB total; 4,148 MB used with the desktop, browser and Linux window open.
 - Storage: 109 GB `/data`, 12 GB used, 96 GB free.
@@ -41,10 +110,85 @@ These are real readings from this unit, not estimates:
 - DeX virtual display: 3440×1440 at 160 dpi, `type=VIRTUAL`, `FLAG_DESKTOP_DISPLAY`;
   presented to a 1920×1080 HDMI output (that is the resolution `screencap -d <desktop id>`
   returns, and the size apps should fill).
+- Local model: Qwen2.5 1.5B Q4_K_M, 986,048,768 bytes, SHA-256 matches; `/health` `{"status":"ok"}`;
+  measured **8.2 tok/s** for a 185-token water answer and **17.2 tok/s** for a 7-token answer, with
+  prompt processing around 40–45 tok/s. An earlier 132-token water answer measured 9.7 tok/s before
+  the safety prompt was strengthened. CPU only; no GPU/NPU path. App process PSS while the
+  model was loaded was ~252 MB, but the model pages are shared/mapped; do not publish that as the
+  model’s RAM cost. Budget ~1.3 GB.
+- Phone Screen: MediaProjection first frame **540×1140**, foreground notification 4711; Stop leaves
+  `dumpsys media_projection` at `null`. Read-only; no touch injection.
 - Idle guest RAM is small; the desktop itself (Xvfb + IceWM + xterm) is the bulk.
 
 Re-run these after changing the rootfs or the X11 package list; the numbers above are the
 reference for the current build.
+
+## Local AI and Phone Screen provisioning
+
+### Model download (normal path)
+
+Open **Local AI → Set up local AI** on Wi-Fi. The app installs Alpine’s `llama-server` with
+`apk add --no-cache llama-server`, downloads the pinned GGUF from Hugging Face, verifies SHA-256,
+and starts it on `127.0.0.1:8081`. The measured bench network did 391 of 940 MB in 25 s.
+
+Pinned artifact for manual verification:
+
+```text
+file:   Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+bytes:  986048768
+sha256: 1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370
+url:    https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+```
+
+On-device paths (app-private; `run-as` works because this is a debug build):
+
+```text
+files/linux/alpine/root/models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+files/linux/alpine/root/models/llama-server.pid
+files/linux/alpine/root/models/llama-server.log
+```
+
+Check it without the UI:
+
+```bash
+adb shell curl -s http://127.0.0.1:8081/health
+adb shell run-as com.aistudio.phonix.vpxmkr \
+  sha256sum files/linux/alpine/root/models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+adb shell run-as com.aistudio.phonix.vpxmkr \
+  tail -20 files/linux/alpine/root/models/llama-server.log
+```
+
+Expected health body: `{"status":"ok"}`. The server is **not** started at boot; tap Start in the
+window, and use Stop when finished. A first answer takes roughly 4–10 s of prompt processing; the
+cool-start decode measured 8.2–17.2 tok/s. Treat those as short-run numbers, not a thermal claim.
+
+If the download is done on a PC instead, a debug install can be prefilled with `run-as`:
+
+```bash
+adb push Qwen2.5-1.5B-Instruct-Q4_K_M.gguf /data/local/tmp/model.gguf
+adb shell run-as com.aistudio.phonix.vpxmkr mkdir -p files/linux/alpine/root/models
+adb shell run-as com.aistudio.phonix.vpxmkr \
+  cp /data/local/tmp/model.gguf files/linux/alpine/root/models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+```
+
+The app verifies every model it downloads itself. A manually prefilled file is accepted on size alone, so run `sha256sum` yourself before copying it; a wrong size is rejected, but a same-size wrong file is not rehashed.
+
+### Phone Screen consent
+
+Phone Screen uses `MediaProjection`, so Android’s system dialog is mandatory. On a headless or
+shattered unit, accept it once through whichever surface is usable:
+
+```bash
+# DeX with a mouse: click Start now on the system dialog.
+# Or, over network ADB, find and tap the button:
+adb shell uiautomator dump /sdcard/ui.xml
+adb shell cat /sdcard/ui.xml | tr '>' '\n' | grep 'Start now'
+adb shell input tap <x> <y>
+```
+
+Consent is per capture session; it does not survive Stop or reboot. ADB is a setup channel, not a
+bypass. The window is read-only and cannot inject taps. Closing the window stops the foreground
+service (notification id 4711).
 
 ## First boot after a factory reset: the one click we cannot script
 
@@ -119,7 +263,24 @@ mid-test. Test it on a spare unit with a known hotspot before promising it.
   second before claiming owner. `provision.sh` reports the count; do this by hand first.
 - **Wireless debugging does not survive a reboot.** Samsung turns it off, so a bench that pairs
   over Wi-Fi and then reboots to test the kiosk loses contact mid-run. Provision over USB when
-  the unit will be rebooted, or expect to re-pair before the post-boot checks.
+  the unit will be rebooted, or expect to re-pair before the post-boot checks. USB tethering
+  enumerated as `R38M200YNRA` with no pairing on this unit. Network ADB is still the right
+  initial-setup channel for a headless unit: `adb pair`, `adb connect`, install, then
+  `input tap` the system consent button if needed.
+- **MediaProjection consent cannot be granted by device owner.** Do not look for an `appops`
+  shortcut in production. The system dialog is per capture session; a reboot loses it. Approved
+  once through DeX, a mouse or network ADB `input tap`.
+- **The package to install is `llama-server`, not `llama.cpp`.** `llama.cpp` is the CLI package.
+  The server binds `127.0.0.1:8081`; the base image does not have it until `apk add`. The model is
+  ~941 MiB, so leave at least 1.2 GB free before setup.
+- **`wm density reset` is wrong on this S10.** It sets the display to **560 dpi** (the panel's
+  density), not the 420 dpi base the phone ships with. After a density test, restore with
+  `wm density 420`, not `wm density reset`; `tools/deck-check.sh` now snapshots and restores the
+  recorded value. `wm size` was `1080x2280` override on `1440x3040` physical; restore that
+  override explicitly rather than calling `wm size reset` if you want the bench state back.
+- **A device-owner package cannot be killed for a persistence test.** `am kill` is ignored and
+  `adb shell kill -9` is denied (`Operation not permitted`). Process-death and layout-persistence
+  tests need the in-app Reboot control or a factory-reset unit, not `am kill`.
 - **The DeX workspace is not the HDMI display.** DeX renders its desktop on a virtual display
   named `Desktop` and presents that onto the HDMI output. A window launched on the physical HDMI
   display (it does appear in `DISPLAY_CATEGORY_PRESENTATION`) is composed *under* DeX's

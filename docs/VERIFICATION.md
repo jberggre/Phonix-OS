@@ -1,0 +1,744 @@
+# Deck and pocket verification — 1.1 on the unit
+
+Written 2026-10-29, first as a static review of `c42622a`, then updated after a bench session
+with the phone attached over USB. **1.1 was built and installed during that session**, so the
+new features in this document were executed on the SM-G973U, not just read.
+
+Each finding is marked **[measured]** (seen on the unit) or **[static]** (code reading only).
+Screenshots and UI dumps for the measured items are in `artifacts/deck/` in the working
+checkout; that folder is gitignored. The APK is
+`app/build/outputs/apk/debug/app-debug.apk`; the replaced 1.0 APK is preserved at
+`artifacts/deck/installed-1.0.apk`.
+
+**P0 follow-up, 2026-10-29:** the four honesty/reachability fixes in §7 items 1–4 were implemented
+and verified in a second install of the same `1.1 (versionCode 2)` debug build. Phone Screen was
+removed, the AI window was relabelled **Offline Knowledge Base**, VS Code stayed red until a real
+loopback probe succeeded, and **About Phonix OS** entered the live Start menu. §10 is that record.
+
+**§11 supersedes the removal/relabel decisions:** on the same day, the working tree gained a real
+local Qwen2.5 1.5B llama.cpp model and restored Phone Screen as a real **read-only
+MediaProjection** view. The APK was installed at **16:58:38**. The old “removed / relabelled” text
+below is kept as history; it is not the current feature state. Input injection remains
+unimplemented, and Android’s capture consent remains mandatory.
+
+**Unit, confirmed by `getprop`/`dumpsys`:** SM-G973U (S10), Android 12 (API 31), One UI 4.1
+(`40100`), `1080x2280` override on a `1440x3040` panel at 420 dpi, rotation locked portrait,
+device owner `com.example.receiver.PhonixDeviceAdminReceiver`. **No external display was
+attached in this session, so DeX itself was not exercised**; the 1080p workspace was simulated
+with `wm size`/`wm density` and is labelled as such below.
+
+## New chat quick start
+
+Read [HANDOFF.md](HANDOFF.md) first for the queue; this page holds the evidence behind it.
+[ROADMAP.md](ROADMAP.md) holds the research behind the open decisions,
+[PROVISIONING.md](PROVISIONING.md) the build/signing record, and [LINUX.md](LINUX.md) the guest.
+
+- **Unit:** serial `R38M200YNRA`, SM-G973U, Android 12 / One UI 4.1, **Phonix 1.1
+  (`versionCode 2`) installed as device owner**, 1080x2280 at 420 dpi, rotation 0. The current APK
+  is the local-AI/mirror build installed at **16:58:38** on 2026-10-29; the version string alone
+  cannot distinguish it from the earlier 1.1 builds. It is left on the desktop; the model server
+  and mirror are stopped; no monitor attached.
+- **adb:** `.tools/platform-tools/adb.exe` in this worktree (`tools/deck-check.sh` finds it).
+  USB tethering enumerated without pairing; wireless debugging resets on reboot.
+- **Build:** JDK 21 + Gradle 9.3.1 + SDK 36.1.0 are under
+  `%LOCALAPPDATA%/Temp/phonix-toolchain`. The offline build that produced 1.1 took 7m17s:
+
+  ```bash
+  export JAVA_HOME="$LOCALAPPDATA/Temp/phonix-toolchain/jdk-21.0.12.1+1"
+  export ANDROID_HOME="$LOCALAPPDATA/Temp/phonix-toolchain/sdk"
+  "$LOCALAPPDATA/Temp/phonix-toolchain/gradle-9.3.1/bin/gradle" --offline --no-daemon assembleDebug
+  adb install -r app/build/outputs/apk/debug/app-debug.apk
+  ```
+
+- **Signing:** the app uses `debugConfig` → `rootDir/debug.keystore`, which is gitignored and
+  **not in this repository**. On this bench machine a matching copy exists in a prior Freebuff
+  worktree under `~/.config/freebuff-desktop/local-projects/*/threads/*/debug.keystore` (SHA-256
+  `7d2b6c3d85f5519e5628a922bbebf1bb3981dd2400a7037fe83938b1cec0b5da`). Without that key, an
+  APK cannot update the device-owner install and the package cannot be uninstalled. Copy it to
+  the worktree root before building, and back it up; see §9.
+- **Harness:** `tools/deck-check.sh baseline|matrix|crashes|death|soak`. It restores the exact
+  recorded display metrics; note that on this S10 `wm density reset` sets **560 dpi**, not the
+  420 dpi base.
+- **Current status:** the four P0 items are done and device-verified (§10). The same day’s
+  follow-up (§11) replaced the two stopgaps with real features: **Local AI** (Qwen2.5 1.5B through
+  `llama-server`, health-gated, 8.2–17.2 tok/s) and **Phone Screen** (real read-only
+  MediaProjection capture). VS Code is still probe-gated, About is live. The remaining blockers are
+  window units/normalisation (B4), the landscape grid (B5), input injection, and the updater (B8);
+  §7 has the order.
+
+---
+
+## 0. Result at a glance
+
+The table records the measured 1.1 build. The Phone Screen, AI, VS Code and updater rows describe
+that build *before* the P0 follow-up; §10 records what changed.
+
+| | |
+|---|---|
+| Build | `gradle --offline assembleDebug`, JDK 21 + Gradle 9.3.1 + SDK 36.1.0, 7m17s, 39 tasks |
+| Signing | Same debug certificate as the installed 1.0 (SHA-256 `7d2b6c3d…b5da`), recovered from a prior worktree, so `adb install -r` succeeded and **device owner survived** |
+| Version on unit | `versionName 1.1`, `versionCode 2` |
+| Crashes/ANRs | None; `logcat -b crash` empty for the package after the whole session |
+| New modules | Cyberdeck AI works but is a keyword table labelled as a model; VS Code shows a false “running” badge; Phone Screen is a painted mock whose taps cannot be delivered |
+| Layout | Phone portrait usable but labels truncate; phone landscape clips the third row under the taskbar; simulated 1920×1080 mdpi renders all icons |
+| Windows | Drag is clamped at x=850 on a 1920px workspace; after changing display metrics, an open window stays off-screen with its close button unreachable |
+| Updater | Endpoint returns 404 for both the wrong and the real repository; **the About/Software Updates screen is unreachable from the live UI** because its only entry point is dead code |
+
+---
+
+## 1. What changed in 1.1
+
+`c42622a feat: update desktop layout and expand features` is the only code commit since the
+previous handoff (`2ea4af2`, documentation only). 17 files, +1636/−667.
+
+| Area | Change | What the bench found |
+|---|---|---|
+| Version | `versionCode 1→2`, `versionName 1.0→1.1` | Installed; About fallback still hardcodes “1.1 (build 2)”. |
+| Desktop layout | Default shortcuts moved to the bottom-left quadrant, positions recomputed at draw time | Portrait now clears the widget column; landscape still loses the third row (B5). |
+| New window types | `PHONE_MIRROR`, `VS_CODE`, `AI_ASSISTANT` added to `WindowType`, taskbar, app picker and content dispatch | All three open; Phone Screen and VS Code are not what their labels say (B1, B3). |
+| AI assistant | `model/AiChatMessage.kt` (canned text) + `CyberdeckAiWindowContent` | Replies are substring lookups; header claims Qwen2.5/llama.cpp (B2). |
+| VS Code | `VsCodeWindowContent`, `startVsCodeServer()` | Badge says running while the WebView reports `ERR_CONNECTION_REFUSED` (B3). |
+| Phone mirror | `PhoneMirrorWindowContent`, `sendPhoneTouch/Key` | Painted mock, fake 12:00/LTE, input never reaches the OS (B1). |
+| Updater | `model/AppUpdateInfo.kt`, `checkAppUpdates()`, update card | Not reachable from the live menu (B13); endpoint 404s (B8). |
+| OOBE | `CYBERDECK_DEV` profile, `PreferredBrowser`, generated shortcuts | Not re-run: the unit is already past OOBE and clearing a device-owner install is destructive. |
+| Games | `GameEntry.directUrl` / `fdroidUrl` surfaced as install URLs | Not exercised; catalogue still links out, installs nothing. |
+| Docs | **`docs/HANDOFF.md` deleted** in 1.1 | Replaced by a new handoff in the follow-up commit; links now point at [HANDOFF.md](HANDOFF.md). The 1.1 file remains readable at `git show c42622a^:docs/HANDOFF.md`. |
+
+No `targetSdk` bump happened in this commit. `targetSdk` is 36, but the unit runs API 31, so the
+API 36/37 large-screen restrictions do not apply to this phone. They matter for the next unit.
+
+---
+
+## 2. Bugs
+
+Severities are for the product, not for the diff. “Both” means pocket and deck. Line numbers and
+class names are for the measured 1.1 build (`c42622a`) before the P0 follow-up; code removed by
+the fix is named for the historical record.
+
+### B1 — The Phone Screen window is a drawing, and its input cannot work (High, both) **[measured]**
+
+**Status 2026-10-29: superseded by §11.** The painted mock and its dead input path were removed in
+the P0 round (§10); §11 restores `PHONE_MIRROR` as a real read-only MediaProjection capture. There
+is still no touch injection. The paragraph below records the removal that existed between the two
+builds.
+
+- `PhonixDesktopScreen.kt:2437` (`PhoneMirrorWindowContent`) paints a phone with a literal
+  `"12:00"`, `"LTE"`, `"100%"` and the caption `"Active Display 0 Surface"` (`:2520`, `:2526`).
+  No `MediaProjection`, `screencap`, `ImageReader` or capture path exists in the app.
+- Measured: the window opened with **12:00** while the real status bar showed **1:58 PM**. Tapping
+  the fake panel updated only a local label, `Tap: 1034,1093`; no phone UI moved.
+- `PhonixViewModel.kt:2006` (`sendPhoneTouch`) and `:2018` (`sendPhoneKey`) shell out to
+  `input -d 0 …` as the app UID, with every exception swallowed.
+- Measured as the app UID (`run-as com.aistudio.phonix.vpxmkr …`):
+  - `input -d 0 tap …` printed the `input` usage text and injected nothing.
+  - `input keyevent KEYCODE_HOME` returned success but the resumed activity did not change.
+  - Control as the shell UID: the same HOME key immediately returned to the launcher. The
+    method works; the caller's UID does not.
+- Target coordinates are hardcoded to `1080×2280` (`:2006-2012`), this panel's override size.
+- **Fix:** either cut the window, or build it honestly: `MediaProjection` consent (plus a
+  `mediaProjection` foreground-service type at API 34+) for the picture and an
+  `AccessibilityService.dispatchGesture` for input. A window labelled “rescue” that cannot
+  deliver a tap is worse than no window. Also note that on the phone panel the app itself is
+  the topmost window at the tapped coordinates, so injected taps would re-enter Phonix unless
+  it is running on the other display.
+
+### B2 — “Cyberdeck AI” is a keyword table wearing a model's name (High, both) **[measured]**
+
+**Status 2026-10-29: superseded by §11.** The relabel was the P0 stopgap; §11 adds a real
+Qwen2.5 1.5B model behind llama-server, with a health probe and measured tok/s. The curated notes
+remain the fallback and the safety reference.
+
+- `model/AiChatMessage.kt` is `DefaultAiKnowledge.matchResponse()`: substring matching that
+  returns fixed strings. The window header says `"Qwen2.5 / Cyberdeck AI"` and
+  `"Dual Mode: Built-in Knowledge + Alpine llama.cpp"` (`PhonixDesktopScreen.kt:2713-2714`),
+  and the welcome message says the assistant “runs 100% offline” on the board.
+- Measured: tapping **Water Filtration** returned a fixed `[OFFLINE SURVIVAL: WATER
+  PURIFICATION]` answer (boiling, bio-sand layers, SODIS). The send button works; `sendAiMessage`
+  only sleeps 350 ms (`PhonixViewModel.kt:2115`). No GGUF, no `llama-cli`, no token counter.
+- **Fix:** relabel now (“Offline Knowledge Base — rule-based”), keep the chips and the
+  suggested-command buttons (they are the useful part), and only add `llama.cpp` behind a real
+  probe: `apk info -e llama.cpp`, start `llama-cli` with a GGUF path, stream tokens, show the
+  model file and measured tok/s. ROADMAP §6 has the sizing.
+
+### B3 — “Server Running :8000” is asserted, never checked (High, both) **[measured]**
+
+**Status 2026-10-29: fixed by probe.** `startVsCodeServer()` now waits up to 12 s for a TCP
+connection to `127.0.0.1:8000` and leaves the badge red with a reason when nothing answers. It
+never sets `vsCodeServerRunning` from the command alone, and the WebView reloads only after a
+successful probe. Measured on the unit with the container running: “Waiting for :8000...”, then
+“Not listening on :8000” and “No listener ... the VS Code CLI is missing or failed.” See §10.
+
+- `startVsCodeServer()` (`PhonixViewModel.kt:2162-2164`) sets `vsCodeServerRunning = true`
+  before sending `code serve-web …`, and never reads the command's output.
+- Measured: after tapping **Start Server**, the window showed **“Server Running :8000”** next
+  to a WebView displaying **`net::ERR_CONNECTION_REFUSED`** for `http://127.0.0.1:8000/`.
+  `curl` from the device returned `rc=7` (connection refused) and `pidof libproot` was empty;
+  Alpine 3.24's base does not contain `code` (ROADMAP §2 records the CLI as untried).
+- **Fix:** add an install step with visible output, probe loopback with a short connect timeout
+  before flipping the badge, add Stop, and keep `--without-connection-token` only because the
+  listener is loopback (say so in the caption). `network_security_config.xml` already permits
+  cleartext to `127.0.0.1`, so the WebView is not the blocker.
+
+### B4 — Windows cannot be resized, movement clamps at 850×750 px, and positions are not normalized when the display changes (High, deck) **[measured]**
+
+- `DesktopWindowFrame` (`PhonixDesktopScreen.kt:1110-1145`) has drag and three buttons, no
+  resize grip. `PhonixViewModel.resizeWindow()` exists at `:728` and **is never called**.
+- `moveWindow()` (`:713-726`) clamps `posX` to `850f` and `posY` to `750f` in px. Measured on a
+  simulated 1920×1080 mdpi workspace: dragging the window from x≈300 to x=1800 stopped it at
+  **x≈850**, leaving the right third of the workspace unreachable.
+- Measured state bug: after switching the workspace from 1920×1080 back to the phone's
+  1080×2280, the window stayed at x≈850. Its close/minimise buttons were off-screen and could
+  not be tapped; it had to be reached by switching the workspace back to 1920 mdpi. Nothing
+  re-clamps window positions on a configuration change.
+- Units are mixed: positions are px (`IntOffset(window.posX.toInt())`), sizes are dp
+  (`.size(width = window.width.dp)`), defaults are bare numbers (`24f`, `360f`, `640f`). At
+  420 dpi a “640 wide” window is 1680 px, wider than the panel.
+- **Fix:** one unit (store dp, convert once at the layout), clamp against the measured container
+  from `BoxWithConstraints`, add a 24 dp corner grip wired to `resizeWindow`, and run a pure
+  `normalizeLayout(state, container)` on every size-class/display change (same function needed
+  for dock/undock, §5). Accept: quarter-window resize at 1920×1080 and 411×869 dp, and a window
+  opened at either size is fully reachable after switching to the other.
+
+### B5 — The icon grid is sized for a tall phone; landscape clips a row (Medium-High, pocket) **[measured]**
+
+- `PhonixDesktopScreen.kt:262-270`: `bottomQuadrantBaseY = screenHeight − 64.dp − 360.dp`,
+  coerced to at least `140`, rows at `+88.dp`. On the 411 dp-tall landscape phone the workspace
+  is ~347 dp, the base clamps to 140, and the third row sits at ~404 dp.
+- Measured: portrait 1080×2280 shows all four rows, but labels truncate (`Phonix Term…`,
+  `Photos & Me…`, `System Mon…`). Landscape 2280×1080 clips the third row behind the taskbar;
+  only two rows are fully reachable.
+- The earlier 1.0 overlap between the widget column and the third icon column is gone in 1.1:
+  icons now start below the widgets. Do not “fix” that part again.
+- Simulated 1920×1080 at 160 dpi (deck metrics) shows all 16 icons and the centered taskbar.
+- **Fix:** compute columns and rows from the measured container and `IconSizeMode`
+  (`floor((width − margins) / (icon + gap))`), page or scroll the overflow, and drop the widget
+  column below the icons when the window is narrower than ~840 dp. Accept: every default
+  shortcut visible and tappable at 411×869, 869×411 and 1920×1080.
+
+### B6 — The deck layout is not persisted, so a reboot or dock cycle loses it (Medium, both) **[static]**
+
+- `SharedPreferences` is written only for `oobe_completed`, `network_onboarded` and the
+  wallpaper (`.kt:278, 310, 323, 1617, 1792`). `DesktopCustomization` — wallpaper, accent, icon
+  size, taskbar, shortcut positions, widget visibility — and the window list exist only in
+  `_uiState`. DataStore is still commented out at `app/build.gradle.kts:108`.
+- Not measured this session: the package is device owner, `am kill` is ignored and shell
+  `kill -9` is denied, so the process cannot be reaped without the in-app reboot or a reset.
+  The code path is unambiguous: nothing writes those fields.
+- This is also a prerequisite for “saved per-deck layouts” (§6).
+- **Fix:** serialize `DesktopCustomization` (Moshi is already present) keyed by size class;
+  restore in `init` before first composition; debounce writes. Keep `windows` session-scoped
+  first, then restore the last layout per size class with the registry. Accept: arrange →
+  reboot → identical layout; dock → undock → identical layout.
+
+### B7 — Immersive mode is unconditional, but it does not take effect (Medium, pocket) **[measured, corrected]**
+
+- `MainActivity.kt:71` calls `setImmersiveDesktopMode(true)` on every launch; the function
+  (`:246`) sets `setDecorFitsSystemWindows(false)` and hides status + navigation bars.
+- Measured on the phone: **the system status bar is still visible** (battery, Wi-Fi, clock) on
+  both 1.0 and 1.1. The call runs in `onCreate` before `setContent`, and the hide is not
+  re-applied after the window attaches, so the policy never lands. The predicted "no bars"
+  symptom was wrong; the intent is still unconditional and still wrong for the pocket.
+- **Fix:** apply the insets controller after content/attach, and derive the policy from the
+  window: hide bars only on a non-default display, or when the window is ≥840 dp with a pointer;
+  show them in pocket mode. Then verify both modes.
+
+### B8 — The updater checks the wrong repository, compares versions as strings, and its screen is unreachable (Medium, both) **[measured + static]**
+
+- `checkAppUpdates()` (`PhonixViewModel.kt:2030-2088`) calls
+  `https://api.github.com/repos/JamesRBerggren/PhonixOS/releases/latest`. The remote is
+  `jberggre/Phonix-OS`, and it is **private**. Measured from the device: both URLs return
+  **HTTP 404** unauthenticated.
+- `tagName.replace("v","") > "1.1"` is lexicographic (`:2047`): `"1.9" > "1.10"` is true, which
+  is wrong; `"1.2" > "1.1"` passes by luck.
+- The failure path sets `UpdateCheckState.UP_TO_DATE` with a note, so the card can claim the
+  unit is current after a 404.
+- `downloadAndInstallUpdate()` (`:2091-2100`) opens a browser, no signature check, contrary to
+  ROADMAP §3.
+- See B13: the screen that contains this card is not reachable.
+- **Fix:** signed manifest on the owner's host (ROADMAP §3), integer `versionCode` from
+  `PackageManager`, explicit `OFFLINE`/`UNKNOWN` state, `PackageInstaller` only after the signer
+  matches, and an entry point that actually exists.
+
+### B9 — Failures are swallowed in the newest paths (Low-Medium, both) **[static]**
+
+`sendPhoneTouch`, `sendPhoneKey` and `downloadAndInstallUpdate` ended in
+`catch (_: Exception) {}` (`.kt:2013`, `:2022`, `:2091-2100`), and `startVsCodeServer` had no
+error path at all (B3). The first two were deleted with the mock; VS Code now reports a specific
+probe failure (§10). `downloadAndInstallUpdate` still swallows errors, and the updater remains
+unfixed (B8). The app already has a terminal that shows real command output; use it.
+
+### B10 — Documentation links broke in 1.1 (Low, repo) **[fixed]**
+
+`docs/HANDOFF.md` was deleted in 1.1 while `ROADMAP.md` still linked to it twice. The follow-up
+commit restores a handoff and points the links at it; the 1.1 file remains readable at
+`git show c42622a^:docs/HANDOFF.md`.
+
+### B11 — Keep these as they are (no action)
+
+- `AndroidManifest.xml:69-70` already has `resizeableActivity="true"`, no `screenOrientation`,
+  no `min/maxAspectRatio`, and `configChanges` covering size/density/uiMode. That is the correct
+  side of the API 36/37 rules.
+- Every desktop window is a Compose box inside one activity, so Samsung's five-app DeX cap
+  never applies. That is a real architectural advantage; keep it and make it deliberate (§6).
+- `DesktopAutoLaunch` resolving Samsung's `…category.DESKTOP` display is discovery, not a
+  behaviour branch. It stays.
+
+### B12 — “Display mode” is cosmetic, not a display fact (Low, both) **[static]**
+
+`MonitorDisplayMode` (`PHONE_PORTRAIT` / `FHD 16:9` / `ULTRAWIDE 21:9`) only changes the
+right-hand widget column's max width (`PhonixDesktopScreen.kt:200-204`). It does not change the
+layout, and on the phone it can claim “External Monitor (16:9)”. Derive it from the window or
+rename it so it stops reading as a display fact.
+
+### B13 — About / Software Updates is unreachable (High for the update feature) **[measured + static]**
+
+**Status 2026-10-29: fixed for reachability.** **About Phonix OS** is now an item in the live
+`Windows11StartMenu` and opens the About window; the Software Updates card is reachable by
+scrolling it. The endpoint and version-compare bugs in B8 are unchanged and still block a real
+update check.
+
+- `WindowType.ABOUT` is dispatched at `PhonixDesktopScreen.kt:1258` and offered only by
+  `PhonixStartMenu` (`:1837`), which **is never called** (one definition, zero call sites).
+- The live start menu is `Windows11StartMenu` (`:379`); it contains **no About entry** (search
+  for “About” in that file returns nothing). Measured: opening the live menu showed App Store,
+  All apps, Pinned and the app grid, with no About.
+- Consequence: the entire About screen, including the Software Updates card, cannot be opened
+  in 1.1. The new update feature is dead UI regardless of the endpoint bug.
+- **Fix:** add About to the live menu (and/or the OS Card), and delete the dead `PhonixStartMenu`
+  or wire it up. This should land before any endpoint work, or the fix cannot be reached.
+
+### Measured corrections to the earlier review
+
+- B7's predicted symptom (“no status bar in pocket”) was wrong; the bar is visible because the
+  hide does not take effect. The policy is still unconditional.
+- B5's overlap claim came from 1.0; 1.1's portrait layout no longer overlaps the widget column.
+  The landscape clipping and the label truncation are real.
+- B8 is worse than “wrong URL”: the screen that shows it is unreachable (B13).
+- New measured state bug: window positions are not re-clamped after a display-size change (B4).
+
+---
+
+## 3. Feature → verification matrix
+
+Run this on the unit. IDs are stable; `tools/deck-check.sh` automates the device-level parts.
+“Result” is what the 2026-10-29 session actually saw.
+
+| ID | Feature | Steps | Pass criterion | Result 2026-10-29 |
+|---|---|---|---|---|
+| F1 | Window types open, focus, minimise, maximise, close | Open Browser, Terminal, VS Code, Offline Knowledge, About; use the three title-bar buttons; drag by the header | Window fully inside workspace; controls reachable; no crash | **Pass at open**; close became unreachable after a metric change (B4) |
+| F2 | VS Code server | VS Code → Start Server; wait 30 s | Badge green only if `127.0.0.1:8000` answers; editor renders; Stop works | **Fail** — green badge with `ERR_CONNECTION_REFUSED` and `curl` rc=7 (B3) |
+| F3 | Phone Screen | Open, consent, view live frames, Stop, close | Actual display frames; LIVE/OFF honest; Stop ends projection; input is explicitly absent | **Pass (read-only)** in §11 — first frame 540×1140, foreground service 4711, Stop returns OFF. No tap test because injection is not implemented. |
+| F4 | Local AI | Open, Set up/Start, ask, wait for stream, Stop | Model installed/verified; `/health` READY; streamed text; measured tok/s; notes fallback | **Pass** in §11 — water answers 9.7 then 8.2 tok/s, 2+2 answer 17.2 tok/s; `null` prefix bug found and fixed. |
+| F5 | Game install URLs | App Store → Games → install an open-source title | Store page opens; “Installed” only from `pm` | **Not run** this session |
+| F6 | Cyberdeck OOBE profile + browser choice | Reset/first run; choose the profile; open a web shortcut | Expected shortcuts; chosen browser opens | **Not run** — unit already past OOBE; reset is destructive |
+| F7 | Update check | About → Check for Updates (with network and offline) | Correct repo/version; offline says offline; install is signed | **Fail** in 1.1 — About unreachable (B13); configured URL 404 measured (B8). **About is reachable after P0; check still fails on B8.** |
+| F8 | Default shortcut layout | Fresh desktop; portrait and landscape | Every icon visible above the taskbar | **Fail in landscape** — third row clipped; portrait labels truncate (B5) |
+| F9 | State across process death / dock cycle | Arrange → kill → relaunch; dock → undock | Layout identical; no window lost | **Not run** — device-owner package cannot be killed; code has no persistence (B6) |
+| F10 | Immersive policy | Compare bars on phone and DeX | Pocket: bars visible. Deck: hidden with caption bar reserved | **Fail on phone** — status bar visible despite the hide call; DeX not run (B7) |
+| F11 | Linux desktop + container stop | Open/close; stop the container | Session survives closing; stop really stops the guest | **Not run** this session |
+| F12 | Network onboarding | Render on DeX; join a hotspot; wrong password | Real SSID state; failure reported | **Not run** this session |
+| F13 | Wallpaper / device owner | Launch, relaunch | Wallpaper applied once; admin intact | **Pass** — admin intact after the 1.1 install |
+| F14 | Window normalisation on size change | Open a window at 1920×1080, switch to 1080×2280 | Window stays fully reachable | **Fail** — stayed at x≈850, close off-screen (B4) |
+
+F2, F3, F4 and the reachability half of F7 were re-run after the P0 fixes; §10 has the post-fix
+results. The table above keeps the 1.1 before-state for comparison.
+
+---
+
+## 4. Bench harness
+
+`tools/deck-check.sh` automates the device-level parts: baseline capture, the pocket/deck metric
+matrix with a guaranteed restore, crash-buffer scan, process-death check and an optional soak
+recorder. It refuses to run without `adb` and prints the install command instead. On this machine
+it now falls back to the local `.tools/platform-tools` copy, and it disables Git Bash path
+conversion so `adb shell cat /proc/uptime` works.
+
+```bash
+tools/deck-check.sh baseline
+tools/deck-check.sh matrix
+tools/deck-check.sh crashes
+tools/deck-check.sh death
+tools/deck-check.sh soak --hours 24
+tools/deck-check.sh reset
+```
+
+Two corrections came out of the bench run and are now in the script:
+
+- **Samsung density:** `wm density reset` on this S10 jumps to **560 dpi** (the panel's density),
+  not the 420 dpi base. The script snapshots the physical density and restores it with
+  `wm density 420`; the pocket profiles restore the recorded metrics instead of calling `reset`.
+  The same quirk bit this session: after `wm density reset` the UI briefly rendered at 560 dpi
+  and had to be corrected by hand.
+- **Device-owner processes cannot be reaped:** `am kill` is ignored and shell `kill -9` is denied.
+  The `death` command now says so instead of implying a failed test.
+
+Two things the script deliberately does **not** do:
+
+- **No `monkey`.** This app's own buttons can run debloat commands and reboot the unit; random
+  tapping is destructive here, not a crash hunt. Run it by hand only on a unit you will reset.
+- **No claim that `wm size` is DeX.** `wm size 1920x1080` + `wm density 160` reproduces the
+  *metrics* Phonix sees on a 1080p workspace at mdpi; it does not create a second display, enter
+  freeform, or exercise DeX's caption bar or task switcher. Real deck acceptance still needs the
+  dock and monitor.
+
+Always record before you change, and always restore: the script snapshots `wm size`,
+`wm density`, `display_density_forced` and rotation, and restores them from an `EXIT` trap,
+including on Ctrl-C.
+
+---
+
+## 5. Usage-mode parity: one capability layer, two policies
+
+The goal is that the pocket and the deck run the same code and differ only in policy. No
+`Build.MANUFACTURER` checks, no “is this a Samsung” branch.
+
+**Signals** (all from the current window/activity, recomputed on configuration change):
+
+| Signal | Source | Used for |
+|---|---|---|
+| Width class | window dp width: `< 600` compact, `600–839` medium, `≥ 840` expanded | Pane count, icon grid, widget column |
+| Height class | window dp height `< 480` short | Icon rows, whether widgets can sit beside icons |
+| Pointer | `InputManager.inputDeviceIds` → any `SOURCE_MOUSE`/`SOURCE_TOUCHPAD` | Hover, right-click, drag precision |
+| Keyboard | any `SOURCE_KEYBOARD` | Accelerators, command palette default-open |
+| External display | `activity.display.displayId != Display.DEFAULT_DISPLAY` | Immersive policy, caption-bar inset |
+| Caption bar | `WindowInsets.Type.captionBar()` | Reserve top strip on the deck |
+| Desk hint | `uiMode == UI_MODE_TYPE_DESK` | Weak corroboration only, never the sole trigger |
+
+**Policies.**
+
+| | Pocket (compact, touch) | Deck (medium/expanded, pointer) |
+|---|---|---|
+| Shell | Single pane + taskbar switcher; one window visible at a time | Tiled panes, 2–4 visible |
+| Windows | Open maximised; “minimise” returns to the launcher; no free drag | Free drag, quarter snapping, resize grips |
+| Context menu | Long-press (already implemented in `DraggableDesktopShortcut`) | Right-click (already implemented) + Shift+F10 |
+| Target size | ≥ 48 dp, 8 dp gaps | 32–40 dp chrome is acceptable |
+| Hover | Never required; every hover affordance has a tap path | Hover states, tooltips |
+| System bars | Visible | Hidden, caption bar reserved |
+| Keyboard | Soft keyboard, `adjustResize` | Ctrl+K palette, Alt+Tab cycle, Ctrl+W close |
+
+**Dock/undock and size changes.** Keep window models and the active module in the ViewModel
+(they already survive configuration changes because the manifest declares the configs). On a
+size-class change, run one pure `normalizeLayout(state, container)` that clamps positions/sizes
+into the new bounds and collapses panes in compact; do not rebuild state from defaults. The
+measured B4 failure — a window left at x≈850 with its close button off-screen after switching
+from 1920 to 1080 — is exactly what this function must prevent. Input focus belongs in the model,
+not a composable-local `remember`.
+
+**Why not `screenOrientation` or resize flags:** already correct — see B11. The failure here is
+layout policy and the missing normalisation pass, not manifest policy.
+
+---
+
+## 6. Cyberdeck parity: make the module surface deliberate
+
+The app is already a modular shell: `WindowType` is the module list and the Compose boxes are the
+tiling. What is missing is the declaration, the entry points and the persistence.
+
+1. **Module registry.** Replace the separate `when (type)` blocks (`DesktopWindowFrame`,
+   `Windows11Taskbar`, `DesktopAppPickerDialog`) with one list:
+
+   ```kotlin
+   data class DeckModule(
+       val id: String, val title: String, val icon: ImageVector,
+       val factory: @Composable (PhonixUiState, PhonixViewModel) -> Unit,
+       val minWidthDp: Int = 320, val needs: Set<Need> = emptySet() // POINTER, KEYBOARD, GUEST, NETWORK
+   )
+   ```
+
+   A module then appears in the picker, taskbar and desktop without touching three files. B13 is
+   the cautionary tale: `About` exists as a module but its only menu is dead code, so the feature
+   is invisible. Add a registry test that every module is reachable from at least one live entry
+   point.
+
+2. **Named deck layouts.** A layout is `(name, sizeClass, list of (moduleId, tile), pins)`. One
+   definition must produce the same arrangement at 1920×1080@160 and, collapsed, at 411×869 dp.
+   Ship three: *Field* (terminal + vitals), *Dev* (editor + terminal + browser), *Server* (guest
+   console + services + vitals). Persist via B6.
+
+3. **In-app tiling, on purpose.** Samsung caps DeX at five simultaneous apps and minimises the
+   oldest. That is a reason to keep the deck inside one window, and to say so in the product
+   copy. Add quarter snapping and a keyboard resize so four panes are usable on 1080p without OS
+   window management.
+
+4. **Keyboard-first.** Ctrl+K command palette over the existing action layer (`openWindow`,
+   `executeTerminalCommand`, connect Wi-Fi, start/stop guest). Every palette entry is one of those
+   calls; nothing new is needed underneath.
+
+5. **Files.** Use `ACTION_OPEN_DOCUMENT_TREE` (SAF) for customer storage. Do not add
+   `MANAGE_EXTERNAL_STORAGE`: it is Play-restricted and this app is sideloaded, so it would buy
+   nothing and cost the option of a store listing later.
+
+6. **Peripherals and thermals.** Surface `UsbManager` device-attach events in a Devices pane (the
+   hub's HID already works through DeX). Use `DeviceTelemetry`'s thermal zones to degrade
+   deliberately: drop background refresh first, show a throttling badge, never lie about clocks.
+
+---
+
+## 7. Fix order
+
+P0 is “the feature is not what the label says”; P1 is “the deck breaks”; P2 is polish. Each item
+names the matrix row that closes it.
+
+| # | Fix | Why first | Closes |
+|---|---|---|---|
+| 1 | Phone Screen: real MediaProjection picture; accessibility input only if wanted later | The most obviously false surface; read-only capture is now done (§11), input is not | F3 |
+| 2 | Real local model behind a health probe and measured tok/s | Replaces the keyword table (§11) | F4 |
+| 3 | Probe VS Code before the badge; install step + Stop + output | One click produces a lie today | F2 |
+| 4 | Add About to the live menu (done); delete the dead `PhonixStartMenu` in the registry pass | The update feature was unreachable; fixing the endpoint first would be invisible | F7, B13 |
+| 5 | Unify window units, clamp to container, add resize grip, normalise on size change | Blocks every deck acceptance test; measured off-screen window | F1, F9, F14 |
+| 6 | Persist `DesktopCustomization` + per-size-class layout | Without it a deck cannot be set up once | F9 |
+| 7 | Apply immersive after attach and derive it from display/pointer/size | Pocket bars currently contradict the code's intent | F10 |
+| 8 | Compute the icon grid from the container | Landscape phone loses a row | F8 |
+| 9 | Updater: signed manifest, integer version, explicit offline | A unit that cannot be fixed remotely is a liability | F7 |
+| 10 | Surface command failures in the terminal | Turns silent failures into readable support tickets | F2, F3 |
+| 11 | Module registry + three deck layouts | The “modular cyberdeck” claim | §6 |
+
+Items 1–3 and the live About entry in item 4 landed on 2026-10-29 and were verified on the unit
+(§10). Item 1’s picture and item 2’s model were then replaced by real implementations in §11. The
+dead `PhonixStartMenu` is still present and should be deleted in the registry pass. The remaining
+order is unchanged, starting with window geometry (item 5).
+
+**Do not fix:** the DeX caption bar (no API — measured), kiosk + DeX (Samsung documents they do
+not combine), `input`-based injection without accessibility, or the manifest's resize/orientation
+settings (already correct).
+
+---
+
+## 8. Open questions for the owner
+
+1. **Phone Screen: build it or cut it?** Resolved by building the picture on 2026-10-29 (§11):
+   real MediaProjection consent and a read-only window. Input still needs an AccessibilityService
+   and a separate opt-in; the painted mock must not return.
+2. **Local AI: relabel only, or commit to the llama.cpp path?** Resolved on 2026-10-29: real
+   Qwen2.5 1.5B Q4_K_M through `llama-server`, measured at 8.2–17.2 tok/s. The remaining question
+   is model quality and thermal soak, not whether the path exists.
+3. **DeX or kiosk?** ROADMAP §4 recommends the in-app supervisor PIN and keeps DeX. The decision
+   changes nothing in this document, but it changes what “sealed appliance” means.
+4. **OOBE and update path next?** OOBE was not exercised on this unit. About is reachable now, but
+   the updater still needs B8's correct repository, integer version compare and signed manifest
+   before a check can succeed.
+
+---
+
+## 9. Bench session record — 2026-10-29
+
+Commands were run from this worktree with `adb` from `.tools/platform-tools`, a device owner
+S10 on USB tethering, and the phone unlocked.
+
+**Build and install**
+
+- Toolchain: `%LOCALAPPDATA%/Temp/phonix-toolchain` — JDK 21.0.12.1+1, Gradle 9.3.1, SDK 36.1.0.
+- `gradle --offline --no-daemon assembleDebug`: **BUILD SUCCESSFUL in 7m 17s**, 39 tasks, APK
+  30,944,622 bytes.
+- The installed 1.0 was signed by `CN=Android Debug` with SHA-256
+  `7d2b6c3d85f5519e5628a922bbebf1bb3981dd2400a7037fe83938b1cec0b5da`. The matching
+  `debug.keystore` was recovered from a prior Freebuff worktree; the new APK was checked with
+  `apksigner` and matches.
+- `adb install -r app-debug.apk`: **Success**. Package now `versionCode 2`, `versionName 1.1`;
+  device-owner admin unchanged.
+
+**Measured**
+
+- AI window: canned Water Filtration answer; header `Qwen2.5 / Cyberdeck AI`; send button works.
+- VS Code: green `Server Running :8000`; WebView `net::ERR_CONNECTION_REFUSED`; `curl` rc=7;
+  no `libproot` running.
+- Phone Screen: fake 12:00/LTE/100%; real status bar 1:58 PM; tap label `Tap: 1034,1093`;
+  app-UID HOME ignored, shell-UID HOME works.
+- Layout: portrait 1080×2280 all rows present with truncated labels; landscape 2280×1080 third
+  row clipped by the taskbar; simulated 1920×1080 mdpi all 16 icons visible.
+- Window: drag stopped at x≈850 on a 1920px workspace; after switching to 1080×2280 it stayed
+  there and its close button was off-screen; recovered by switching back to 1920 mdpi.
+- Live start menu has no About entry; `PhonixStartMenu` has zero call sites; both GitHub URLs
+  return 404 from the device.
+- `logcat -b crash` empty for the package; no ANR.
+
+**Restored**
+
+- `wm size 1080x2280` (the original override), `wm density 420` (Samsung's `wm density reset`
+  had set 560), `user_rotation 0`, `accelerometer_rotation 0`. Final `wm size`/`density` match
+  the session baseline; device-owner admin intact.
+
+**Not run, and why**
+
+- DeX on a monitor, dock/undock, caption-bar behaviour: no external display attached.
+- OOBE Cyberdeck profile and preferred-browser choice: the unit is past OOBE; resetting the only
+  device-owner install is destructive.
+- Process-death persistence: `am kill` is ignored and shell `kill -9` is denied for the device
+  owner; B6 is therefore static.
+- 24 h soak, monkey, container stop, Wi-Fi join, games install URL, browser preference.
+- No release build or signature rotation; debug only.
+
+**Changes made in this session:** all six files in `docs/` — this file (measured review and
+quick start), `ROADMAP.md` (verdicts and work order), `PROVISIONING.md` (toolchain, signing,
+install and Samsung traps), and current-status notes in `LINUX.md`, `PRIVACY.md` and
+`COMPATIBILITY.md`; plus `tools/deck-check.sh` (Samsung density restore, local adb fallback,
+Git Bash path conversion, device-owner death note) and `.gitignore` (`.tools/`, `artifacts/`).
+The tracked AI Studio plan under `.aistudio/` now carries a historical-plan banner so it is not
+mistaken for current behaviour. The round is committed and pushed to `main`; see
+[HANDOFF.md](HANDOFF.md) for the queue that starts after it.
+
+---
+
+## 10. P0 follow-up — implemented and verified 2026-10-29
+
+This is the post-review fix round. The APK was built from the working tree that is now committed,
+so it still reports `1.1 (versionCode 2)`; identify it by the 15:39:37 install time, not by the
+version string.
+
+### What changed
+
+- **Phone Screen removed.** `PHONE_MIRROR` is gone from `WindowType`; the default shortcut, taskbar
+  mapping, content dispatch and `PhoneMirrorWindowContent` are gone; `sendPhoneTouch`/`sendPhoneKey`
+  and `phoneMirrorLastTap` are gone. The OOBE rescue walkthrough was removed too, so the wizard is
+  now six steps (0–5) and deploys on the last one. The old default grid slot now opens **About
+  Phonix OS**.
+- **AI relabelled.** Window and shortcut titles now say **Offline Knowledge** / **Offline Knowledge
+  Base**. The header says “Rule-based notes - no language model is loaded”; the offline badge says
+  “LOCAL NOTES”; the llama.cpp action says “Install llama.cpp”. Welcome and fallback copy no longer
+  claim Qwen2.5 or a running model.
+- **VS Code is probe-gated.** `startVsCodeServer()` keeps `vsCodeServerRunning = false` until a
+  `Socket.connect(127.0.0.1:8000)` succeeds (350 ms per attempt, 12 s overall), checks for an
+  already-listening server first, and reports a specific failure when the container is stopped or
+  no listener appears. The WebView reloads only after success. Header states: “Not listening on
+  :8000”, “Waiting for :8000...”, “Listening on 127.0.0.1:8000”.
+- **About is live.** **About Phonix OS** was added to `Windows11StartMenu` with the version/update
+  card entry point. The dead `PhonixStartMenu` was left in place this round; it still has zero call
+  sites and should be deleted when the module registry lands.
+
+### Checks on the unit
+
+| Check | Result |
+|---|---|
+| Build | `:app:compileDebugKotlin` and `assembleDebug` succeeded; final APK 31,658,001 bytes |
+| Install | `adb install -r` succeeded; `versionCode 2`; device owner unchanged |
+| Phone Screen removed | Desktop has no Phone Screen shortcut or label; About now occupies its grid slot. No `Phone Screen` text in the live Start menu or desktop dump |
+| About entry | Start menu → search “about” → **About Phonix OS** → window opens. Scrolling inside the window shows the **Software Updates** card (“Manual Only”, repository row) |
+| AI labels | Window shows **Offline Knowledge Base** / “Rule-based notes - no language model is loaded” / “LOCAL NOTES”; no Qwen2.5, “Cyberdeck AI”, “Dual Mode” or “100% OFFLINE” text |
+| VS Code initial | Badge **Not listening on :8000**; status “Server not started” |
+| VS Code start | Tap **Start & Probe** → **Waiting for :8000...**; after 12 s → **Not listening on :8000** and “No listener ... CLI is missing or failed.” No green badge |
+| Crashes | `tools/deck-check.sh crashes`: no crash/ANR evidence for the package |
+| Final state | Desktop, Start menu closed, keyboard hidden; `1080x2280` override, 420 dpi, rotation 0/0; device owner intact |
+
+One test swipe intended to scroll the About window landed on the desktop and moved the Linux
+System shortcut. It was restored with **Personalize → Reset Shortcuts to Default Grid**; the final
+dump matches the pre-test default positions. This is a reminder that the About window is only
+~340 dp tall, so its content must be scrolled inside the window, not below it.
+
+### Evidence (gitignored `artifacts/deck/`)
+
+- `p0-desktop.xml` / `p0-final.xml`: desktop without Phone Screen, About shortcut in place.
+- `p0-start-about.xml`: filtered Start menu with the live About item.
+- `p0-about-open.xml`, `p0-about-updates.xml`: About window and the Software Updates card.
+- `p0-ai.xml`: new knowledge-base labels and welcome copy.
+- `p0-vscode.xml`, `p0-vscode-probing.xml`, `p0-vscode-failed.xml`: red badge, waiting state and
+  measured failure.
+
+### Not verified
+
+- The **success** path of the VS Code probe (a real CLI listening on 8000), Stop, and editor
+  rendering. The base Alpine image has no `code` binary; ROADMAP §2's CLI experiment is still the
+  prerequisite.
+- A real update check. About is reachable, but B8's wrong URL/404 and lexicographic compare remain.
+- DeX on a monitor, dock/undock and window geometry; no monitor was attached.
+- The renumbered six-step OOBE after removing the rescue walkthrough. The unit is past OOBE and a
+  reset is destructive; compile and UI inspection are the only checks so far.
+
+---
+
+## 11. Local AI and real Phone Screen — implemented and measured 2026-10-29
+
+This round replaced the two P0 stopgaps with working features. The APK is still
+`1.1 (versionCode 2)`; identify it by the **16:58:38** install time. It is 31,685,535 bytes
+(SHA-256 `a7516b6cef12cbbd80378d510ff031c2a04c9a3b8248c0f5e3bddba5c74a7674`) and was built from
+the working tree that is now committed and pushed on `main`.
+
+### Why Phone Screen came back
+
+The P0 removal was correct: the old window painted a fake phone. The owner needs a real view
+because the bench S10’s panel is shattered and entombed inside the mini-PC shell. The window is
+now a real capture, not a mock, and it is deliberately **read-only**. It does not inject touches;
+that would require a separate AccessibilityService opt-in and is not implemented.
+
+### Local AI: what is actually running
+
+- **Engine:** `engine/LocalAiEngine.kt`; process state in `PhonixViewModel`; UI in
+  `OfflineKnowledgeWindowContent`.
+- **Guest runtime:** Alpine community package **`llama-server`** (not `llama-cli`), launched as
+  `llama-server -m qwen2.5-1.5b-instruct-q4_k_m.gguf --host 127.0.0.1 --port 8081 -c 4096 -t 4`.
+- **Model:** Qwen2.5 1.5B Instruct Q4_K_M from
+  `bartowski/Qwen2.5-1.5B-Instruct-GGUF`; **986,048,768 bytes**; SHA-256
+  `1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370`.
+- **Storage:** guest path `/root/models/qwen2.5-1.5b-instruct-q4_k_m.gguf`, app-private under
+  `files/linux/alpine/root/models/`. The model is not in the APK.
+- **Ready gate:** `/health` must return 200. A launch command alone never sets READY.
+- **Stop:** kills the pid file; `/health` becomes unreachable and the badge returns to STOPPED.
+- **Fallback:** if the model is stopped, erroring or still setting up, the existing curated notes
+  answer with a visible “answer comes from the built-in notes” prefix.
+
+**Measured setup:** tapping **Set up local AI** installed `llama-server`, downloaded the model
+(391 of 940 MB after 25 s), verified the SHA-256, and reached `{"status":"ok"}` from
+`curl http://127.0.0.1:8081/health`. The on-device `sha256sum` matched the pinned hash.
+
+**Measured inference (S10, CPU, no cloud):**
+
+| Prompt | Prompt tokens / decode | Result |
+|---|---|---|
+| “water filtration” (first answer) | 421 prompt, 132 decoded | **9.7 tok/s**, prompt eval 42.18 tok/s, total 23.8 s |
+| “what is two plus two” | 169 prompt, 7 decoded | **17.2 tok/s**, answer “Two plus two is four.” |
+| “water filtration” (after safety prompt) | 484 prompt, 185 decoded | **8.2 tok/s**, prompt eval 40.08 tok/s, total 34.5 s; final answer recommended a one-minute boil |
+
+The first streamed answer exposed a parser bug: the role delta’s `"content": null` was converted
+by `JSONObject.optString` into the literal word `null`, so the answer began “nullFor water…”. The
+parser now treats `content: null` as empty. The next answer was clean, with no `null` prefix.
+
+The first water answer also conflated the notes’ one-minute boil with SODIS’s six hours. The system
+prompt now requires safety-critical topics to copy the supplied notes exactly and never combine
+steps. Re-running the same question produced a one-minute boil and no six-hour instruction. The
+model still invented an irrelevant sentence about a “safe, readable zone”, so it remains a
+fallback to the curated notes, not their replacement.
+
+### Phone Screen: what is actually running
+
+- `service/ScreenMirror.kt`: a `mediaProjection` foreground service plus process-wide frame state.
+- The UI uses `MediaProjectionManager.createScreenCaptureIntent()`; Android’s system consent dialog
+  is mandatory. The measured dialog was “Start recording or casting with Phonix OS?”.
+- Capture is **540×1140** at 300 ms intervals, drawn through the real `ImageReader` frame; no fake
+  clock, carrier, battery or touch label exists.
+- Measured: foreground notification id **4711**, `first captured frame 540x1140`, UI **LIVE**;
+  Stop drove the UI back to **OFF** and `dumpsys media_projection` returned `null`.
+- Closing the window also stops the service; a capture is never left running invisibly.
+
+**Hard limits, stated in the UI:** read-only; no tap/type injection; consent per session and lost on
+reboot; the default display is what gets captured. On the phone’s own panel the window necessarily
+contains itself. On DeX it should show the phone display, but that was not tested because no
+external monitor was attached.
+
+### Verification and device state
+
+- `:app:assembleDebug` succeeded; APK 31,685,535 bytes; `adb install -r` at **16:58:38** succeeded.
+- `:app:testDebugUnitTest` **passed** (4m27s online; final rerun 2m06s offline). The first
+  `--offline` attempt failed only because the test artifacts were not cached; that was not a code
+  failure.
+- No package crash or ANR records after the session (`logcat -b crash` empty for the package).
+- Final metrics restored: `1080x2280` override on `1440x3040`, physical density 420, rotation 0/0.
+  Device owner unchanged. The model server was stopped and the mirror was OFF at the end.
+- Not run: real DeX/monitor capture, touch injection, 24 h thermal soak, process-death recovery,
+  reboot re-consent, and a second model size. The 1.5B model’s first water answer conflated boiling
+  time with SODIS, so the UI must keep saying the curated notes are the safety reference.
+
+### Network debugging as the initial setup channel
+
+Network ADB is useful for provisioning, not for bypassing consent:
+
+```bash
+adb pair <phone-ip>:<pair-port>       # from Android’s Wireless debugging screen
+adb connect <phone-ip>:<debug-port>
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+# Accept the system capture dialog from a PC when the panel is unusable:
+adb shell uiautomator dump /sdcard/ui.xml
+adb shell input tap <x> <y>            # “Start now” in the consent dialog
+```
+
+A pre-downloaded GGUF can be pushed into the debug install with `run-as`; the app’s own download is
+faster on the bench network and verifies the hash itself. ADB cannot remove the MediaProjection
+consent requirement, and it cannot make the appliance self-provisioning.

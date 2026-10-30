@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PersonAdd
@@ -217,6 +218,12 @@ fun Windows11StartMenu(
                 Icons.Default.Code, Slate300
             ) {
                 viewModel.toggleWindow(WindowType.NOTEPAD)
+            },
+            StartMenuItem(
+                "app_about", "About Phonix OS", "Version, updates & device info",
+                Icons.Default.Info, PhonixCyan
+            ) {
+                viewModel.openWindow(WindowType.ABOUT)
             }
         )
     }

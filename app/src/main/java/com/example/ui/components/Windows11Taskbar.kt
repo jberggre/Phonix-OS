@@ -21,12 +21,13 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Widgets
@@ -128,8 +129,9 @@ fun Windows11Taskbar(
                 WindowType.NOTEPAD -> Icons.Default.Code
                 WindowType.PERSONALIZE -> Icons.Default.Palette
                 WindowType.PRIVACY -> Icons.Default.Security
-                WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
+                WindowType.ABOUT -> Icons.Default.Info
                 WindowType.VS_CODE -> Icons.Default.Code
+                WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
                 WindowType.AI_ASSISTANT -> Icons.Default.SmartToy
                 else -> Icons.Default.Computer
             }
@@ -142,8 +144,9 @@ fun Windows11Taskbar(
                 WindowType.SERVER_MANAGER -> Color(0xFFA855F7)
                 WindowType.BENCHMARK -> PhonixRed
                 WindowType.PRIVACY -> PhonixGreen
-                WindowType.PHONE_MIRROR -> PhonixAmber
+                WindowType.ABOUT -> PhonixCyan
                 WindowType.VS_CODE -> PhonixBlueLight
+                WindowType.PHONE_MIRROR -> Color(0xFF22D3EE)
                 WindowType.AI_ASSISTANT -> Color(0xFFA855F7)
                 else -> PhonixBlueLight
             }
