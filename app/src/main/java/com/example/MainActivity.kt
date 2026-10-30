@@ -181,7 +181,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                                 }
                             }
 
-                            // Sleek Auto-Hiding Top Notch (collapses to ~16dp, expands on hover/tap)
+                            // Sleek Auto-Hiding Top Notch (compact pill; tap/click to expand)
                             AutoHidingTopBar(
                                 isExpanded = uiState.isTopNotchExpanded,
                                 activeTab = uiState.activeTab,

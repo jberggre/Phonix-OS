@@ -54,9 +54,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.PhonixAmber
@@ -90,6 +92,10 @@ fun AutoHidingTopBar(
     onRunDebloat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // At high densities the full pill is nearly a third of the desktop wide and covers the
+    // title bar of a full-height window. The compact form keeps the notch out of the way while
+    // leaving network setup one tap away.
+    val compactPill = LocalConfiguration.current.screenWidthDp < 600
     if (isExpanded) {
         // 1. FULL EXPANDED TELEMETRY & HARDWARE CONTROL BAR
         Surface(
@@ -116,13 +122,15 @@ fun AutoHidingTopBar(
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
-                // Top Identity & Quick Actions Row
+                // Identity row. The collapse control stays pinned here instead of sitting at
+                // the end of the action row: at 640 dpi the one-line header was wider than the
+                // desktop, so the only way to close the bar was pushed off-screen.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
@@ -136,7 +144,7 @@ fun AutoHidingTopBar(
                             Text("P", color = Color.White, fontWeight = FontWeight.Black, fontSize = 15.sp)
                         }
 
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Phonix", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Spacer(Modifier.width(4.dp))
@@ -145,83 +153,92 @@ fun AutoHidingTopBar(
                             Text(
                                 "Recycled Mini PC Shell • S8/S9/S10 Motherboard",
                                 color = Slate400,
-                                fontSize = 10.sp
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
-                    // Action Controls
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    IconButton(
+                        onClick = { onToggleExpand(false) },
+                        modifier = Modifier.size(28.dp).testTag("top_bar_collapse_btn")
                     ) {
-                        // Debloat Button
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { onRunDebloat() }
-                                .testTag("top_bar_debloat_btn"),
-                            color = PhonixBlue.copy(alpha = 0.2f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, PhonixBlue.copy(alpha = 0.5f))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(Icons.Default.Security, contentDescription = null, tint = PhonixBlueLight, modifier = Modifier.size(12.dp))
-                                Text("Debloat Junk", color = PhonixBlueLight, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Hide", tint = Slate400, modifier = Modifier.size(18.dp))
+                    }
+                }
 
-                        // Container Power Toggle
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { onTogglePower() }
-                                .testTag("top_bar_power_btn"),
-                            color = if (containerStatus == ContainerStatus.RUNNING) PhonixGreen.copy(alpha = 0.15f) else PhonixRed.copy(alpha = 0.15f),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (containerStatus == ContainerStatus.RUNNING) PhonixGreen else PhonixRed
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    if (containerStatus == ContainerStatus.RUNNING) Icons.Default.PowerSettingsNew else Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = if (containerStatus == ContainerStatus.RUNNING) PhonixGreen else PhonixRed,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Text(
-                                    if (containerStatus == ContainerStatus.RUNNING) "RUNNING" else "STOPPED",
-                                    color = if (containerStatus == ContainerStatus.RUNNING) PhonixGreen else PhonixRed,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                Spacer(Modifier.height(6.dp))
 
-                        // Restart Button
-                        IconButton(
-                            onClick = onRestart,
-                            modifier = Modifier.size(28.dp).testTag("top_bar_restart_btn")
+                // Action Controls. These labels are wider than a high-density desktop, so
+                // scroll them instead of clipping the row; the pinned collapse button above
+                // remains reachable at every width.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Debloat Button
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onRunDebloat() }
+                            .testTag("top_bar_debloat_btn"),
+                        color = PhonixBlue.copy(alpha = 0.2f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, PhonixBlue.copy(alpha = 0.5f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = Slate400, modifier = Modifier.size(16.dp))
-                        }
-
-                        // Collapse Button (Retracts up)
-                        IconButton(
-                            onClick = { onToggleExpand(false) },
-                            modifier = Modifier.size(28.dp).testTag("top_bar_collapse_btn")
-                        ) {
-                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Hide", tint = Slate400, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Security, contentDescription = null, tint = PhonixBlueLight, modifier = Modifier.size(12.dp))
+                            Text("Debloat Junk", color = PhonixBlueLight, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
+
+                    // Container Power Toggle
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onTogglePower() }
+                            .testTag("top_bar_power_btn"),
+                        color = if (containerStatus == ContainerStatus.RUNNING) PhonixGreen.copy(alpha = 0.15f) else PhonixRed.copy(alpha = 0.15f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (containerStatus == ContainerStatus.RUNNING) PhonixGreen else PhonixRed
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                if (containerStatus == ContainerStatus.RUNNING) Icons.Default.PowerSettingsNew else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = if (containerStatus == ContainerStatus.RUNNING) PhonixGreen else PhonixRed,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                if (containerStatus == ContainerStatus.RUNNING) "RUNNING" else "STOPPED",
+                                color = if (containerStatus == ContainerStatus.RUNNING) PhonixGreen else PhonixRed,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Restart Button
+                    IconButton(
+                        onClick = onRestart,
+                        modifier = Modifier.size(28.dp).testTag("top_bar_restart_btn")
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = Slate400, modifier = Modifier.size(16.dp))
+                    }
+
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -287,16 +304,9 @@ fun AutoHidingTopBar(
                 .padding(top = 2.dp)
                 .wrapContentSize()
                 .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            if (event.type == PointerEventType.Enter) {
-                                onToggleExpand(true)
-                            }
-                        }
-                    }
-                }
+                // Expand on a tap, not on pointer entry. On touch, Enter fires as soon as a
+                // finger goes down on the pill, so a title-bar drag that crossed the notch
+                // opened the bar and was then swallowed by it.
                 .clickable { onToggleExpand(true) }
                 .testTag("top_notch_trigger"),
             color = Slate900.copy(alpha = 0.90f),
@@ -304,7 +314,7 @@ fun AutoHidingTopBar(
             shadowElevation = 8.dp
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 3.dp),
+                modifier = Modifier.padding(horizontal = if (compactPill) 10.dp else 14.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -317,47 +327,66 @@ fun AutoHidingTopBar(
                 )
 
                 Text(
-                    text = "Phonix Mini PC",
+                    text = if (compactPill) "Phonix" else "Phonix Mini PC",
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
                 )
 
-                Text(
-                    text = if (isBatteryRemoved) "AC ⚡" else "BATTERY",
-                    color = if (isBatteryRemoved) PhonixAmber else PhonixGreen,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
-                )
+                if (!compactPill) {
+                    Text(
+                        text = if (isBatteryRemoved) "AC ⚡" else "BATTERY",
+                        color = if (isBatteryRemoved) PhonixAmber else PhonixGreen,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
 
-                // Always reachable with the mouse: when a unit loses its network, the fix
-                // must not depend on a phone screen that DeX has switched off.
-                Surface(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable { onOpenNetwork() }
-                        .testTag("network_chip"),
-                    color = if (isOnline) PhonixGreen.copy(alpha = 0.15f) else PhonixRed.copy(alpha = 0.22f)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    // Always reachable with the mouse: when a unit loses its network, the fix
+                    // must not depend on a phone screen that DeX has switched off.
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { onOpenNetwork() }
+                            .testTag("network_chip"),
+                        color = if (isOnline) PhonixGreen.copy(alpha = 0.15f) else PhonixRed.copy(alpha = 0.22f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isOnline) Icons.Default.Wifi else Icons.Default.WifiOff,
+                                contentDescription = null,
+                                tint = if (isOnline) PhonixGreen else PhonixRed,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Text(
+                                text = networkLabel,
+                                color = if (isOnline) PhonixGreen else PhonixRed,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                } else {
+                    // Same action, without the long SSID label that made the notch wide.
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { onOpenNetwork() }
+                            .testTag("network_chip"),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (isOnline) Icons.Default.Wifi else Icons.Default.WifiOff,
-                            contentDescription = null,
+                            contentDescription = "Network",
                             tint = if (isOnline) PhonixGreen else PhonixRed,
-                            modifier = Modifier.size(10.dp)
-                        )
-                        Text(
-                            text = networkLabel,
-                            color = if (isOnline) PhonixGreen else PhonixRed,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }

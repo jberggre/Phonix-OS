@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -98,6 +101,11 @@ fun Windows11Taskbar(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // The brand block and fixed tray leave too little room for the app strip on a phone or a
+    // 640 dpi desktop. Compact mode drops the redundant brand and scrolls the apps instead of
+    // clipping them; the wide desktop keeps the centered Windows 11 layout untouched.
+    val compactTaskbar = LocalConfiguration.current.screenWidthDp < 600
+    val taskbarAppsScroll = rememberScrollState()
     var currentTime by remember { mutableStateOf("") }
     var currentDate by remember { mutableStateOf("") }
 
@@ -195,27 +203,29 @@ fun Windows11Taskbar(
                 .fillMaxHeight()
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = if (compactTaskbar) Arrangement.Start else Arrangement.SpaceBetween
         ) {
-            // Left Spacer to balance layout if needed
-            Box(modifier = Modifier.width(120.dp), contentAlignment = Alignment.CenterStart) {
-                // Mini PC Brand / Status
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(PhonixGreen)
-                    )
-                    Text(
-                        text = "Phonix OS",
-                        color = Slate400,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+            if (!compactTaskbar) {
+                // Left Spacer to balance layout if needed
+                Box(modifier = Modifier.width(120.dp), contentAlignment = Alignment.CenterStart) {
+                    // Mini PC Brand / Status
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(PhonixGreen)
+                        )
+                        Text(
+                            text = "Phonix OS",
+                            color = Slate400,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
@@ -223,7 +233,12 @@ fun Windows11Taskbar(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.weight(1f, fill = false)
+                modifier = Modifier
+                    .weight(1f, fill = compactTaskbar)
+                    .then(
+                        if (compactTaskbar) Modifier.horizontalScroll(taskbarAppsScroll)
+                        else Modifier
+                    )
             ) {
                 // 1. Windows 11 Start Button (Phonix Flame Emblem)
                 Box(
