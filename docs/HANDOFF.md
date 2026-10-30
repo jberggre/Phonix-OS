@@ -19,20 +19,30 @@ for the research and sources, and [PROVISIONING.md](PROVISIONING.md) before touc
   the window's own width/height, so the first resize recomposed and cancelled the drag; and the
   window bounds included the 50 dp taskbar, so a full-height window covered the bar at 640 dpi.
   The work area now excludes the bar and the grip stays above it.
-- **Open host-chrome issue:** at 640 dpi the expanded `AutoHidingTopBar` overflows, hiding its
-  collapse button. Its collapsed hit area also overlaps the top of a full-height window's title
-  bar, so title drags near the top are captured by the bar. That is outside `WindowGeometry`; a
-  touch-outside dismissal or a scrollable action row is still needed.
-- Verification: `assembleDebug` + `testDebugUnitTest` green, **38 tests, 0 failures**. The APK was
-  installed over the device-owner build with the shared debug keystore. The S10 was restored to
-  `1080x2280`/420 dpi, rotation 0, accelerometer and proximity on; the Linux guest was stopped and
-  no screen mirror was started.
+- **High-density host chrome fixed in `ce94f4b`:** the expanded bar put its identity and actions
+  on one `SpaceBetween` row, so at 640 dpi the collapse control was laid out past the right edge,
+  and the collapsed pill was 270 dp wide and covered most of a full-height window's title bar.
+  Collapse is now pinned in the header, the subtitle ellipsizes, and the action row scrolls.
+  Below 600 dp the collapsed notch is a ~90 dp `Phonix` pill with a compact network button and
+  expands on tap/click rather than pointer entry. Measured at 1920x1080/640: `Hide` at
+  `[1772,301][1844,373]`, Debloat/STOPPED at y=483..589, and a title drag from `(1500,280)` to
+  `(1100,280)` moved the Terminal window without reopening the notch.
+- **Taskbar compact mode:** below 600 dp the redundant `Phonix OS` brand block is hidden and the
+  app strip is horizontally scrollable. At 1080x2280/420, a swipe from x=550 to x=120 exposed the
+  Terminal and Settings entries that were previously clipped. The high-density Start menu still
+  clips its pinned row and all-apps list; that is the remaining host-chrome issue.
+- Verification: `assembleDebug` + `testDebugUnitTest` green, **38 tests, 0 failures**. The APK
+  (29,682,604 bytes) was installed over the device-owner build with the shared debug keystore.
+  The S10 was restored to `1080x2280`/420 dpi, rotation 0, accelerometer on; the device owner is
+  unchanged, the Linux guest was stopped, the crash buffer has no package entry, and no screen
+  mirror was started.
 
 ## Where the tree stands
 
-- **Current worktree:** committed and pushed at `13d4f9b` (`versionCode 3`, `versionName 1.2`). It
-  builds and tests green: `assembleDebug` plus `testDebugUnitTest` pass with **38 tests**, and it
-  was installed in place over the device-owner build on the S10 under the shared debug keystore.
+- **Current worktree:** code head `ce94f4b` (`versionCode 3`, `versionName 1.2`); this handoff
+  commit follows it. It builds and tests green: `assembleDebug` plus `testDebugUnitTest` pass with
+  **38 tests**, and it was installed in place over the device-owner build on the S10 under the
+  shared debug keystore.
 - Changes add fold posture and connected-display reporting, adaptive shortcut/window geometry,
   saved opt-in device behavior, an OOBE compatibility/setup step, and focused classifier/geometry/
   preference/version tests. `git diff --check` passes; this is only a whitespace check.
