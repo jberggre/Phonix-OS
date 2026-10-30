@@ -1,5 +1,9 @@
 # Phonix OS
 
+> **Worktree note (2026-10-30):** an uncommitted 1.2 compatibility candidate is being prepared.
+> It has not been built or verified on a device; do not treat it as the current installed APK.
+> The existing bench record below remains the measured 1.1 state.
+
 Phonix is an Android app that turns a phone into a desktop mini-PC. It is a Kotlin/Jetpack
 Compose shell with its own window manager, a proot Alpine guest, and Samsung DeX / connected-display
 support. The target is recycled or screenless phones in a cyberdeck-style enclosure.

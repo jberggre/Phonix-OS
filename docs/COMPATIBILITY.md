@@ -172,6 +172,93 @@ show the **default display**; it does not extend the desktop or create a second 
   `adb shell input tap` (use `uiautomator dump` for the current coordinates). That is a bench
   workaround, not a shipping provisioning mechanism.
 
+## 1.2 compatibility work and Pixel 9 Pro Fold test matrix
+
+The current worktree contains an **unbuilt 1.2 candidate**. It adds WindowManager fold-posture
+reporting, width-responsive shortcut placement, window normalization/resize behavior, and explicit
+opt-in gates for host-device changes. These are implementation notes, not verification claims:
+no APK has been built from this candidate and no Pixel 9 Pro Fold test has been run.
+
+When a build is available, use this non-destructive phone checklist:
+
+1. Install/launch normally and choose **Daily driver**; verify the wallpaper, Linux guest,
+   background service, boot startup and display watcher stay off unless individually enabled.
+   Do not enroll device owner or run `provision.sh`/`dpm set-device-owner`.
+2. Open Phonix on the cover screen, unfold to the inner display, rotate, fold to tabletop, and
+   return to the cover. Confirm the report changes from phone/large window to unfolded/half-opened
+   when Android reports that posture, and that shortcut columns reflow without clipping.
+3. Open, drag, resize and maximize a desktop window on both cover and inner displays. Confirm its
+   title controls remain reachable after each posture/rotation/window-size change.
+4. Re-run the same checks with **Cyberdeck** selected only if desired. Save each choice explicitly;
+   confirm immersive bars and display watching apply only after save, and switch back to Daily
+   driver to confirm the watcher stops and phone-screen bars return.
+5. With a compatible USB-C DP Alt Mode adapter and display, record Android's actual prompt and
+   select **Desktop** or **Mirror** as offered. Verify whether the external screen is a separate
+   desktop or a mirror; Phonix's attached-display report cannot prove the USB-C link mode.
+   Disconnect/reconnect once and record whether window placement and input recover.
+6. Record Android version/build, Phonix versionCode, cover/inner widths, observed posture, chosen
+   external-display mode, keyboard/mouse results, crashes and battery/thermal behavior. Do not use
+   `wm size`, `wm density`, factory reset, device-owner commands or destructive provisioning on
+   the personal Pixel during this test.
+
+**The candidate now builds: versionCode 3 / versionName 1.2, and it was installed in place on the
+S10 bench unit (Android 12, API 31) with the unit tests green (21 tests).** That does not advance
+the Pixel rows below. An emulator can exercise WindowManager fold features, but it cannot establish the
+Pixel's actual USB-C route or desktop-vs-mirror behavior, so the physical Pixel matrix stays
+pending.
+
+### Pre-flight readings, Pixel 9 Pro Fold (read-only)
+
+Recorded over ADB before any install on the personal Pixel. Nothing on the phone was changed.
+
+| Reading | Value |
+|---|---|
+| Model / codename | Pixel 9 Pro Fold (`comet`), manufacturer `Google` |
+| OS | Android 17, API 37; the app targets 36 |
+| Device state | `cmd device_state state` returns `OPENED`; states include CLOSED, HALF_OPENED, OPENED, REAR_DISPLAY_STATE, CONCURRENT_INNER_DEFAULT, REAR_DISPLAY_OUTER_DEFAULT |
+| Inner panel | display 0, "Inner Display", 2076x2152 px, 390 dpi, type INTERNAL, ON |
+| Cover panel | display 3, "Outer Display", 1080x2424 px, type INTERNAL, OFF while open |
+| Unfolded logical size | 2152x2076 px -> about 532x552 dp, under the 600 dp large-window threshold |
+| Desktop on external displays | `force_desktop_mode_on_external_displays=0`, so a monitor mirrors until this is enabled |
+| Freeform | `android.software.freeform_window_management` present; `enable_freeform_support` unset |
+| Hinge sensor | `android.hardware.sensor.hinge_angle` present |
+| Platform Linux | `com.android.virtualization.terminal` and `android.software.virtualization_framework` present |
+
+Two consequences for the test:
+
+1. **A second panel is not a monitor.** The cover panel is an ordinary display id. A launch path
+   that accepted "any non-default display that is ON" therefore reported a monitor and would open
+   the desktop on the cover screen while the phone was folded. The candidate now requires
+   `FLAG_PRESENTATION`, which neither pixel panel carries, and only real HDMI/DP outputs do. That
+   is the same flag `DisplayManager` filters its presentation category on.
+2. **Unfolded is 532 dp wide, not "large".** Posture, not width, has to drive the foldable layout:
+   if `WindowInfoTracker` fails to report a `FoldingFeature`, the classifier falls back to PHONE
+   rather than LARGE_WINDOW on this device. Watch for that specifically in step 2 of the checklist.
+
+### DeX capture, S10 with a real monitor
+
+Measured with the bench S10 docked to an external display, app launched with
+`am start --display 2`. This is a capture pass, not the full matrix.
+
+| Reading | Value |
+|---|---|
+| HDMI output | "HDMI Screen", 1920x1080, type EXTERNAL, **FLAG_PRESENTATION**, EDID `ES-G34C5` |
+| DeX workspace | display 2, "Desktop", virtual, 3440x1440 at 160 dpi, **no FLAG_PRESENTATION** |
+| App window | freeform task at 1920x1080 on the workspace, with DeX's own caption bar (unchanged) |
+| Phone panel | display 0 keeps its own Android UI while DeX runs on the monitor |
+
+That last row is the mini-PC split this product depends on, and it also confirms why the
+`FLAG_PRESENTATION` discriminator added above is the right one: the physical output carries the
+flag, the virtual workspace does not, and `workspaceDisplay()` still finds the workspace through
+Samsung's display category rather than through that flag.
+
+Verified in that configuration: the desktop icon set (File Explorer, Terminal, Browser, Settings),
+two-line icon captions, taskbar pins including a real App Store glyph, and the OS card / Vitals
+widgets in the top right. Captured with `screencap -d 2`.
+
+Still owed on DeX: a dock/undock cycle with the watcher consent enabled, the capability card in the
+wizard, the Phone Screen consent flow, and the 24-hour soak.
+
 ## What we have not verified
 
 - Motorola's live compatibility table could not be fetched directly during research; the model

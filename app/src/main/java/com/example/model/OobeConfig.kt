@@ -39,6 +39,45 @@ enum class MiniPcProfile(val title: String, val subtitle: String, val descriptio
     )
 }
 
+/**
+ * Who is actually setting this up. The answer is not cosmetic: it picks the starting use mode,
+ * the workload profile and which bloat categories are pre-selected, all of which stay editable
+ * in the later steps.
+ */
+enum class SetupPersona(
+    val title: String,
+    val subtitle: String,
+    val outcome: String,
+    val profile: MiniPcProfile,
+    val applianceMode: Boolean,
+    val trimHostPackages: Boolean
+) {
+    DAILY_PHONE(
+        title = "This is my everyday phone",
+        subtitle = "Daily driver",
+        outcome = "Nothing on Android changes until you open Phonix: no wallpaper swap, no background service, no boot start. Only analytics and carrier-tracking packages are pre-ticked.",
+        profile = MiniPcProfile.EVERYDAY_DESKTOP,
+        applianceMode = false,
+        trimHostPackages = false
+    ),
+    CYBERDECK_BUILD(
+        title = "I'm building a cyberdeck",
+        subtitle = "Dock, monitor, Linux",
+        outcome = "Phonix becomes the machine: desktop appears on the monitor when it is plugged in, the Linux guest is ready to open, and the build gets the aggressive trim list. Every item stays untickable below.",
+        profile = MiniPcProfile.CYBERDECK_DEV,
+        applianceMode = true,
+        trimHostPackages = true
+    ),
+    MINI_PC_OWNER(
+        title = "I'm setting up a mini-PC",
+        subtitle = "Screenless or reclaimed board",
+        outcome = "This board is now a computer: it starts the desktop by itself, needs no phone UI, and the trim list removes everything the phone shell was only keeping alive.",
+        profile = MiniPcProfile.HOMELAB_SERVER,
+        applianceMode = true,
+        trimHostPackages = true
+    )
+}
+
 enum class AppCategory(
     val id: String,
     val title: String,
@@ -114,14 +153,14 @@ enum class AppCategory(
 }
 
 enum class DesktopThemePreset(val title: String, val description: String) {
-    WINDOWS_11_DARK("Windows 11 Dark Fluent", "Deep slate acrylic panels with electric blue accents"),
+    FLUENT_DARK("Fluent Dark", "Deep slate panels with electric blue accents"),
     CYBER_PHOENIX("Cyber Phoenix Neon", "Vibrant amber-orange glow inspired by reclaimed silicon"),
     CLEAN_SLATE("Clean Slate Minimal", "Pure titanium grayscale palette for focused productivity"),
-    OLED_OBSIDIAN("AMOLED Obsidian", "Pure black background for maximum contrast and zero backlight bleed")
+    OLED_OBSIDIAN("AMOLED Obsidian", "Pure black background: an OLED panel draws no light for those pixels")
 }
 
 enum class PreferredBrowser(val title: String, val subtitle: String, val packageName: String?) {
-    PHONIX_BROWSER("Phonix Browser", "Private desktop WebView, zero tracking, lightweight", null),
+    PHONIX_BROWSER("Phonix Browser", "Desktop WebView window with no account and no telemetry of its own. The sites you open still see you", null),
     FIREFOX("Mozilla Firefox", "Full extensions, tracking protection & open web engine", "org.mozilla.firefox"),
     CHROMIUM("Chromium", "Open-source Chromium engine for web apps", "org.chromium.chrome")
 }
@@ -129,18 +168,19 @@ enum class PreferredBrowser(val title: String, val subtitle: String, val package
 data class OobeSetupConfig(
     val deviceName: String = "Phonix-MiniPC",
     val profile: MiniPcProfile = MiniPcProfile.EVERYDAY_DESKTOP,
+    // Media gallery, distro store and hardware monitor are deliberately absent: those surfaces
+    // are the top-right OS card and Vitals widgets, so a desktop icon for them was a duplicate.
     val selectedCategories: Set<AppCategory> = setOf(
         AppCategory.WEB_BROWSER,
         AppCategory.FILE_MANAGER,
         AppCategory.APP_STORE,
-        AppCategory.MEDIA_GALLERY,
-        AppCategory.LINUX_TERMINAL,
-        AppCategory.HARDWARE_MONITOR
+        AppCategory.LINUX_TERMINAL
     ),
-    val enableLinuxDesktop: Boolean = true,
+    val enableLinuxDesktop: Boolean = false,
     val preferredBrowser: PreferredBrowser = PreferredBrowser.PHONIX_BROWSER,
     val debloatChrome: Boolean = false,
     val enableAggressiveDebloat: Boolean = true,
-    val themePreset: DesktopThemePreset = DesktopThemePreset.WINDOWS_11_DARK,
-    val taskbarCentered: Boolean = true
+    val themePreset: DesktopThemePreset = DesktopThemePreset.FLUENT_DARK,
+    val taskbarCentered: Boolean = true,
+    val deviceChanges: DeviceChangeChoices = DeviceChangeChoices()
 )

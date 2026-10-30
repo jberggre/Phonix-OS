@@ -108,6 +108,7 @@ import com.example.ui.theme.Slate950
 import com.example.util.AppLaunchHelper
 import com.example.viewmodel.PhonixUiState
 import com.example.viewmodel.PhonixViewModel
+import com.example.model.DeviceUseMode
 
 private data class StartMenuItem(
     val id: String,
@@ -202,7 +203,7 @@ fun Windows11StartMenu(
                 AppLaunchHelper.launchSettings(context)
             },
             StartMenuItem(
-                "app_debloat", "Android Debloater", "Remove bloat you do not need",
+                "app_debloat", "Android Debloater", "Copy reviewed adb commands (opt-in)",
                 Icons.Default.Security, PhonixBlueLight
             ) {
                 viewModel.runScreenlessMiniPcDebloat()
@@ -218,6 +219,12 @@ fun Windows11StartMenu(
                 Icons.Default.Code, Slate300
             ) {
                 viewModel.toggleWindow(WindowType.NOTEPAD)
+            },
+            StartMenuItem(
+                "app_device_setup", "Device & Display Setup", "Daily driver, mini-PC choices and compatibility check",
+                Icons.Default.Settings, PhonixCyan
+            ) {
+                viewModel.openInstallationWizard()
             },
             StartMenuItem(
                 "app_about", "About Phonix OS", "Version, updates & device info",

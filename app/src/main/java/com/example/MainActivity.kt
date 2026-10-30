@@ -2,6 +2,9 @@ package com.example
 
 import android.os.Build
 import android.os.Bundle
+import android.hardware.display.DisplayManager
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -24,6 +27,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.window.layout.FoldingFeature
+import androidx.window.layout.WindowInfoTracker
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
+import com.example.model.FoldPosture
 import com.example.ui.components.CoolingGovernorScreen
 import com.example.ui.components.DistroHubScreen
 import com.example.ui.components.GamingHubScreen
@@ -40,16 +51,37 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.service.DesktopAutoLaunchService
 import com.example.util.DesktopAutoLaunch
 import com.example.util.WallpaperProvisioner
+import com.example.util.DeviceSetupPreferences
 import com.example.ui.theme.Slate950
 import com.example.viewmodel.AppNavTab
 import com.example.viewmodel.PhonixViewModel
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
     private val viewModel: PhonixViewModel by viewModels()
+    private val displayManager by lazy { getSystemService(DISPLAY_SERVICE) as DisplayManager }
+    private val displayHandler by lazy { Handler(Looper.getMainLooper()) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        displayManager.registerDisplayListener(this, displayHandler)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                WindowInfoTracker.getOrCreate(this@MainActivity)
+                    .windowLayoutInfo(this@MainActivity)
+                    .collect { layoutInfo ->
+                        val foldingFeature = layoutInfo.displayFeatures.filterIsInstance<FoldingFeature>().firstOrNull()
+                        val posture = when (foldingFeature?.state) {
+                            FoldingFeature.State.FLAT -> FoldPosture.FLAT
+                            FoldingFeature.State.HALF_OPENED -> FoldPosture.HALF_OPENED
+                            else -> FoldPosture.UNKNOWN
+                        }
+                        val widthDp = resources.configuration.screenWidthDp
+                        viewModel.updateFoldPosture(posture, widthDp)
+                    }
+            }
+        }
+
         // No forced orientation: on DeX an orientation-locked activity is confined to a
         // phone-shaped window, which is exactly what we are trying to escape. The desktop
         // adapts to whatever window the window manager gives us.
@@ -61,25 +93,31 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
 
-        // Paint the Phonix wallpaper behind everything Samsung draws, so the phone home,
-        // lock screen and (where the platform mirrors it) DeX match the desktop.
-        // Off the main thread: decoding the wallpaper is expensive on a cold start.
-        Thread { WallpaperProvisioner.applyOnce(applicationContext) }.start()
+        // System wallpaper is an explicit setup choice. Daily-driver installs leave the
+        // user's home/lock-screen wallpaper untouched.
+        if (DeviceSetupPreferences.shouldApplySystemWallpaper(applicationContext)) {
+            Thread { WallpaperProvisioner.applyOnce(applicationContext) }.start()
+        }
 
         try {
-            // Configure Immersive Desktop Mode (hides system navigation gesture bar & status bar for full PC feel)
-            setImmersiveDesktopMode(true)
+            setImmersiveDesktopMode(isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this))
         } catch (_: Exception) {
         }
 
-        // The desktop is a window onto a monitor, so make sure something is always watching
-        // for one: BootReceiver starts this at power-on, this covers a manual launch.
-        DesktopAutoLaunchService.start(applicationContext)
+        // External display watching is an opt-in appliance behavior, not a default for
+        // ordinary phones. An explicit external-display choice starts the watcher.
+        if (DeviceSetupPreferences.shouldWatchExternalDisplays(applicationContext)) {
+            DesktopAutoLaunchService.start(applicationContext)
+        }
 
         setContent {
             MyApplicationTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val snackbarHostState = remember { SnackbarHostState() }
+
+                LaunchedEffect(uiState.isOobeCompleted) {
+                    if (viewModel.shouldPromptDeviceSetup()) viewModel.openInstallationWizard()
+                }
 
                 LaunchedEffect(uiState.notificationMessage) {
                     uiState.notificationMessage?.let { msg ->
@@ -143,7 +181,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            // Sleek Auto-Hiding Top Notch (collapses to ~16dp, expands on hover/tap)
+                            // Sleek Auto-Hiding Top Notch (compact pill; tap/click to expand)
                             AutoHidingTopBar(
                                 isExpanded = uiState.isTopNotchExpanded,
                                 activeTab = uiState.activeTab,
@@ -191,7 +229,8 @@ class MainActivity : ComponentActivity() {
                         InstallationWizardDialog(
                             uiState = uiState,
                             viewModel = viewModel,
-                            onDismiss = { viewModel.closeInstallationWizard() }
+                            onDismiss = { viewModel.closeInstallationWizard() },
+                            onDeviceChoicesSaved = { refreshSavedDeviceDisplayPolicy() }
                         )
                     }
                 }
@@ -201,10 +240,54 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshCapabilitySnapshot()
+        setImmersiveDesktopMode(isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this))
         moveToDesktopDisplayIfNeeded()
         // Returning from the Play Store or Android's Wi-Fi settings must change what the UI
         // shows, so re-read the package list rather than trusting where the customer was.
         viewModel.loadInstalledApps(this)
+    }
+
+    override fun onDisplayAdded(displayId: Int) {
+        refreshCapabilitySnapshot()
+        setImmersiveDesktopMode(isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this))
+    }
+
+    override fun onDisplayChanged(displayId: Int) {
+        refreshCapabilitySnapshot()
+        setImmersiveDesktopMode(isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this))
+    }
+
+    override fun onDisplayRemoved(displayId: Int) {
+        refreshCapabilitySnapshot()
+        setImmersiveDesktopMode(isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this))
+    }
+
+    override fun onDestroy() {
+        displayManager.unregisterDisplayListener(this)
+        super.onDestroy()
+    }
+
+    private fun refreshCapabilitySnapshot() {
+        viewModel.refreshDeviceCapabilityReport(this, resources.configuration.screenWidthDp)
+    }
+
+    fun refreshSavedDeviceDisplayPolicy() {
+        refreshCapabilitySnapshot()
+        setImmersiveDesktopMode(
+            isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this)
+        )
+    }
+
+    private fun isOnExternalDisplay(): Boolean = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display?.displayId?.let { it != android.view.Display.DEFAULT_DISPLAY } == true
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.displayId != android.view.Display.DEFAULT_DISPLAY
+        }
+    } catch (_: Exception) {
+        false
     }
 
     /**
@@ -217,6 +300,7 @@ class MainActivity : ComponentActivity() {
      * this one. Runs at most once per process.
      */
     private fun moveToDesktopDisplayIfNeeded() {
+        if (!DeviceSetupPreferences.shouldWatchExternalDisplays(this)) return
         if (relocateAttempted) return
         // Only ever move onto a real workspace. Moving onto the bare HDMI output would put the
         // window under DeX's presentation and provoke DeX's cross-display restart dialog.

@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.util.DesktopAutoLaunch
+import com.example.util.DeviceSetupPreferences
 
 /**
  * Watches for the HDMI/DeX display and opens the Phonix desktop on it.
@@ -40,6 +41,10 @@ class DesktopAutoLaunchService : Service(), DisplayManager.DisplayListener {
 
     override fun onCreate() {
         super.onCreate()
+        if (!DeviceSetupPreferences.shouldWatchExternalDisplays(this)) {
+            stopSelf()
+            return
+        }
         startAsForeground()
         displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         displayManager.registerDisplayListener(this, handler)
@@ -50,6 +55,10 @@ class DesktopAutoLaunchService : Service(), DisplayManager.DisplayListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!DeviceSetupPreferences.shouldWatchExternalDisplays(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         handler.removeCallbacks(launchRunnable)
         handler.postDelayed(launchRunnable, INITIAL_LAUNCH_DELAY_MS)
         return START_STICKY
@@ -109,7 +118,7 @@ class DesktopAutoLaunchService : Service(), DisplayManager.DisplayListener {
             // running on another display" dialog that needs a mouse. So on Samsung, wait for the
             // workspace however long it takes. Only a phone that genuinely mirrors to HDMI (no
             // DeX) falls back, and only after the grace period.
-            if (IS_SAMSUNG || waitedMs < WORKSPACE_GRACE_MS) {
+            if (DeviceSetupPreferences.shouldWaitForWorkspace(this) || waitedMs < WORKSPACE_GRACE_MS) {
                 Log.i(
                     TAG,
                     "monitor present but no workspace yet (${waitedMs}ms), waiting; visible: " +
@@ -171,9 +180,9 @@ class DesktopAutoLaunchService : Service(), DisplayManager.DisplayListener {
         /** Grace period before a non-Samsung phone falls back to a plain mirrored output. */
         private const val WORKSPACE_GRACE_MS = 15_000L
 
-        private val IS_SAMSUNG = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
 
         fun start(context: Context) {
+            if (!DeviceSetupPreferences.shouldWatchExternalDisplays(context)) return
             val intent = Intent(context, DesktopAutoLaunchService::class.java)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

@@ -211,6 +211,10 @@ fun PrivacyHubWindowContent(viewModel: PhonixViewModel) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
+                            if (!com.example.util.DeviceSetupPreferences.mayApplySystemPrivateDns(context)) {
+                                notice = Notice("System-wide Private DNS changes are disabled. Enable them in Device & Display Setup first.", false)
+                                return@Button
+                            }
                             val applied = tryApplyPrivateDns(context, effectiveHost)
                             currentDns = readPrivateDns(context)
                             notice = if (applied) {
@@ -409,7 +413,7 @@ fun PrivacyHubWindowContent(viewModel: PhonixViewModel) {
                     )
                 }
 
-                if (deviceOwner) {
+                if (deviceOwner && com.example.util.DeviceSetupPreferences.choices(context).allowFactoryReset) {
                     Button(
                         onClick = {
                             wipeConfirmText = ""
@@ -429,21 +433,8 @@ fun PrivacyHubWindowContent(viewModel: PhonixViewModel) {
                         lineHeight = 14.sp
                     )
                 } else {
-                    Button(
-                        onClick = {
-                            if (!openSystemReset(context)) {
-                                notice = Notice("No reset screen found on this device.", false)
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Slate800),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text("Open Android reset", fontSize = 11.sp)
-                    }
                     Text(
-                        "Android only lets the device owner wipe silently. On a normal phone this " +
-                            "opens Samsung's own factory reset screen, where the system still asks you " +
-                            "to confirm.",
+                        "Factory-reset controls are disabled in Device & Display Setup. Enable them only for a dedicated appliance; Android will still require confirmation for a normal user.",
                         color = Slate400,
                         fontSize = 10.sp,
                         lineHeight = 14.sp
@@ -654,6 +645,7 @@ private fun readPrivateDns(context: Context): String {
  * screen with the hostname on the clipboard.
  */
 private fun tryApplyPrivateDns(context: Context, host: String): Boolean {
+    if (!com.example.util.DeviceSetupPreferences.mayApplySystemPrivateDns(context)) return false
     if (Build.VERSION.SDK_INT < 28) return false
     if (host.isBlank()) return false
     val granted = context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) ==
@@ -694,6 +686,9 @@ private fun openUrl(context: Context, url: String) {
 
 /** Device-owner only. Returns an error string, or null once the platform has accepted the wipe. */
 private fun eraseDevice(context: Context): String? {
+    if (!com.example.util.DeviceSetupPreferences.choices(context).allowFactoryReset) {
+        return "Factory-reset control is disabled in Device & Display Setup."
+    }
     val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
         ?: return "Device policy service unavailable."
     if (!dpm.isDeviceOwnerApp(context.packageName)) {

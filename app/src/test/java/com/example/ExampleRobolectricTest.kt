@@ -4,7 +4,17 @@ import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.model.CoolingMode
+import com.example.model.DesktopCustomization
 import com.example.model.WindowType
+import com.example.model.DeviceChangeChoices
+import com.example.model.SetupPersona
+import com.example.model.DeviceUseMode
+import com.example.util.DesktopPrefs
+import com.example.model.DesktopShortcut
+import com.example.model.DesktopWallpaper
+import com.example.model.KnowledgeCategory
+import com.example.ui.components.nextMinuteDelayMillis
+import com.example.util.DeviceSetupPreferences
 import com.example.viewmodel.AppNavTab
 import com.example.viewmodel.ContainerStatus
 import com.example.viewmodel.PhonixViewModel
@@ -23,6 +33,50 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
     @Test
+    fun `device setup choices default off until explicitly saved`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
+        prefs.edit().clear().putBoolean("oobe_completed", true).commit()
+        try {
+            val defaults = DeviceSetupPreferences.choices(context)
+            assertEquals(DeviceUseMode.DAILY_DRIVER, defaults.useMode)
+            assertFalse(DeviceSetupPreferences.hasSavedChoices(context))
+            assertFalse(defaults.applySystemWallpaper)
+            assertFalse(defaults.startLinuxOnLaunch)
+            assertFalse(defaults.keepLinuxInBackground)
+            assertFalse(defaults.startLinuxAtBoot)
+            assertFalse(defaults.watchExternalDisplays)
+            assertFalse(defaults.immersiveExternalDisplay)
+            assertFalse(defaults.allowSystemPrivateDns)
+            assertFalse(defaults.allowDeviceOwnerNetworkManagement)
+            assertFalse(defaults.allowDebloatCommands)
+            assertFalse(defaults.allowFactoryReset)
+            assertFalse(DeviceSetupPreferences.shouldStartLinuxOnLaunch(context))
+            assertFalse(DeviceSetupPreferences.shouldKeepLinuxInBackground(context))
+            assertFalse(DeviceSetupPreferences.shouldStartLinuxAtBoot(context))
+            assertFalse(DeviceSetupPreferences.shouldWatchExternalDisplays(context))
+
+            val optedIn = DeviceChangeChoices(
+                useMode = DeviceUseMode.CYBERDECK,
+                startLinuxOnLaunch = true,
+                keepLinuxInBackground = true,
+                startLinuxAtBoot = true
+            )
+            DeviceSetupPreferences.save(context, optedIn)
+            assertTrue(DeviceSetupPreferences.hasSavedChoices(context))
+            assertEquals(optedIn, DeviceSetupPreferences.choices(context))
+            assertTrue(DeviceSetupPreferences.shouldStartLinuxOnLaunch(context))
+            assertTrue(DeviceSetupPreferences.shouldKeepLinuxInBackground(context))
+            assertTrue(DeviceSetupPreferences.shouldStartLinuxAtBoot(context))
+
+            DeviceSetupPreferences.save(context, optedIn.copy(keepLinuxInBackground = false))
+            assertFalse(DeviceSetupPreferences.shouldStartLinuxAtBoot(context))
+        } finally {
+            prefs.edit().clear().commit()
+        }
+    }
+
+    @Test
     fun `read string from context`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
@@ -38,37 +92,33 @@ class ExampleRobolectricTest {
         viewModel.toggleLockIconsToGrid(true)
 
         val initialShortcuts = viewModel.uiState.value.customization.shortcuts
-        val scStore = initialShortcuts.first { it.id == "sc_store" }
+        val scFiles = initialShortcuts.first { it.id == "sc_files" }
         val scBrowser = initialShortcuts.first { it.id == "sc_browser" }
 
-        // Initially sc_store is at (0, 0) and sc_browser is at (0, 1)
-        assertEquals(0, scStore.gridCol)
-        assertEquals(0, scStore.gridRow)
-        assertEquals(0, scBrowser.gridCol)
-        assertEquals(1, scBrowser.gridRow)
+        // File Explorer owns (0, 0); the browser starts two columns to its right.
+        assertEquals(0, scFiles.gridCol)
+        assertEquals(0, scFiles.gridRow)
+        assertEquals(0, scBrowser.gridRow)
 
-        // Drop sc_browser directly onto sc_store's grid slot (x=16f, y=16f -> col 0, row 0)
+        // Drop the browser directly onto File Explorer's grid slot (col 0, row 0).
         viewModel.dropShortcut("sc_browser", 16f, 16f)
 
         val updatedShortcuts = viewModel.uiState.value.customization.shortcuts
         val updatedBrowser = updatedShortcuts.first { it.id == "sc_browser" }
-        val updatedStore = updatedShortcuts.first { it.id == "sc_store" }
+        val updatedFiles = updatedShortcuts.first { it.id == "sc_files" }
 
         // Both shortcuts must NOT have the same position! They must have swapped or displaced
         assertFalse(
-            "Browser and Store shortcuts must not overlap at the same grid coordinates",
-            updatedBrowser.gridCol == updatedStore.gridCol && updatedBrowser.gridRow == updatedStore.gridRow
+            "Browser and File Explorer must not overlap at the same grid coordinates",
+            updatedBrowser.gridCol == updatedFiles.gridCol && updatedBrowser.gridRow == updatedFiles.gridRow
         )
         assertFalse(
-            "Browser and Store shortcuts must not overlap at the same pixel coordinates",
-            updatedBrowser.posX == updatedStore.posX && updatedBrowser.posY == updatedStore.posY
+            "Browser and File Explorer must not overlap at the same pixel coordinates",
+            updatedBrowser.posX == updatedFiles.posX && updatedBrowser.posY == updatedFiles.posY
         )
 
-        // Specifically, sc_browser took (0, 0) and sc_store was swapped to (0, 1)
         assertEquals(0, updatedBrowser.gridCol)
         assertEquals(0, updatedBrowser.gridRow)
-        assertEquals(0, updatedStore.gridCol)
-        assertEquals(1, updatedStore.gridRow)
 
         // Ensure ALL shortcuts on the desktop have completely unique grid coordinates
         val allSlots = updatedShortcuts.map { Pair(it.gridCol, it.gridRow) }
@@ -160,8 +210,11 @@ class ExampleRobolectricTest {
         val linesAfterClear = viewModel.uiState.value.terminalLines
         assertTrue("Terminal should be completely cleared after clear command", linesAfterClear.isEmpty())
 
+        // Nothing has started the guest in this test, so the state must say so rather than
+        // defaulting to a running container the device does not have.
+        assertEquals(ContainerStatus.STOPPED, viewModel.uiState.value.containerStatus)
+
         // Execute shutdown command
-        assertEquals(ContainerStatus.RUNNING, viewModel.uiState.value.containerStatus)
         viewModel.executeTerminalCommand("shutdown")
         assertEquals(ContainerStatus.STOPPED, viewModel.uiState.value.containerStatus)
     }
@@ -193,6 +246,37 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `desktop keeps a conventional icon set and the removed duplicates stay gone`() {
+        val ids = DesktopCustomization().shortcuts.map { it.id }
+
+        // A Windows/Linux-like desktop: files, terminal, browser, settings - not an app drawer.
+        assertTrue(ids.containsAll(listOf("sc_files", "sc_terminal", "sc_browser", "sc_settings")))
+
+        // Photos, the distro store and the hardware monitor are the OS card / Vitals widgets now.
+        assertFalse("Photos shortcut should be gone", ids.contains("sc_photos"))
+        assertFalse("Linux System shortcut should be gone", ids.contains("sc_distro"))
+        assertFalse("System Monitor shortcut should be gone", ids.contains("sc_monitor"))
+    }
+
+    @Test
+    fun `deleting a desktop shortcut leaves its taskbar pin alone`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = PhonixViewModel(app)
+        val pin = viewModel.uiState.value.customization.taskbarPins.first { it.id == "sc_files" }
+
+        // Both a desktop icon and a taskbar pin exist for File Explorer. Removing the icon used to
+        // remove the app from the bar as well - measured on device when Local AI vanished.
+        assertTrue(viewModel.uiState.value.customization.shortcuts.any { it.id == pin.id })
+        viewModel.removeShortcut(pin.id)
+
+        assertTrue(viewModel.uiState.value.customization.shortcuts.none { it.id == pin.id })
+        assertTrue(
+            "the taskbar pin must survive deleting the desktop icon",
+            viewModel.uiState.value.customization.taskbarPins.any { it.id == pin.id }
+        )
+    }
+
+    @Test
     fun `test cooling profile and direct power mode`() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = PhonixViewModel(app)
@@ -204,6 +288,174 @@ class ExampleRobolectricTest {
 
         viewModel.toggleBatteryRemovedDirectPower(true)
         assertTrue(viewModel.uiState.value.isBatteryRemovedDirectPower)
+    }
+
+    @Test
+    fun `welcome persona sets a daily driver up with nothing invasive`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = PhonixViewModel(app)
+
+        viewModel.selectSetupPersona(SetupPersona.DAILY_PHONE)
+        val state = viewModel.uiState.value
+
+        assertEquals(SetupPersona.DAILY_PHONE, state.setupPersona)
+        assertEquals(DeviceUseMode.DAILY_DRIVER, state.deviceChanges.useMode)
+        assertFalse(state.deviceChanges.applySystemWallpaper)
+        assertFalse(state.deviceChanges.watchExternalDisplays)
+        assertFalse(state.deviceChanges.keepLinuxInBackground)
+        assertFalse(state.deviceChanges.startLinuxAtBoot)
+
+        // Daily-safe trim only: analytics and carrier telemetry, never the whole catalogue.
+        val ticked = state.debloatPackages.filter { it.isEnabled }
+        assertTrue(ticked.isNotEmpty())
+        assertTrue(ticked.all { it.category == "Analytics & Tracking" || it.category == "Carrier Telemetry" })
+    }
+
+    @Test
+    fun `cyberdeck persona opts into appliance behaviour and the full trim list`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = PhonixViewModel(app)
+
+        viewModel.selectSetupPersona(SetupPersona.CYBERDECK_BUILD)
+        val state = viewModel.uiState.value
+
+        assertEquals(DeviceUseMode.CYBERDECK, state.deviceChanges.useMode)
+        assertTrue(state.deviceChanges.watchExternalDisplays)
+        assertTrue(state.deviceChanges.keepLinuxInBackground)
+        assertTrue(state.debloatPackages.all { it.isEnabled })
+        // The persona never touches the two dangerous switches, whatever mode is chosen.
+        assertFalse(state.deviceChanges.allowFactoryReset)
+        assertFalse(state.deviceChanges.allowSystemPrivateDns)
+    }
+
+    @Test
+    fun `trim targets skip packages this device does not have`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = PhonixViewModel(app)
+        val missing = viewModel.uiState.value.debloatPackages.first().packageName
+        val present = viewModel.uiState.value.debloatPackages.last().packageName
+
+        viewModel.updateDebloatPresence(mapOf(missing to false, present to true))
+
+        val targets = viewModel.debloatTargets().map { it.packageName }
+        assertFalse(targets.contains(missing))
+        assertTrue(targets.contains(present))
+    }
+
+    @Test
+    fun `renaming an entry changes its label everywhere and never its artwork`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = PhonixViewModel(app)
+        val before = viewModel.uiState.value.customization.shortcuts.first()
+
+        viewModel.startRename(before.id)
+        viewModel.updateRenameDraft("My Files")
+        viewModel.commitRename()
+
+        val state = viewModel.uiState.value
+        val renamed = state.customization.shortcuts.first { it.id == before.id }
+        assertEquals("My Files", renamed.title)
+        // The artwork is chosen from windowType, so the type must survive a rename.
+        assertEquals(before.windowType, renamed.windowType)
+        assertTrue(state.customization.taskbarPins.filter { it.id == before.id }.all { it.title == "My Files" })
+        assertEquals(null, state.renameTargetId)
+    }
+
+    @Test
+    fun `debloat advice is labelled and needs no model`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = PhonixViewModel(app)
+        viewModel.updateDebloatPresence(mapOf("com.samsung.android.game.gos" to true))
+
+        viewModel.requestDebloatAdvice()
+        val state = viewModel.uiState.value
+
+        // Without a running model this must still answer, and must say where the text came from.
+        assertNotNull(state.debloatAdvice)
+        assertFalse(state.debloatAdviceFromModel)
+        assertTrue(state.debloatAdvice!!.contains("ticked"))
+        assertTrue(
+            "advice must be explicit about whether Phonix can remove anything",
+            state.debloatAdvice!!.contains("device owner") || state.debloatAdvice!!.contains("not device owner")
+        )
+    }
+
+    @Test
+    fun `closing the assistant clears its session but minimising keeps it`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = PhonixViewModel(app)
+
+        viewModel.openWindow(WindowType.AI_ASSISTANT)
+        viewModel.setAiKnowledgeScope(KnowledgeCategory.CODING)
+        viewModel.toggleKnowledgeLibrary()
+        val window = viewModel.uiState.value.windows.first { it.type == WindowType.AI_ASSISTANT }
+
+        // Minimising is not closing: the shelf choice and the library stay exactly as they were.
+        viewModel.minimizeWindow(window.id)
+        assertEquals(KnowledgeCategory.CODING, viewModel.uiState.value.aiKnowledgeScope)
+        assertTrue(viewModel.uiState.value.showKnowledgeLibrary)
+
+        // Closing is a reset, so the next question starts with a clean context.
+        viewModel.closeWindow(window.id)
+        val afterClose = viewModel.uiState.value
+        assertEquals(null, afterClose.aiKnowledgeScope)
+        assertFalse(afterClose.showKnowledgeLibrary)
+        assertFalse(afterClose.isAiGenerating)
+        assertEquals(
+            "only the welcome message should remain",
+            1,
+            afterClose.aiChatMessages.size
+        )
+    }
+
+    @Test
+    fun `desktop layout round-trips through storage with renames and pins intact`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        DesktopPrefs.clear(context)
+        try {
+            val saved = DesktopCustomization(
+                wallpaper = DesktopWallpaper.CUSTOM_PHOTO,
+                customWallpaperPath = "/data/user/0/com.example/files/desktop_custom_wallpaper.jpg",
+                showDesktopGrid = true,
+                showIconFrames = false,
+                lockIconsToGrid = true,
+                shortcuts = listOf(
+                    DesktopShortcut(
+                        id = "sc_terminal",
+                        title = "My Shell",
+                        windowType = WindowType.TERMINAL,
+                        posX = 210f,
+                        posY = 96f,
+                        hasCustomPosition = true
+                    )
+                )
+            )
+            DesktopPrefs.save(context, saved)
+            val loaded = DesktopPrefs.load(context)
+
+            assertNotNull("a saved desktop must load", loaded)
+            assertEquals(DesktopWallpaper.CUSTOM_PHOTO, loaded!!.wallpaper)
+            assertEquals(saved.customWallpaperPath, loaded.customWallpaperPath)
+            assertTrue(loaded.showDesktopGrid)
+            assertFalse(loaded.showIconFrames)
+            assertTrue(loaded.lockIconsToGrid)
+            assertEquals(1, loaded.shortcuts.size)
+            assertEquals("My Shell", loaded.shortcuts.first().title)
+            assertEquals(210f, loaded.shortcuts.first().posX)
+            // The taskbar has its own list and must survive on its own.
+            assertEquals(saved.taskbarPins.map { it.id }, loaded.taskbarPins.map { it.id })
+        } finally {
+            DesktopPrefs.clear(context)
+        }
+    }
+
+    @Test
+    fun `taskbar clock wakes on the minute boundary, not every second`() {
+        assertEquals(60_000L, nextMinuteDelayMillis(0L))
+        assertEquals(30_000L, nextMinuteDelayMillis(30_000L))
+        assertEquals(1L, nextMinuteDelayMillis(59_999L))
+        // Never zero: a zero delay would spin the loop at the boundary.
+        assertEquals(60_000L, nextMinuteDelayMillis(60_000L))
     }
 
     @Test

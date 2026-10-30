@@ -726,6 +726,27 @@ external monitor was attached.
   reboot re-consent, and a second model size. The 1.5B model’s first water answer conflated boiling
   time with SODIS, so the UI must keep saying the curated notes are the safety reference.
 
+### High-density host chrome (2026-10-30)
+
+- **Expanded top bar:** at `1920x1080`/640 dpi the old header put the identity block and actions
+  on one `SpaceBetween` row; the actions, including the only collapse button, were laid out past
+  the right edge. The header now pins collapse, ellipsizes the subtitle, and scrolls the action
+  row. Measured `Hide` bounds: `[1772,301][1844,373]`; Debloat/STOPPED at y=483..589.
+- **Collapsed notch:** the pill was 270 dp wide and covered most of a full-height window's title
+  bar. Below 600 dp it is now a ~90 dp `Phonix` pill with a compact network button, and it expands
+  on tap/click rather than on pointer entry. A title drag from `(1500,280)` to `(1100,280)` moved
+  the Terminal window and left the bar collapsed.
+- **Taskbar:** below 600 dp the 120 dp brand block is hidden and the app strip scrolls. At
+  `1080x2280`/420 dpi the first frame showed three app entries; a swipe from x=550 to x=120 at
+  y=2039 exposed Terminal and Settings. The clock still wraps its AM/PM suffix at this width.
+- `assembleDebug` + `testDebugUnitTest` green, **38 tests, 0 failures**; APK 29,682,604 bytes,
+  installed over the device-owner build. Final device state: `1080x2280` override on `1440x3040`,
+  physical density 420, user rotation 0, accelerometer on; guest stopped; crash buffer empty for
+  the package; device owner still
+  `com.aistudio.phonix.vpxmkr/com.example.receiver.PhonixDeviceAdminReceiver`.
+- Remaining: the 640 dpi Start menu still clips its pinned row and all-apps list. This is host
+  chrome, not the desktop window geometry.
+
 ### Network debugging as the initial setup channel
 
 Network ADB is useful for provisioning, not for bypassing consent:

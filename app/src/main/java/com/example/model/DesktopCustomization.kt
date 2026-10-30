@@ -3,11 +3,18 @@ package com.example.model
 import androidx.compose.ui.graphics.Color
 
 enum class DesktopWallpaper(val title: String, val description: String) {
-    PHOENIX_CYBER_DEFAULT("Phoenix Cybernetic (Default)", "Rising neon phoenix emblem with electric blue and deep black circuitry"),
-    MATRIX_DEEP_BLUE("Matrix Circuit Grid", "Futuristic deep blue grid with pulsating neon data tracks"),
-    OBSIDIAN_NIGHT("Obsidian Dark AMOLED", "Ultra-clean pure black backdrop for maximum OLED power savings and contrast"),
-    RETRO_CLASSIC_TEAL("Retro PC Classic Teal", "Iconic vintage 90s workstation desktop teal"),
-    SYNTHWAVE_NEON("Cyber Neon Horizon", "Atmospheric electric indigo and cyan twilight gradient")
+    PHOENIX_CYBER_DEFAULT("Phoenix Cybernetic (Default)", "The bundled Phonix wallpaper: the phoenix rising over dark circuitry"),
+    EMBER_MARK("Ember Mark", "Near-black backdrop, ember heat glow and the Phonix head mark"),
+    ALPINE_PEAK("Alpine Peak", "A nod to Alpine Linux: the mountain cut into a chip package"),
+    TERMINAL_GREEN("Terminal Green", "Green on black, the way a shell looked before wallpapers existed"),
+    RETRO_CLASSIC_TEAL("Retro PC Classic Teal", "Flat vintage 90s workstation teal"),
+    OBSIDIAN_NIGHT("Obsidian Black", "Pure black. The cheapest wallpaper on an OLED panel"),
+
+    /**
+     * A picture the user picked from their gallery. The file lives in this app's private storage;
+     * see [com.example.util.WallpaperStore].
+     */
+    CUSTOM_PHOTO("Your Photo", "A picture from your gallery, copied into this app and never uploaded")
 }
 
 enum class DesktopAccentColor(val title: String, val color: Color, val hex: String) {
@@ -30,7 +37,7 @@ enum class IconSizeMode(val title: String, val sizeDp: Int) {
 enum class ShortcutShape(val title: String, val cornerRadiusDp: Int) {
     SQUIRCLE("Fluent Squircle", 14),
     CIRCLE("Circle", 50),
-    TILE("Windows 11 Tile", 6),
+    TILE("Fluent Tile", 6),
     HEXAGON("Hexagon", 8),
     GLASS_POD("Glass Pod", 22)
 }
@@ -48,7 +55,7 @@ enum class TaskbarPosition {
 }
 
 enum class TaskbarStyle(val title: String) {
-    WINDOWS_11_FLUENT("Windows 11 Fluent Center"),
+    FLUENT_CENTER("Fluent Center"),
     SOLID_DARK("Deep Black Carbon"),
     GLASS_TRANSLUCENT("Frosted Aero Glass"),
     WINDOWS_CLASSIC("Classic 90s Beveled")
@@ -74,7 +81,6 @@ data class DesktopShortcut(
     val customColor: DesktopAccentColor? = null,
     val customBackground: ShortcutBgStyle = ShortcutBgStyle.FROSTED_GLASS,
     val launchPackage: String? = null,
-    val isPinnedToTaskbar: Boolean = false,
     val isNativeApp: Boolean = false,
     val isAppStore: Boolean = false
 ) {
@@ -99,147 +105,41 @@ data class DesktopShortcut(
         // Leaves the top half of the screen clear for the Phoenix wallpaper emblem,
         // and keeps the right side open for desktop vitals and quick widgets.
         fun getDefaultShortcuts(): List<DesktopShortcut> = listOf(
-            // Column 0 (Left-most, Col 0, posX = 20f)
-            DesktopShortcut(
-                id = "sc_store",
-                title = "App Store",
-                windowType = WindowType.APP_STORE,
-                gridCol = 0,
-                gridRow = 0,
-                posX = 20f,
-                posY = 280f,
-                customColor = DesktopAccentColor.CYBER_CYAN,
-                launchPackage = "com.android.vending",
-                isPinnedToTaskbar = true,
-                isAppStore = true
-            ),
-            DesktopShortcut(
-                id = "sc_browser",
-                title = "Phonix Browser",
-                windowType = WindowType.BROWSER,
-                gridCol = 0,
-                gridRow = 1,
-                posX = 20f,
-                posY = 368f,
-                customColor = DesktopAccentColor.CYBER_CYAN,
-                isPinnedToTaskbar = true
-            ),
+            // A conventional desktop, in the spirit of "This PC / Home, Terminal, Browser,
+            // Settings". Everything else is one click away in the taskbar or the Start menu, so
+            // the desktop does not read like an app drawer.
             DesktopShortcut(
                 id = "sc_files",
                 title = "File Explorer",
                 windowType = WindowType.FILE_EXPLORER,
                 gridCol = 0,
-                gridRow = 2,
+                gridRow = 0,
                 posX = 20f,
-                posY = 456f,
+                posY = 280f,
                 customColor = DesktopAccentColor.AMBER_EMBER,
                 launchPackage = "com.google.android.documentsui",
-                isPinnedToTaskbar = true,
                 isNativeApp = true
             ),
-            DesktopShortcut(
-                id = "sc_photos",
-                title = "Photos & Media",
-                windowType = WindowType.BROWSER,
-                gridCol = 0,
-                gridRow = 3,
-                posX = 20f,
-                posY = 544f,
-                customColor = DesktopAccentColor.PURPLE_NEBULA,
-                launchPackage = "com.google.android.apps.photos",
-                isPinnedToTaskbar = false,
-                isNativeApp = true
-            ),
-
-            // Column 1 (posX = 110f)
             DesktopShortcut(
                 id = "sc_terminal",
-                title = "Phonix Terminal",
+                title = "Terminal",
                 windowType = WindowType.TERMINAL,
                 gridCol = 1,
                 gridRow = 0,
                 posX = 110f,
                 posY = 280f,
-                customColor = DesktopAccentColor.EMERALD_LINUX,
-                isPinnedToTaskbar = true
+                customColor = DesktopAccentColor.EMERALD_LINUX
             ),
             DesktopShortcut(
-                id = "sc_distro",
-                title = "Linux System",
-                windowType = WindowType.DISTRO_STORE,
-                gridCol = 1,
-                gridRow = 1,
-                posX = 110f,
-                posY = 368f,
-                customColor = DesktopAccentColor.CYBER_CYAN,
-                isPinnedToTaskbar = true
-            ),
-            DesktopShortcut(
-                id = "sc_server",
-                title = "Server Hub",
-                windowType = WindowType.SERVER_MANAGER,
-                gridCol = 1,
-                gridRow = 2,
-                posX = 110f,
-                posY = 456f,
-                customColor = DesktopAccentColor.PURPLE_NEBULA
-            ),
-            DesktopShortcut(
-                id = "sc_monitor",
-                title = "System Monitor",
-                windowType = WindowType.RESOURCE_MONITOR,
-                gridCol = 1,
-                gridRow = 3,
-                posX = 110f,
-                posY = 544f,
-                customColor = DesktopAccentColor.CYBER_CYAN
-            ),
-
-            // Column 2 (posX = 200f)
-            DesktopShortcut(
-                id = "sc_ai",
-                title = "Local AI",
-                windowType = WindowType.AI_ASSISTANT,
+                id = "sc_browser",
+                title = "Phonix Browser",
+                windowType = WindowType.BROWSER,
                 gridCol = 2,
                 gridRow = 0,
                 posX = 200f,
                 posY = 280f,
-                customColor = DesktopAccentColor.PURPLE_NEBULA,
-                isPinnedToTaskbar = true
-            ),
-            DesktopShortcut(
-                id = "sc_vscode",
-                title = "VS Code Web",
-                windowType = WindowType.VS_CODE,
-                gridCol = 2,
-                gridRow = 1,
-                posX = 200f,
-                posY = 368f,
-                customColor = DesktopAccentColor.ELECTRIC_BLUE,
-                isPinnedToTaskbar = false
-            ),
-            DesktopShortcut(
-                id = "sc_about",
-                title = "About Phonix OS",
-                windowType = WindowType.ABOUT,
-                gridCol = 2,
-                gridRow = 2,
-                posX = 200f,
-                posY = 456f,
                 customColor = DesktopAccentColor.CYBER_CYAN
             ),
-            DesktopShortcut(
-                id = "sc_privacy",
-                title = "Privacy Hub",
-                windowType = WindowType.PRIVACY,
-                gridCol = 2,
-                gridRow = 3,
-                posX = 200f,
-                posY = 544f,
-                customColor = DesktopAccentColor.EMERALD_LINUX
-            ),
-
-            // Column 3 (posX = 290f)
             DesktopShortcut(
                 id = "sc_settings",
                 title = "Settings",
@@ -249,25 +149,50 @@ data class DesktopShortcut(
                 posX = 290f,
                 posY = 280f,
                 isNativeApp = true
+            )
+        )
+
+        /**
+         * The taskbar keeps its own list, deliberately independent of the desktop icons.
+         *
+         * Deleting a desktop shortcut must not drop the app out of the bar, and unpinning from the
+         * bar must not delete the icon - the two used to share one flag, so removing an icon also
+         * removed the app from the taskbar (measured: deleting Local AI removed it entirely).
+         */
+        fun getDefaultTaskbarPins(): List<DesktopShortcut> = listOf(
+            DesktopShortcut(
+                id = "sc_store",
+                title = "App Store",
+                windowType = WindowType.APP_STORE,
+                customColor = DesktopAccentColor.CYBER_CYAN,
+                launchPackage = "com.android.vending",
+                isAppStore = true
             ),
             DesktopShortcut(
-                id = "sc_personalize",
-                title = "Personalize",
-                windowType = WindowType.PERSONALIZE,
-                gridCol = 3,
-                gridRow = 1,
-                posX = 290f,
-                posY = 368f
-            ),
-            DesktopShortcut(
-                id = "sc_phone_screen",
-                title = "Phone Screen",
-                windowType = WindowType.PHONE_MIRROR,
-                gridCol = 3,
-                gridRow = 2,
-                posX = 290f,
-                posY = 456f,
+                id = "sc_browser",
+                title = "Phonix Browser",
+                windowType = WindowType.BROWSER,
                 customColor = DesktopAccentColor.CYBER_CYAN
+            ),
+            DesktopShortcut(
+                id = "sc_files",
+                title = "File Explorer",
+                windowType = WindowType.FILE_EXPLORER,
+                customColor = DesktopAccentColor.AMBER_EMBER,
+                launchPackage = "com.google.android.documentsui",
+                isNativeApp = true
+            ),
+            DesktopShortcut(
+                id = "sc_terminal",
+                title = "Terminal",
+                windowType = WindowType.TERMINAL,
+                customColor = DesktopAccentColor.EMERALD_LINUX
+            ),
+            DesktopShortcut(
+                id = "sc_ai",
+                title = "Local AI",
+                windowType = WindowType.AI_ASSISTANT,
+                customColor = DesktopAccentColor.PURPLE_NEBULA
             )
         )
     }
@@ -288,18 +213,27 @@ sealed class DesktopContextMenuData {
 
 data class DesktopCustomization(
     val wallpaper: DesktopWallpaper = DesktopWallpaper.PHOENIX_CYBER_DEFAULT,
+    /** Absolute path of an imported photo; only meaningful when [wallpaper] is CUSTOM_PHOTO. */
+    val customWallpaperPath: String? = null,
     val accentColor: DesktopAccentColor = DesktopAccentColor.ELECTRIC_BLUE,
     val iconSize: IconSizeMode = IconSizeMode.MEDIUM,
     val taskbarPosition: TaskbarPosition = TaskbarPosition.BOTTOM,
-    val taskbarStyle: TaskbarStyle = TaskbarStyle.WINDOWS_11_FLUENT,
+    val taskbarStyle: TaskbarStyle = TaskbarStyle.FLUENT_CENTER,
     val displayMode: MonitorDisplayMode = MonitorDisplayMode.MONITOR_FHD_16_9,
     val showQuickDistroWidget: Boolean = true,
     val showSystemMonitorWidget: Boolean = true,
     val showDesktopGrid: Boolean = false,
     val showDesktopLabels: Boolean = true,
+    /**
+     * Draw the tile and outline behind a desktop icon. Off gives the flat "just the glyph and the
+     * caption" look some desktops prefer; the icons stay hit-testable either way.
+     */
+    val showIconFrames: Boolean = true,
     val showClockInTaskbar: Boolean = true,
     val showBatteryInTaskbar: Boolean = true,
     val lockIconsToGrid: Boolean = false, // Freeform movement enabled by default
     val shortcuts: List<DesktopShortcut> = DesktopShortcut.getDefaultShortcuts(),
+    /** Taskbar contents. Independent of [shortcuts]: one can change without touching the other. */
+    val taskbarPins: List<DesktopShortcut> = DesktopShortcut.getDefaultTaskbarPins(),
     val areAllWindowsHidden: Boolean = false
 )

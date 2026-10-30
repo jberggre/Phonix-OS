@@ -1,8 +1,13 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +32,8 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
@@ -34,6 +41,8 @@ import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -83,6 +93,7 @@ private data class TaskbarAppEntry(
     val shortcut: DesktopShortcut?
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Windows11Taskbar(
     uiState: PhonixUiState,
@@ -90,9 +101,17 @@ fun Windows11Taskbar(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // The brand block and fixed tray leave too little room for the app strip on a phone or a
+    // 640 dpi desktop. Compact mode drops the redundant brand and scrolls the apps instead of
+    // clipping them; the wide desktop keeps the centered Windows 11 layout untouched.
+    val compactTaskbar = LocalConfiguration.current.screenWidthDp < 600
+    val taskbarAppsScroll = rememberScrollState()
     var currentTime by remember { mutableStateOf("") }
     var currentDate by remember { mutableStateOf("") }
 
+    // The clock used to wake every second and format twice to redraw text that can only change
+    // once a minute: 86,400 wake-ups a day for 1,440 visible changes. It now sleeps to the next
+    // minute boundary, which is 60x less work for exactly the same display.
     LaunchedEffect(Unit) {
         val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
         val dateFormat = SimpleDateFormat("M/d/yyyy", Locale.getDefault())
@@ -100,20 +119,22 @@ fun Windows11Taskbar(
             val now = Date()
             currentTime = timeFormat.format(now)
             currentDate = dateFormat.format(now)
-            delay(1000L)
+            delay(nextMinuteDelayMillis(System.currentTimeMillis()))
         }
     }
 
-    // Build the list of taskbar apps: pinned shortcuts + active windows
-    val taskbarApps = remember(uiState.customization.shortcuts, uiState.windows, uiState.activeWindowId) {
-        val pinnedShortcuts = uiState.customization.shortcuts.filter { it.isPinnedToTaskbar }
+    // Build the list of taskbar apps: taskbar pins + active windows.
+    // The pins are the taskbar's own list, so deleting a desktop icon never removes an app here.
+    val taskbarApps = remember(uiState.customization.taskbarPins, uiState.customization.shortcuts, uiState.windows, uiState.activeWindowId) {
+        val pinnedShortcuts = uiState.customization.taskbarPins
         val openTypes = uiState.windows.map { it.type }.toSet()
 
         // Combine pinned and open
         val allTypes = (pinnedShortcuts.map { it.windowType } + openTypes).distinct()
 
         allTypes.map { type ->
-            val shortcut = uiState.customization.shortcuts.find { it.windowType == type }
+            val shortcut = uiState.customization.taskbarPins.find { it.windowType == type }
+                ?: uiState.customization.shortcuts.find { it.windowType == type }
             val matchingWindow = uiState.windows.find { it.type == type }
             val isRunning = matchingWindow != null
             val isFocused = matchingWindow != null && !matchingWindow.isMinimized && matchingWindow.id == uiState.activeWindowId
@@ -133,6 +154,9 @@ fun Windows11Taskbar(
                 WindowType.VS_CODE -> Icons.Default.Code
                 WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
                 WindowType.AI_ASSISTANT -> Icons.Default.SmartToy
+                // A pinned App Store used to fall through to the generic computer glyph.
+                WindowType.APP_STORE -> Icons.Default.Storefront
+                WindowType.SETTINGS -> Icons.Default.Settings
                 else -> Icons.Default.Computer
             }
 
@@ -148,6 +172,7 @@ fun Windows11Taskbar(
                 WindowType.VS_CODE -> PhonixBlueLight
                 WindowType.PHONE_MIRROR -> Color(0xFF22D3EE)
                 WindowType.AI_ASSISTANT -> Color(0xFFA855F7)
+                WindowType.APP_STORE -> PhonixCyan
                 else -> PhonixBlueLight
             }
 
@@ -178,27 +203,29 @@ fun Windows11Taskbar(
                 .fillMaxHeight()
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = if (compactTaskbar) Arrangement.Start else Arrangement.SpaceBetween
         ) {
-            // Left Spacer to balance layout if needed
-            Box(modifier = Modifier.width(120.dp), contentAlignment = Alignment.CenterStart) {
-                // Mini PC Brand / Status
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(PhonixGreen)
-                    )
-                    Text(
-                        text = "Phonix OS",
-                        color = Slate400,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+            if (!compactTaskbar) {
+                // Left Spacer to balance layout if needed
+                Box(modifier = Modifier.width(120.dp), contentAlignment = Alignment.CenterStart) {
+                    // Mini PC Brand / Status
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(PhonixGreen)
+                        )
+                        Text(
+                            text = "Phonix OS",
+                            color = Slate400,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
@@ -206,7 +233,12 @@ fun Windows11Taskbar(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.weight(1f, fill = false)
+                modifier = Modifier
+                    .weight(1f, fill = compactTaskbar)
+                    .then(
+                        if (compactTaskbar) Modifier.horizontalScroll(taskbarAppsScroll)
+                        else Modifier
+                    )
             ) {
                 // 1. Windows 11 Start Button (Phonix Flame Emblem)
                 Box(
@@ -267,13 +299,20 @@ fun Windows11Taskbar(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                if (app.shortcut != null && !app.isRunning && app.shortcut.launchPackage != null) {
-                                    viewModel.launchShortcutOrHostApp(context, app.shortcut)
-                                } else {
-                                    viewModel.toggleWindow(app.windowType)
+                            .combinedClickable(
+                                onClick = {
+                                    if (app.shortcut != null && !app.isRunning && app.shortcut.launchPackage != null) {
+                                        viewModel.launchShortcutOrHostApp(context, app.shortcut)
+                                    } else {
+                                        viewModel.toggleWindow(app.windowType)
+                                    }
+                                },
+                                // Long-press opens the rename dialog, which also carries the
+                                // unpin action for a bar entry (the bar owns its own pins).
+                                onLongClick = {
+                                    viewModel.startRename(app.id)
                                 }
-                            }
+                            )
                             .background(
                                 if (app.isFocused) Slate800.copy(alpha = 0.8f) else Color.Transparent
                             )
@@ -285,12 +324,21 @@ fun Windows11Taskbar(
                             .testTag("taskbar_app_${app.id.lowercase()}"),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = app.icon,
-                            contentDescription = app.title,
-                            tint = app.defaultColor,
-                            modifier = Modifier.size(22.dp)
-                        )
+                        if (app.shortcut?.launchPackage == null) {
+                            Image(
+                                painter = painterResource(id = AppIconGlyphs.artFor(app.windowType)),
+                                contentDescription = app.title,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = app.icon,
+                                contentDescription = app.title,
+                                tint = app.defaultColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
 
                         // Running Dot Indicator
                         if (app.isRunning) {
@@ -346,7 +394,9 @@ fun Windows11Taskbar(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = currentDate.ifEmpty { "10/28/2026" },
+                        // Blank until the first tick formats a real date, instead of showing a
+                        // hardcoded placeholder date that was briefly wrong.
+                        text = currentDate,
                         color = Slate400,
                         fontSize = 9.sp
                     )
@@ -365,4 +415,18 @@ fun Windows11Taskbar(
             }
         }
     }
+}
+
+/**
+ * Milliseconds until the wall clock reaches the next whole minute.
+ *
+ * The taskbar clock only changes on a minute boundary, so waking on any other cadence is wasted
+ * work - and on a 2019 phone every avoidable wake-up is battery. Kept as a pure function so the
+ * boundary handling (including the last millisecond of a minute) can be unit tested without a
+ * device.
+ */
+internal fun nextMinuteDelayMillis(nowMillis: Long): Long {
+    val millisIntoMinute = nowMillis % 60_000L
+    val remaining = 60_000L - millisIntoMinute
+    return if (remaining <= 0L) 60_000L else remaining
 }
