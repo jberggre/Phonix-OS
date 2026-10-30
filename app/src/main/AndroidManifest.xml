@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Required on Android 14+ for the read-only Phone Screen capture service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Lets Phonix paint its own wallpaper onto the device so DeX/lock screen match the desktop -->
@@ -104,6 +106,12 @@
             android:name=".service.DesktopAutoLaunchService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Real, read-only screen mirror. Started only after the system capture-consent dialog. -->
+        <service
+            android:name=".service.ScreenMirrorService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <!--
             Device-owner target for provision.sh (`dpm set-device-owner`).

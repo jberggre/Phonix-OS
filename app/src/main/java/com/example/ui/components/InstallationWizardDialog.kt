@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Security
@@ -124,13 +123,13 @@ fun InstallationWizardDialog(
                 // Header Bar with Step Title and Close
                 WizardHeader(
                     currentStep = uiState.wizardStep,
-                    totalSteps = 7,
+                    totalSteps = 6,
                     onClose = { if (!uiState.isWizardDeploying) onDismiss() }
                 )
 
                 // Step Progress Bar
                 LinearProgressIndicator(
-                    progress = { (uiState.wizardStep + 1) / 7f },
+                    progress = { (uiState.wizardStep + 1) / 6f },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(4.dp),
@@ -156,8 +155,7 @@ fun InstallationWizardDialog(
                             2 -> Step2LinuxChoice(uiState, viewModel)
                             3 -> Step3BrowserSelection(uiState, viewModel)
                             4 -> Step4DebloatOptimization(uiState, viewModel)
-                            5 -> Step5ScreenRescue(uiState, viewModel)
-                            6 -> Step6AutomatedDeployment(uiState, viewModel, onDismiss)
+                            5 -> Step5AutomatedDeployment(uiState, viewModel, onDismiss)
                             else -> Step0DeviceAssessment(uiState, viewModel)
                         }
                     }
@@ -192,8 +190,7 @@ fun WizardHeader(
         "Step 3: Linux Subsystem (Keep vs Lean)",
         "Step 4: Default Web Browser",
         "Step 5: Privacy Debloat & Chrome",
-        "Step 6: Display 0 Rescue (Shattered Screen)",
-        "Step 7: Finish Setup & Launch Desktop"
+        "Step 6: Finish Setup & Launch Desktop"
     )
 
     Row(
@@ -704,77 +701,10 @@ fun Step4DebloatOptimization(
 }
 
 // -------------------------------------------------------------
-// STEP 5: Shattered Screen Rescue Walkthrough
+// STEP 5: Automated Deployment
 // -------------------------------------------------------------
 @Composable
-fun Step5ScreenRescue(
-    uiState: PhonixUiState,
-    viewModel: PhonixViewModel
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth().border(1.dp, PhonixAmber, RoundedCornerShape(10.dp))
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(24.dp))
-                    Text("Display 0 Rescue for Shattered Screens", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-                Text(
-                    "Galaxy S10 motherboards harvested from phones with unusable cracked screens are enclosed inside this mini PC shell. Phonix includes a dedicated rescue window so you never get locked out.",
-                    color = Slate200,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp
-                )
-            }
-        }
-
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("How to Control the Broken Screen:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-
-                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("1.", color = PhonixCyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    Text("Permission Popups: Any Android dialogs that appear strictly on the internal phone display can be viewed and tapped inside the rescue window.", color = Slate300, fontSize = 11.sp)
-                }
-
-                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("2.", color = PhonixCyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    Text("Direct Touch Forwarding: Clicking the virtual phone screen forwards touch coordinates (0 to 1080x2280) to the physical digitizer.", color = Slate300, fontSize = 11.sp)
-                }
-
-                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("3.", color = PhonixCyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    Text("Virtual Hardware Keys: Enclosed physical buttons (Power, Home, Back, Recents) are available right on the window's bottom navigation bar.", color = Slate300, fontSize = 11.sp)
-                }
-            }
-        }
-
-        Text(
-            "Access the Phone Screen window anytime from the 'Phone Screen' desktop shortcut or from the Phonix Start Menu.",
-            color = PhonixAmber,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
-
-// -------------------------------------------------------------
-// STEP 6: Automated Deployment
-// -------------------------------------------------------------
-@Composable
-fun Step6AutomatedDeployment(
+fun Step5AutomatedDeployment(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel,
     onFinished: () -> Unit
@@ -870,7 +800,7 @@ fun WizardFooter(
                 Spacer(modifier = Modifier.width(1.dp))
             }
 
-            if (uiState.wizardStep < 6) {
+            if (uiState.wizardStep < 5) {
                 Button(
                     onClick = onNext,
                     colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),

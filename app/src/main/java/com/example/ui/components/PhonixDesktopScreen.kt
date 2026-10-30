@@ -84,6 +84,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
@@ -95,7 +96,6 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Bolt
@@ -108,8 +108,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import com.example.model.UpdateCheckState
 import com.example.model.AiChatMessage
+import com.example.model.AiEngineState
+import com.example.model.UpdateCheckState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -148,6 +149,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.R
+import com.example.engine.LocalAiEngine
 import com.example.engine.TerminalLine
 import com.example.model.DesktopAccentColor
 import com.example.model.DesktopShortcut
@@ -666,8 +668,9 @@ fun DraggableDesktopShortcut(
         WindowType.BENCHMARK -> Icons.Default.PlayArrow
         WindowType.NOTEPAD -> Icons.Default.Code
         WindowType.PRIVACY -> Icons.Default.Security
-        WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
+        WindowType.ABOUT -> Icons.Default.Info
         WindowType.VS_CODE -> Icons.Default.Code
+        WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
         WindowType.AI_ASSISTANT -> Icons.Default.SmartToy
         else -> Icons.Default.Computer
     }
@@ -682,8 +685,9 @@ fun DraggableDesktopShortcut(
         WindowType.FILE_EXPLORER -> Color(0xFFFBBF24)
         WindowType.BENCHMARK -> Color(0xFFF43F5E)
         WindowType.PRIVACY -> PhonixGreen
-        WindowType.PHONE_MIRROR -> PhonixAmber
+        WindowType.ABOUT -> PhonixCyan
         WindowType.VS_CODE -> PhonixBlueLight
+        WindowType.PHONE_MIRROR -> Color(0xFF22D3EE)
         WindowType.AI_ASSISTANT -> Color(0xFFA855F7)
         else -> PhonixBlueLight
     }
@@ -1171,7 +1175,7 @@ fun DesktopWindowFrame(
                         WindowType.FILE_EXPLORER -> Icons.Default.Folder
                         WindowType.BENCHMARK -> Icons.Default.PlayArrow
                         WindowType.PRIVACY -> Icons.Default.Security
-                        WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
+                        WindowType.ABOUT -> Icons.Default.Info
                         WindowType.VS_CODE -> Icons.Default.Code
                         WindowType.AI_ASSISTANT -> Icons.Default.SmartToy
                         else -> Icons.Default.Computer
@@ -1256,9 +1260,9 @@ fun DesktopWindowFrame(
                     WindowType.NOTEPAD -> NotepadWindowContent()
                     WindowType.PRIVACY -> PrivacyHubWindowContent(viewModel)
                     WindowType.ABOUT -> AboutWindowContent(uiState, viewModel)
-                    WindowType.PHONE_MIRROR -> PhoneMirrorWindowContent(uiState, viewModel)
                     WindowType.VS_CODE -> VsCodeWindowContent(uiState, viewModel)
-                    WindowType.AI_ASSISTANT -> CyberdeckAiWindowContent(uiState, viewModel)
+                    WindowType.PHONE_MIRROR -> PhoneMirrorWindowContent()
+                    WindowType.AI_ASSISTANT -> OfflineKnowledgeWindowContent(uiState, viewModel)
                     else -> TerminalWindowContent(uiState, viewModel)
                 }
             }
@@ -1902,8 +1906,8 @@ fun PhonixStartMenu(
                 Triple("VirGL 3D Benchmark", Icons.Default.PlayArrow, Color(0xFFF43F5E)) to WindowType.BENCHMARK,
                 Triple("File Manager", Icons.Default.Folder, Color(0xFFFBBF24)) to WindowType.FILE_EXPLORER,
                 Triple("Notepad Editor", Icons.Default.Code, Slate200) to WindowType.NOTEPAD,
-                Triple("Phone Screen (Display 0 Rescue)", Icons.Default.PhoneAndroid, PhonixAmber) to WindowType.PHONE_MIRROR,
-                Triple("Cyberdeck Local AI", Icons.Default.SmartToy, Color(0xFFA855F7)) to WindowType.AI_ASSISTANT,
+                Triple("Phone Screen (read-only)", Icons.Default.PhoneAndroid, PhonixCyan) to WindowType.PHONE_MIRROR,
+                Triple("Local AI", Icons.Default.SmartToy, Color(0xFFA855F7)) to WindowType.AI_ASSISTANT,
                 Triple("VS Code Web IDE", Icons.Default.Code, PhonixBlueLight) to WindowType.VS_CODE,
                 Triple("About Phonix OS", Icons.Default.Info, PhonixCyan) to WindowType.ABOUT
             )
@@ -2431,161 +2435,6 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
 }
 
 // -------------------------------------------------------------
-// PHONE SCREEN RESCUE WINDOW (Display 0 for shattered screens)
-// -------------------------------------------------------------
-@Composable
-fun PhoneMirrorWindowContent(
-    uiState: PhonixUiState,
-    viewModel: PhonixViewModel
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Slate950)
-            .padding(10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Rescue Banner
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
-        ) {
-            Row(
-                modifier = Modifier.padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(20.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Display 0 Rescue (Physical Phone Screen)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    Text("Controls the shattered phone inside the shell. Tap screen or use navigation buttons.", color = Slate400, fontSize = 9.sp)
-                }
-                uiState.phoneMirrorLastTap?.let { (x, y) ->
-                    Text("Tap: $x,$y", color = PhonixCyan, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Phone Screen Surface (Aspect Ratio ~9:19 for S10)
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .widthIn(max = 280.dp)
-                .fillMaxWidth()
-                .background(Color.Black, RoundedCornerShape(16.dp))
-                .border(2.dp, Slate800, RoundedCornerShape(16.dp))
-                .clip(RoundedCornerShape(16.dp))
-                .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        val xNorm = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        val yNorm = (offset.y / size.height.toFloat()).coerceIn(0f, 1f)
-                        viewModel.sendPhoneTouch(xNorm, yNorm)
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                // Top Status Bar Area
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("12:00", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("LTE", color = Slate400, fontSize = 9.sp)
-                        Text("100%", color = PhonixGreen, fontSize = 9.sp)
-                    }
-                }
-
-                // Center Display Representation
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        Icons.Default.PhoneAndroid,
-                        contentDescription = null,
-                        tint = Slate600,
-                        modifier = Modifier.size(40.dp)
-                    )
-                    Text(
-                        "Active Display 0 Surface",
-                        color = Slate300,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "Resolution: 1080 x 2280\nTap anywhere inside to forward touch directly to the phone OS.",
-                        color = Slate500,
-                        fontSize = 9.sp,
-                        lineHeight = 12.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-
-                // Bottom Phone Dock Hint
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Slate900.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceAround
-                ) {
-                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = Slate400, modifier = Modifier.size(16.dp))
-                    Icon(Icons.Default.Security, contentDescription = null, tint = Slate400, modifier = Modifier.size(16.dp))
-                    Icon(Icons.Default.Apps, contentDescription = null, tint = Slate400, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Virtual Navigation Bar (Direct hardware keyevent forwarding to Display 0)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Slate900)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Key 4: Back
-                IconButton(onClick = { viewModel.sendPhoneKey(4) }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(18.dp))
-                }
-                // Key 3: Home
-                IconButton(onClick = { viewModel.sendPhoneKey(3) }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Home, contentDescription = "Home", tint = PhonixCyan, modifier = Modifier.size(20.dp))
-                }
-                // Key 187: Recents / App Switch
-                IconButton(onClick = { viewModel.sendPhoneKey(187) }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.GridView, contentDescription = "Recents", tint = Color.White, modifier = Modifier.size(18.dp))
-                }
-                // Key 26: Power / Screen Wake
-                IconButton(onClick = { viewModel.sendPhoneKey(26) }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.PowerSettingsNew, contentDescription = "Power", tint = PhonixAmber, modifier = Modifier.size(18.dp))
-                }
-                // Key 82: Unlock / Menu
-                IconButton(onClick = { viewModel.sendPhoneKey(82) }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Security, contentDescription = "Unlock", tint = PhonixGreen, modifier = Modifier.size(18.dp))
-                }
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
 // VS CODE WEB WINDOW CONTENT (Local ARM64 Alpine loopback)
 // -------------------------------------------------------------
 @SuppressLint("SetJavaScriptEnabled")
@@ -2615,6 +2464,12 @@ fun VsCodeWindowContent(
         onDispose { webView.destroy() }
     }
 
+    // The first load can happen before the server exists. Reload only after the socket probe
+    // has actually connected, so a successful start replaces the connection-refused page.
+    LaunchedEffect(uiState.vsCodeServerRunning) {
+        if (uiState.vsCodeServerRunning) webView.reload()
+    }
+
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E))) {
         // VS Code Header Bar
         Row(
@@ -2630,12 +2485,27 @@ fun VsCodeWindowContent(
                 Text("VS Code Web IDE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 Box(
                     modifier = Modifier
-                        .background(if (uiState.vsCodeServerRunning) PhonixGreen.copy(alpha = 0.2f) else Slate800, RoundedCornerShape(4.dp))
+                        .background(
+                            when {
+                                uiState.vsCodeServerRunning -> PhonixGreen.copy(alpha = 0.2f)
+                                uiState.vsCodeServerProbing -> PhonixAmber.copy(alpha = 0.2f)
+                                else -> Slate800
+                            },
+                            RoundedCornerShape(4.dp)
+                        )
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        if (uiState.vsCodeServerRunning) "Server Running :8000" else "Loopback 127.0.0.1:8000",
-                        color = if (uiState.vsCodeServerRunning) PhonixGreen else Slate400,
+                        when {
+                            uiState.vsCodeServerRunning -> "Listening on 127.0.0.1:8000"
+                            uiState.vsCodeServerProbing -> "Waiting for :8000..."
+                            else -> "Not listening on :8000"
+                        },
+                        color = when {
+                            uiState.vsCodeServerRunning -> PhonixGreen
+                            uiState.vsCodeServerProbing -> PhonixAmber
+                            else -> Slate400
+                        },
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace
                     )
@@ -2643,15 +2513,22 @@ fun VsCodeWindowContent(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!uiState.vsCodeServerRunning) {
+                if (!uiState.vsCodeServerRunning && !uiState.vsCodeServerProbing) {
                     Button(
                         onClick = { viewModel.startVsCodeServer() },
                         colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
                         shape = RoundedCornerShape(6.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
-                        Text("Start Server", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Start & Probe", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
+                }
+                if (uiState.vsCodeServerProbing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        color = PhonixAmber,
+                        strokeWidth = 2.dp
+                    )
                 }
                 IconButton(
                     onClick = {
@@ -2665,6 +2542,20 @@ fun VsCodeWindowContent(
             }
         }
 
+        // The badge is a measured fact, not a request. Show why it is not green.
+        if (!uiState.vsCodeServerRunning) {
+            Text(
+                uiState.vsCodeServerStatus,
+                color = if (uiState.vsCodeServerProbing) PhonixAmber else Color(0xFFFCA5A5),
+                fontSize = 9.sp,
+                lineHeight = 12.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF2A1A1A))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+
         // Web View IDE Content
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             AndroidView(
@@ -2676,21 +2567,24 @@ fun VsCodeWindowContent(
 }
 
 // -------------------------------------------------------------
-// CYBERDECK LOCAL AI ASSISTANT WINDOW CONTENT (Qwen2.5 / llama.cpp)
+// LOCAL AI WINDOW CONTENT
 // -------------------------------------------------------------
 @Composable
-fun CyberdeckAiWindowContent(
+fun OfflineKnowledgeWindowContent(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
     var promptInput by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val lastMessageLength = uiState.aiChatMessages.lastOrNull()?.text?.length ?: 0
+    val ready = uiState.aiEngineState == AiEngineState.READY
 
-    LaunchedEffect(uiState.aiChatMessages.size) {
+    LaunchedEffect(uiState.aiChatMessages.size, lastMessageLength) {
         if (uiState.aiChatMessages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.aiChatMessages.size - 1)
+            listState.animateScrollToItem(uiState.aiChatMessages.lastIndex)
         }
     }
+    LaunchedEffect(Unit) { viewModel.refreshLocalAi() }
 
     Column(
         modifier = Modifier
@@ -2698,7 +2592,6 @@ fun CyberdeckAiWindowContent(
             .background(Slate950)
             .padding(10.dp)
     ) {
-        // Header info bar with local engine telemetry
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2710,40 +2603,33 @@ fun CyberdeckAiWindowContent(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Default.SmartToy, contentDescription = null, tint = Color(0xFFA855F7), modifier = Modifier.size(18.dp))
                 Column {
-                    Text("Qwen2.5 / Cyberdeck AI", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    Text("Dual Mode: Built-in Knowledge + Alpine llama.cpp", color = Slate400, fontSize = 8.sp)
+                    Text(
+                        if (ready) "Local AI Assistant" else "Offline Knowledge Base",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        if (ready) "Qwen2.5 1.5B - CPU - 127.0.0.1:8081" else "Built-in notes work now; the local model is opt-in",
+                        color = Slate400,
+                        fontSize = 8.sp
+                    )
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFF064E3B),
-                    border = BorderStroke(1.dp, Color(0xFF10B981))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(modifier = Modifier.size(6.dp).background(Color(0xFF34D399), CircleShape))
-                        Text("100% OFFLINE", color = Color(0xFFD1FAE5), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Slate800,
-                    modifier = Modifier.clickable {
-                        viewModel.executeSuggestedAiCommand("apk add llama.cpp && llama-cli --help")
-                    }
-                ) {
-                    Text("⚡ llama-cli", color = PhonixCyan, fontSize = 9.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
-                }
-            }
+            AiStatePill(uiState.aiEngineState)
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
-        // Quick Suggestion Chips covering all offline modules
+        if (ready) {
+            AiReadyStrip(uiState, viewModel)
+        } else {
+            AiSetupCard(uiState, viewModel)
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // The notes remain the fallback and the grounding source for the model.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2772,9 +2658,8 @@ fun CyberdeckAiWindowContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
-        // Chat Messages
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -2792,11 +2677,26 @@ fun CyberdeckAiWindowContent(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            if (msg.isUser) "You" else "Qwen2.5 Cyberdeck AI",
+                            when {
+                                msg.isUser -> "You"
+                                msg.modelGenerated -> "Local model"
+                                else -> "Offline notes"
+                            },
                             color = if (msg.isUser) PhonixCyan else Color(0xFFA855F7),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
                         )
+                        if (msg.grounded) {
+                            Text("· notes", color = Slate400, fontSize = 8.sp)
+                        }
+                        msg.tokensPerSecond?.let { speed ->
+                            Text(
+                                "· " + String.format(Locale.US, "%.1f", speed) +
+                                    if (msg.tokenCountExact) " tok/s" else " chunks/s",
+                                color = Slate400,
+                                fontSize = 8.sp
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Box(
@@ -2815,12 +2715,11 @@ fun CyberdeckAiWindowContent(
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                msg.text,
+                                if (msg.text.isBlank() && msg.modelGenerated) "▍" else msg.text,
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 lineHeight = 15.sp
                             )
-                            // Actionable Suggested Command with Run in Terminal button
                             msg.suggestedCommand?.let { cmd ->
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -2860,15 +2759,18 @@ fun CyberdeckAiWindowContent(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color(0xFFA855F7), strokeWidth = 2.dp)
-                        Text("Thinking offline...", color = Slate400, fontSize = 10.sp)
+                        Text(
+                            if (ready) "Generating locally..." else "Looking up notes...",
+                            color = Slate400,
+                            fontSize = 10.sp
+                        )
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
-        // Input Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -2878,7 +2780,13 @@ fun CyberdeckAiWindowContent(
                 value = promptInput,
                 onValueChange = { promptInput = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask about hardware, Linux commands, servers...", color = Slate500, fontSize = 11.sp) },
+                placeholder = {
+                    Text(
+                        if (ready) "Ask the local model..." else "Ask the notes...",
+                        color = Slate500,
+                        fontSize = 11.sp
+                    )
+                },
                 singleLine = true,
                 shape = RoundedCornerShape(8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -2893,18 +2801,215 @@ fun CyberdeckAiWindowContent(
 
             IconButton(
                 onClick = {
-                    if (promptInput.isNotBlank()) {
+                    if (uiState.isAiGenerating) {
+                        viewModel.stopAiGeneration()
+                    } else if (promptInput.isNotBlank()) {
                         viewModel.sendAiMessage(promptInput)
                         promptInput = ""
                     }
                 },
                 modifier = Modifier
                     .size(44.dp)
-                    .background(Color(0xFFA855F7), RoundedCornerShape(8.dp))
+                    .background(
+                        if (uiState.isAiGenerating) Color(0xFFB45309) else Color(0xFFA855F7),
+                        RoundedCornerShape(8.dp)
+                    )
             ) {
-                Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(18.dp))
+                Icon(
+                    if (uiState.isAiGenerating) Icons.Default.Close else Icons.Default.Send,
+                    contentDescription = if (uiState.isAiGenerating) "Stop" else "Send",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun AiStatePill(state: AiEngineState) {
+    val label: String
+    val background: Color
+    val border: Color
+    when (state) {
+        AiEngineState.READY -> {
+            label = "MODEL READY"; background = Color(0xFF064E3B); border = Color(0xFF10B981)
+        }
+        AiEngineState.DOWNLOADING -> {
+            label = "DOWNLOADING"; background = Color(0xFF3B2A12); border = PhonixAmber
+        }
+        AiEngineState.INSTALLING, AiEngineState.STARTING, AiEngineState.CHECKING -> {
+            label = "SETTING UP"; background = Color(0xFF3B2A12); border = PhonixAmber
+        }
+        AiEngineState.ERROR -> {
+            label = "ERROR"; background = Color(0xFF3B1717); border = Color(0xFFEF4444)
+        }
+        AiEngineState.STOPPED -> {
+            label = "STOPPED"; background = Slate800; border = Slate500
+        }
+        AiEngineState.NOT_SET_UP -> {
+            label = "OFFLINE NOTES"; background = Slate800; border = Slate500
+        }
+    }
+    Surface(shape = RoundedCornerShape(10.dp), color = background, border = BorderStroke(1.dp, border)) {
+        Text(
+            label,
+            color = if (state == AiEngineState.ERROR) Color(0xFFFCA5A5) else Color(0xFFFEF3C7),
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun AiSetupCard(uiState: PhonixUiState, viewModel: PhonixViewModel) {
+    val busy = uiState.aiSetupRunning
+    val state = uiState.aiEngineState
+    val title = when (state) {
+        AiEngineState.CHECKING -> "Checking the local model"
+        AiEngineState.INSTALLING -> "Installing the model runtime"
+        AiEngineState.DOWNLOADING -> "Downloading the model"
+        AiEngineState.STARTING -> "Loading the model"
+        AiEngineState.ERROR -> "Local model needs attention"
+        AiEngineState.STOPPED -> "Local model installed"
+        else -> "Run a real model on this phone"
+    }
+    val percent = (uiState.aiDownloadProgress * 100).toInt().coerceIn(0, 100)
+    val canStart = uiState.aiModelPresent && uiState.aiServerPackagePresent
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF111827), RoundedCornerShape(8.dp))
+            .border(1.dp, Slate800, RoundedCornerShape(8.dp))
+            .padding(9.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(uiState.aiEngineMessage, color = Slate300, fontSize = 9.sp, lineHeight = 12.sp)
+            }
+            if (state == AiEngineState.ERROR) {
+                Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(15.dp))
+            }
+        }
+
+        if (busy) {
+            if (state == AiEngineState.DOWNLOADING) {
+                LinearProgressIndicator(
+                    progress = { uiState.aiDownloadProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                    color = Color(0xFFA855F7),
+                    trackColor = Slate800
+                )
+                Text(
+                    "${uiState.aiDownloadedBytes / (1024L * 1024L)} of " +
+                        "${uiState.aiDownloadTotalBytes / (1024L * 1024L)} MB - $percent%",
+                    color = Slate400,
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                    color = Color(0xFFA855F7),
+                    trackColor = Slate800
+                )
+            }
+        }
+
+        Text(
+            "About 1.0 GB download and 1.3 GB RAM while loaded. CPU inference; nothing leaves the phone.",
+            color = Slate500,
+            fontSize = 8.sp,
+            lineHeight = 11.sp
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = { viewModel.setupLocalAi() },
+                enabled = !busy,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7E22CE)),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    when {
+                        busy -> "Working..."
+                        canStart -> "Start local AI"
+                        state == AiEngineState.ERROR -> "Retry setup"
+                        else -> "Set up local AI"
+                    },
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (busy) {
+                OutlinedButton(onClick = { viewModel.cancelLocalAiSetup() }, shape = RoundedCornerShape(6.dp)) {
+                    Text("Cancel", fontSize = 10.sp)
+                }
+            } else if (state == AiEngineState.ERROR) {
+                OutlinedButton(onClick = { viewModel.refreshLocalAi() }, shape = RoundedCornerShape(6.dp)) {
+                    Text("Check again", fontSize = 10.sp)
+                }
+            }
+        }
+
+        if (state == AiEngineState.ERROR && uiState.aiSetupLog.isNotEmpty()) {
+            Text(
+                uiState.aiSetupLog.takeLast(3).joinToString("\n"),
+                color = Color(0xFFFCA5A5),
+                fontSize = 8.sp,
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 11.sp,
+                maxLines = 4
+            )
+        }
+    }
+}
+
+@Composable
+private fun AiReadyStrip(uiState: PhonixUiState, viewModel: PhonixViewModel) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF052E1B), RoundedCornerShape(8.dp))
+            .border(1.dp, Color(0xFF166534), RoundedCornerShape(8.dp))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(modifier = Modifier.size(6.dp).background(Color(0xFF34D399), CircleShape))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                LocalAiEngine.MODEL_DISPLAY_NAME,
+                color = Color(0xFFD1FAE5),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                uiState.aiModelTokensPerSecond?.let {
+                    String.format(Locale.US, "Health passed; measured %.1f tok/s", it)
+                } ?: "Health check passed; server is listening on loopback",
+                color = Color(0xFF86EFAC),
+                fontSize = 8.sp
+            )
+            Text(
+                "AI can err; safety-critical steps belong to the curated notes.",
+                color = Color(0xFFFDE68A),
+                fontSize = 7.sp,
+                lineHeight = 9.sp
+            )
+        }
+        Text(
+            "Stop",
+            color = Color(0xFFFCA5A5),
+            fontSize = 9.sp,
+            modifier = Modifier
+                .clickable { viewModel.stopLocalAi() }
+                .padding(horizontal = 5.dp, vertical = 3.dp)
+        )
     }
 }
 

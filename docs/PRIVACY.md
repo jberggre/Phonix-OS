@@ -4,6 +4,12 @@ The Privacy Hub exists for the two things a recycled phone can honestly do for p
 filter its own DNS lookups, and help its owner give a spare machine a second life as the
 household filter. It is also where a Phonix-managed unit is erased at end of life.
 
+**Status (2026-10-29, 16:29 build):** the Private DNS write path was verified on the unit
+before 1.1; the 1.1 session did not retest it. **Decommission has not been executed** — it
+would wipe the only unit — so treat it as written-but-unexercised. The current build adds a local
+model and a read-only screen mirror; their data boundaries are below. The 1.1 changes did not
+touch this screen; see [VERIFICATION.md](VERIFICATION.md) for the current work queue.
+
 ## On the phone: Private DNS
 
 Android 9+ supports DNS-over-TLS through **Settings → Network & internet → Private DNS**.
@@ -28,6 +34,24 @@ Limits worth repeating to customers:
 - DNS filtering does not remove in-page ads served from the same domain as the content.
 - The chosen resolver sees every lookup. It is a trade of one intermediary for another.
 - Private DNS applies to this phone only.
+
+## Local AI and Phone Screen
+
+These are the two features that touch sensitive data, so the boundaries are explicit:
+
+- **Local AI:** the question, system prompt and streamed answer stay on the phone. `llama-server`
+  binds `127.0.0.1:8081`; there is no cloud AI key and no external inference call. The one network
+  request is the **model download** from Hugging Face when the customer taps Set up. The model is
+  stored app-privately and can be deleted by clearing Phonix’s data (or the in-app reset). The
+  curated notes are sent to the local model only as context; they do not leave the device.
+- **Phone Screen:** `MediaProjection` captures the default display and writes it only to the
+  in-process frame state used by the Phone Screen window. It is read-only, shows Android’s
+  mandatory capture-consent dialog, and is stopped when the window closes. There is no recording,
+  no upload and no input injection. A foreground notification is always shown while capture is
+  active; a hidden capture would be a privacy defect.
+- **Network ADB** is a provisioning tool, not a product feature. It can start the app and tap the
+  consent dialog, but it does not bypass Android’s consent and should be disabled before the unit
+  is shipped.
 
 ## In the house: Pi-hole on a spare machine
 
@@ -67,3 +91,6 @@ able to silently wipe a phone.
 - "No DNS provider sees your traffic" — untrue with public Private DNS resolvers; true only
   for a self-hosted resolver with DoT.
 - "Fully automatic decommission" — a person must type `ERASE`; that is intentional.
+- "The AI never uses the network" — the initial model download is a network request; inference is
+  local. Say “inference is local”, not “the feature never touches the network”.
+- "The mirror can control the phone" — it is read-only; no taps are injected.

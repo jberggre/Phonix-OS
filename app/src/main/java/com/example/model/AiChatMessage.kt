@@ -7,18 +7,35 @@ data class AiChatMessage(
     val isUser: Boolean,
     val text: String,
     val suggestedCommand: String? = null,
-    val timestamp: String = "Now"
+    val timestamp: String = "Now",
+    /** True only for text produced by the local llama.cpp model, not the notes table. */
+    val modelGenerated: Boolean = false,
+    /** True when curated offline notes were supplied as retrieval context to the model. */
+    val grounded: Boolean = false,
+    val tokensPerSecond: Float? = null,
+    val tokenCountExact: Boolean = true
 )
 
 object DefaultAiKnowledge {
     fun getInitialMessages(): List<AiChatMessage> = listOf(
         AiChatMessage(
             isUser = false,
-            text = "Welcome to your Phonix Cyberdeck Assistant. I run 100% offline directly on this repurposed S10 motherboard.\n\nOffline Knowledge Modules Loaded:\n• 💻 Coding & Shell Scripts (Python, Bash, C, Git, Web)\n• 🌱 Farming & Agriculture (Soil NPK, composting, staple crops, seeds)\n• 🛡️ Grid-Down Survival (Water filtration, emergency radio, solar/DC power, first aid, mesh comms)\n• ⚙️ Hardware & Linux (Thermals, debloat, local servers)\n\nAsk me anything or enter a topic to begin.",
+            text = "Welcome to Phonix offline knowledge. The built-in notes work without a model. You can optionally set up a real local model (Qwen2.5 1.5B) that runs on this phone's CPU and never sends your question to a server.\n\nTopics in the notes:\n• 💻 Coding & Shell Scripts (Python, Bash, C, Git, Web)\n• 🌱 Farming & Agriculture (Soil NPK, composting, staple crops, seeds)\n• 🛡️ Grid-Down Survival (Water filtration, emergency radio, solar/DC power, first aid, mesh comms)\n• ⚙️ Hardware & Linux (Thermals, debloat, local servers)\n\nTap Set up local AI for free-form answers, or type a topic to use the notes.\n\nThe local model can still make mistakes. Safety-critical water, medical, electrical and fire instructions should be taken from the curated notes, not from free-form model text.",
             suggestedCommand = "cat /sys/class/thermal/thermal_zone0/temp",
             timestamp = "System"
         )
     )
+
+    /**
+     * The curated answer for a prompt, or null when the prompt falls through to the topic list.
+     * Used as retrieval context for the local model, not as its answer.
+     */
+    fun notesFor(prompt: String, coolingModeName: String, tempC: Float): String? {
+        val reply = matchResponse(prompt, coolingModeName, tempC).first
+        return reply.takeIf { !it.startsWith(FALLBACK_PREFIX) }
+    }
+
+    private const val FALLBACK_PREFIX = "This is the rule-based Phonix offline knowledge base"
 
     fun matchResponse(prompt: String, coolingModeName: String, tempC: Float): Pair<String, String?> {
         val lower = prompt.lowercase(java.util.Locale.ROOT)
@@ -173,7 +190,7 @@ object DefaultAiKnowledge {
             }
             lower.contains("vscode") || lower.contains("ide") -> {
                 Pair(
-                    "VS Code Web can be run on loopback port 8000 using the Alpine CLI build. You can access it via the VS Code desktop window or web browser.",
+                    "VS Code Web needs Microsoft's Alpine arm64 CLI and a working serve-web listener on port 8000. The VS Code window probes that port and reports a failure if nothing answers; the base Alpine image does not include the CLI.",
                     "code serve-web --host 127.0.0.1 --port 8000 --without-connection-token &"
                 )
             }
@@ -185,7 +202,7 @@ object DefaultAiKnowledge {
             }
             else -> {
                 Pair(
-                    "I am your offline Phonix Cyberdeck Assistant running on this custom S10 mini PC.\n\nAvailable offline modules:\n• 'survival' - Rule of 3s, shelter, fire, navigation\n• 'water' - Boiling, DIY sand/charcoal filtration, SODIS\n• 'first aid' - Bleeding, tourniquets, ORS rehydration, burns\n• 'farming' - Calorie crops, composting 3:1, seed saving\n• 'radio' - Emergency VHF/UHF/CB frequencies, mesh comms\n• 'power' - 12V to 5V buck converters, solar sizing\n• 'coding' - Python, Bash, C compiler, offline git\n• 'thermal' - Motherboard temps & cooling status",
+                    "This is the rule-based Phonix offline knowledge base, not a language model. It matches topics against built-in notes on this device.\n\nAvailable topics:\n• 'survival' - Rule of 3s, shelter, fire, navigation\n• 'water' - Boiling, DIY sand/charcoal filtration, SODIS\n• 'first aid' - Bleeding, tourniquets, ORS rehydration, burns\n• 'farming' - Calorie crops, composting 3:1, seed saving\n• 'radio' - Emergency VHF/UHF/CB frequencies, mesh comms\n• 'power' - 12V to 5V buck converters, solar sizing\n• 'coding' - Python, Bash, C compiler, offline git\n• 'thermal' - Motherboard temps & cooling status",
                     "uname -a"
                 )
             }

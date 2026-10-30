@@ -1,5 +1,16 @@
 # Phonix OS: Samsung DeX-Style Native App Overlay & First-Run Setup Engine
 
+> **Status (2026-10-29): historical implementation plan, not current documentation.**
+> This is the original AI Studio plan for the OOBE and the desktop shell. Several items below
+> were aspirational and are **not** in the shipping app — notably Docker, GPU clock control, a
+> streaming-emulator path, and some Windows-11-specific OOBE details. Do not treat it as a
+> feature list or a test plan.
+>
+> Current sources of truth:
+> - [docs/VERIFICATION.md](../../../../docs/VERIFICATION.md) — measured 1.1 state, bugs, matrix and work queue
+> - [docs/ROADMAP.md](../../../../docs/ROADMAP.md) — platform, AI and update research
+> - [docs/PROVISIONING.md](../../../../docs/PROVISIONING.md) — build, signing, install and bench traps
+
 Transforming salvaged smartphone motherboards in recycled-plastic Mini PC shells into a desktop experience. This revised plan introduces a complete **Windows 11 Out-of-Box Experience (OOBE) Setup Wizard** that runs on first launch (and can be reset anytime for a new user/buyer). It guides users through zero-waste app selection to preserve phone flash memory, aggressive mobile hardware debloating, desktop personalization, and seamless integration with the host phone's genuine installed apps, Google Play Store, and Linux tools.
 
 ---

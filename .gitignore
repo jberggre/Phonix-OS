@@ -19,3 +19,7 @@ debug.keystore
 
 # Local captures from device testing (138 MB of debug screenshots)
 /screenshots/
+
+# Local tooling and device artifacts (platform-tools, screenshots, dumps)
+/.tools/
+/artifacts/

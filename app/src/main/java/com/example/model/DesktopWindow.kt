@@ -15,9 +15,9 @@ enum class WindowType(val defaultTitle: String, val iconName: String) {
     NOTEPAD("Notepad / Editor", "note"),
     BENCHMARK("Container Benchmark", "speed"),
     ABOUT("About Phonix OS", "info"),
-    PHONE_MIRROR("Phone Screen (Display 0)", "phone_android"),
     VS_CODE("VS Code Web IDE", "code"),
-    AI_ASSISTANT("Phonix Cyberdeck AI", "smart_toy")
+    PHONE_MIRROR("Phone Screen (read-only)", "phone"),
+    AI_ASSISTANT("Local AI", "smart_toy")
 }
 
 data class DesktopWindow(

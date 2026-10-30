@@ -8,6 +8,12 @@ and what remains unverified, so the compatibility list we put on a box is honest
 Last checked: October 2026. Prices, model lists and software versions change; confirm the
 exact regional SKU before promising a customer anything.
 
+**Current app status (2026-10-29, Phonix 1.1):** the S10 unit was re-verified in phone mode and
+in simulated 1080p/mdpi metrics; a real DeX workspace was tested in earlier sessions, not in
+the 1.1 session. The measured 1.1 gaps — fixed 850 px window clamp, no resize grip, landscape
+icon clipping, and an off-screen window after a metric change — are app-side and affect every
+desktop mode, not only DeX. They are recorded in [VERIFICATION.md](VERIFICATION.md) §2 and §3.
+
 ## Quick comparison
 
 | | Samsung DeX | Google Pixel desktop mode | Motorola Mobile Desktop (Smart Connect) | LG Screen+ |
@@ -91,6 +97,80 @@ Sources: [Motorola Smart Connect compatibility chart](https://en-us.support.moto
 Sources: [Android Central — LG Android 10 desktop mode](https://www.androidcentral.com/lgs-android-10-update-came-surprise-desktop-mode),
 [GSMArena — models with desktop mode](https://www.gsmarena.com/lg_included_desktop_mode_with_its_android_10_update-news-41151.php),
 [LG — closing the mobile business](https://www.lg.com/global/newsroom/news/corporate/lg-to-close-mobile-phone-business-worldwide/).
+
+## Extra displays: mirror, extend, or a second app window
+
+These are different outcomes and should not be sold as the same feature:
+
+- **Mirror** — the second screen shows the phone's image (Smart View, most Cast routes, DisplayLink
+  Presenter).
+- **Extend** — one workspace continues across screens. Native DeX on this S10 does **not** provide
+  a supported two-external-monitor extended desktop; a multi-HDMI hub does not create one.
+- **Second app window** — Phonix draws its own content on a display Android exposes. This is the
+  realistic app-level route.
+
+| Route on the S10 | What it actually gives | Verdict |
+|---|---|---|
+| USB-C → HDMI + DeX | One external DeX workspace; the phone remains separately usable | Best first test |
+| Wireless DeX / Miracast | One DeX workspace over Wi-Fi to a Miracast receiver | One display only |
+| Smart View | Mirrors the phone screen | Not an extension |
+| Chromecast / Google Cast | Media sender/receiver, not an Android desktop | Not a monitor route |
+| `DisplayManager` + `Presentation` | App-owned UI on a secondary display Android exposes | Best app-level prototype |
+| `ActivityOptions.setLaunchDisplayId()` | Launches a Phonix activity on an existing display (API 26+) | Needs a separate activity/instance path and a real display test |
+| `MediaProjection` + `VirtualDisplay` | Captures/streams a display; not a free independent UI canvas | Streaming feature, not an extra desktop |
+| scrcpy `--new-display` | PC-rendered Android virtual display running Phonix; ADB required, dies with scrcpy | Useful bench experiment, not an appliance feature |
+| DisplayLink adapter | Vendor documents Android mirror mode, one display up to 1920×1080 | Not DeX extension |
+| Multi-HDMI dock | Community reports mirroring/one active output, not two DeX desktops | Do not promise |
+
+Samsung documents the S10 connecting to one TV/monitor by USB-C-to-HDMI, DeX Pad or DeX Station,
+and says the phone can still be used while DeX runs. It also says apps generally run on only one
+screen at a time and caps DeX at five apps. A dock with two HDMI outputs therefore does not give
+two independent DeX desktops on this unit. The Android 16/17 connected-display desktop experience
+is an OS feature on supported newer devices; it cannot be retrofitted to Android 12.
+
+**Next experiments, in order:**
+
+1. Connect a real USB-C-to-HDMI monitor and run Phonix in DeX; verify input, resize and the
+   caption bar before adding display features.
+2. Add a `DisplayManager` listener and prototype a `Presentation` with a separate Compose surface
+   for a second displayed surface. Do not assume the DeX workspace display is the raw HDMI one;
+   the existing `DesktopAutoLaunch` works around Samsung's separate `…DESKTOP` category.
+3. Test `scrcpy --new-display=1920x1080 --start-app=com.aistudio.phonix.vpxmkr` on the bench PC
+   as a development-only virtual display. It does not create a physical DeX output.
+4. Only after (1)–(3) decide whether “second display” means a shared state control surface, a
+   separate module pane, or a duplicated desktop. They need different UI and input models.
+
+**Not verified on this unit:** `Presentation`/`launchDisplayId` against Samsung's DeX display,
+whether a second Phonix instance can run on phone + external display simultaneously, and any
+route to two independent external monitors. Treat community dual-output reports as claims to test,
+not specifications.
+
+Sources: [Android connected displays](https://developer.android.com/develop/adaptive-apps/guides/support-connected-displays),
+[`Presentation`](https://android.googlesource.com/platform/frameworks/base/+/b267554/core/java/android/app/Presentation.java),
+[Media projection](https://developer.android.com/media/grow/media-projection),
+[scrcpy](https://github.com/Genymobile/scrcpy),
+[Samsung DeX compatibility](https://www.samsung.com/us/support/answer/ANS10001955/),
+[Samsung dual-output discussion](https://r1.community.samsung.com/t5/samsung-dex/dual-monitor-output-for-dex/td-p/14136930)
+(community report, not a specification).
+
+## Phone Screen capture (not an extra display)
+
+Phonix now has a separate **Phone Screen (read-only)** window, restored on 2026-10-29. It uses
+`MediaProjectionManager.createScreenCaptureIntent()` and a `mediaProjection` foreground service to
+show the **default display**; it does not extend the desktop or create a second workspace.
+
+- Android’s capture-consent dialog is mandatory. The token is per session and is lost when the
+  service stops or the unit reboots; there is no public device-owner bypass.
+- The window is read-only. Android does not let an ordinary app inject touches into another app’s
+  window without an AccessibilityService, and Phonix does not ship one.
+- On the phone’s own panel the captured window necessarily contains itself. The useful case is
+  viewing the default display from DeX or another surface. **Capture while DeX is on a real
+  monitor was not tested** because no monitor was attached in this session.
+- Measured on the S10: 540×1140 first frame, foreground notification 4711, LIVE → OFF with
+  `dumpsys media_projection` showing `null` after Stop. See [VERIFICATION.md](VERIFICATION.md) §11.
+- On a shattered/headless unit, network ADB can accept the system prompt once with
+  `adb shell input tap` (use `uiautomator dump` for the current coordinates). That is a bench
+  workaround, not a shipping provisioning mechanism.
 
 ## What we have not verified
 

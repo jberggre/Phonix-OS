@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.engine.LinuxDesktop
 import com.example.engine.LinuxRuntime
+import com.example.engine.LocalAiEngine
 import com.example.engine.TerminalLine
 import com.example.model.DefaultServerCatalog
 import com.example.model.DesktopWindow
@@ -47,12 +48,14 @@ import com.example.model.DesktopThemePreset
 import com.example.model.AppUpdateInfo
 import com.example.model.UpdateCheckState
 import com.example.model.AiChatMessage
+import com.example.model.AiEngineState
 import com.example.model.DefaultAiKnowledge
 import com.example.model.PreferredBrowser
 import com.example.util.AppLaunchHelper
 import com.example.util.DeviceTelemetry
 import com.example.util.NetworkOnboarding
 import android.graphics.Rect
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -64,7 +67,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.net.Inet4Address
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
+import java.net.Socket
 import java.util.Locale
 import java.util.UUID
 
@@ -164,12 +169,23 @@ data class PhonixUiState(
     // Software Updates (GitHub Releases)
     val updateState: UpdateCheckState = UpdateCheckState.IDLE,
     val updateInfo: AppUpdateInfo? = null,
-    // Cyberdeck Local AI Assistant
+    // Local AI: the model is opt-in, downloaded outside the APK, and only READY after /health.
     val aiChatMessages: List<AiChatMessage> = DefaultAiKnowledge.getInitialMessages(),
     val isAiGenerating: Boolean = false,
-    // Phone Screen Mirror (Display 0 Rescue)
-    val phoneMirrorLastTap: Pair<Int, Int>? = null,
-    val vsCodeServerRunning: Boolean = false
+    val aiEngineState: AiEngineState = AiEngineState.NOT_SET_UP,
+    val aiEngineMessage: String = "Local model not set up - the built-in notes still work offline.",
+    val aiSetupRunning: Boolean = false,
+    val aiModelPresent: Boolean = false,
+    val aiServerPackagePresent: Boolean = false,
+    val aiDownloadProgress: Float = 0f,
+    val aiDownloadedBytes: Long = 0L,
+    val aiDownloadTotalBytes: Long = LocalAiEngine.MODEL_BYTES,
+    val aiSetupLog: List<String> = emptyList(),
+    val aiModelTokensPerSecond: Float? = null,
+    // VS Code is only "running" after a real loopback connection succeeds.
+    val vsCodeServerRunning: Boolean = false,
+    val vsCodeServerProbing: Boolean = false,
+    val vsCodeServerStatus: String = "Server not started"
 )
 
 enum class BootTarget {
@@ -273,6 +289,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     private var telemetryJob: Job? = null
     private var networkWatcher: AutoCloseable? = null
     private var maxZIndex: Float = 3f
+    private val localAi = LocalAiEngine(application)
+    private var aiSetupJob: Job? = null
+    private var aiChatJob: Job? = null
+    private var aiStreamingMessageId: String? = null
 
     init {
         val prefs = application.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
@@ -637,7 +657,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 width = when (type) {
                     WindowType.BROWSER -> 400f
                     WindowType.PRIVACY -> 470f
-                    WindowType.PHONE_MIRROR -> 360f
                     WindowType.VS_CODE -> 640f
                     WindowType.AI_ASSISTANT -> 440f
                     else -> 360f
@@ -645,7 +664,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 height = when (type) {
                     WindowType.BROWSER -> 380f
                     WindowType.PRIVACY -> 540f
-                    WindowType.PHONE_MIRROR -> 540f
                     WindowType.VS_CODE -> 480f
                     WindowType.AI_ASSISTANT -> 480f
                     else -> 340f
@@ -1009,11 +1027,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setWizardStep(step: Int) {
-        _uiState.update { it.copy(wizardStep = step.coerceIn(0, 6)) }
+        _uiState.update { it.copy(wizardStep = step.coerceIn(0, 5)) }
     }
 
     fun nextWizardStep() {
-        _uiState.update { it.copy(wizardStep = (it.wizardStep + 1).coerceAtMost(6)) }
+        _uiState.update { it.copy(wizardStep = (it.wizardStep + 1).coerceAtMost(5)) }
     }
 
     fun prevWizardStep() {
@@ -2001,30 +2019,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // -------------------------------------------------------------
-    // Display 0 Phone Screen Rescue (for broken / shattered phones)
-    // -------------------------------------------------------------
-    fun sendPhoneTouch(xNorm: Float, yNorm: Float) {
-        val targetX = (xNorm.coerceIn(0f, 1f) * 1080f).toInt()
-        val targetY = (yNorm.coerceIn(0f, 1f) * 2280f).toInt()
-        _uiState.update { it.copy(phoneMirrorLastTap = Pair(targetX, targetY)) }
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                Runtime.getRuntime().exec(arrayOf("sh", "-c", "input -d 0 tap $targetX $targetY"))
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    fun sendPhoneKey(keyCode: Int) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                Runtime.getRuntime().exec(arrayOf("sh", "-c", "input -d 0 keyevent $keyCode"))
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    // -------------------------------------------------------------
     // Manual GitHub Software Updates (User-initiated, No Backdoors)
     // -------------------------------------------------------------
     fun checkAppUpdates() {
@@ -2110,11 +2104,263 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // -------------------------------------------------------------
-    // Cyberdeck Local AI Assistant
+    // Local AI Assistant
     // -------------------------------------------------------------
+    private fun appendAiSetupLog(text: String) {
+        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        if (lines.isEmpty()) return
+        _uiState.update { state ->
+            state.copy(aiSetupLog = (state.aiSetupLog + lines).takeLast(10))
+        }
+    }
+
+    private fun failAiSetup(message: String) {
+        _uiState.update {
+            it.copy(
+                aiSetupRunning = false,
+                aiEngineState = AiEngineState.ERROR,
+                aiEngineMessage = message,
+                aiSetupLog = (it.aiSetupLog + message).takeLast(10)
+            )
+        }
+    }
+
+    /**
+     * Reads the model and guest package from disk, then probes /health. It never starts the
+     * server just to answer this check; START is an explicit customer action.
+     */
+    fun refreshLocalAi() {
+        if (_uiState.value.aiSetupRunning) return
+        _uiState.update {
+            it.copy(aiEngineState = AiEngineState.CHECKING, aiEngineMessage = "Checking the local model...")
+        }
+        viewModelScope.launch {
+            val modelPresent = localAi.hasModel()
+            val (healthy, packagePresent) = withContext(Dispatchers.IO) {
+                localAi.isServerHealthy() to localAi.isServerPackageInstalled()
+            }
+            _uiState.update { state ->
+                when {
+                    healthy -> state.copy(
+                        aiEngineState = AiEngineState.READY,
+                        aiEngineMessage = "Ready - replies stay on this device.",
+                        aiModelPresent = modelPresent,
+                        aiServerPackagePresent = packagePresent,
+                        aiDownloadedBytes = if (modelPresent) LocalAiEngine.MODEL_BYTES else state.aiDownloadedBytes,
+                        aiDownloadProgress = if (modelPresent) 1f else state.aiDownloadProgress
+                    )
+                    modelPresent && packagePresent -> state.copy(
+                        aiEngineState = AiEngineState.STOPPED,
+                        aiEngineMessage = "Model installed. Start it to get free-form answers.",
+                        aiModelPresent = true,
+                        aiServerPackagePresent = true,
+                        aiDownloadedBytes = LocalAiEngine.MODEL_BYTES,
+                        aiDownloadProgress = 1f
+                    )
+                    modelPresent -> state.copy(
+                        aiEngineState = AiEngineState.STOPPED,
+                        aiEngineMessage = "Model file present, but llama-server is not installed. Run setup.",
+                        aiModelPresent = true,
+                        aiServerPackagePresent = false,
+                        aiDownloadedBytes = LocalAiEngine.MODEL_BYTES,
+                        aiDownloadProgress = 1f
+                    )
+                    else -> state.copy(
+                        aiEngineState = AiEngineState.NOT_SET_UP,
+                        aiEngineMessage = "Local model not set up - the built-in notes still work offline.",
+                        aiModelPresent = false,
+                        aiServerPackagePresent = packagePresent,
+                        aiDownloadProgress = 0f
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Opt-in setup: boot the guest, install Alpine's llama-server if missing, download and
+     * verify the GGUF, launch the server, and only then report READY from /health.
+     */
+    fun setupLocalAi() {
+        if (_uiState.value.aiSetupRunning || _uiState.value.aiEngineState == AiEngineState.READY) return
+        aiSetupJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    aiSetupRunning = true,
+                    aiEngineState = AiEngineState.INSTALLING,
+                    aiEngineMessage = "Starting the Linux container...",
+                    aiSetupLog = emptyList(),
+                    aiDownloadProgress = 0f
+                )
+            }
+            try {
+                if (!localAi.ensureContainer()) {
+                    failAiSetup("The Alpine container did not start. Open Terminal and check its output.")
+                    return@launch
+                }
+
+                if (!localAi.isServerPackageInstalled()) {
+                    _uiState.update {
+                        it.copy(
+                            aiEngineState = AiEngineState.INSTALLING,
+                            aiEngineMessage = "Installing llama-server inside Alpine..."
+                        )
+                    }
+                    val install = localAi.ensureServerPackage(::appendAiSetupLog)
+                    if (install.isFailure) {
+                        failAiSetup(install.exceptionOrNull()?.message ?: "llama-server installation failed.")
+                        return@launch
+                    }
+                }
+                _uiState.update { it.copy(aiServerPackagePresent = true) }
+
+                if (!localAi.hasModel()) {
+                    _uiState.update {
+                        it.copy(
+                            aiEngineState = AiEngineState.DOWNLOADING,
+                            aiEngineMessage = "Downloading ${LocalAiEngine.MODEL_DISPLAY_NAME}...",
+                            aiDownloadedBytes = 0L,
+                            aiDownloadProgress = 0f,
+                            aiDownloadTotalBytes = LocalAiEngine.MODEL_BYTES
+                        )
+                    }
+                    val download = localAi.downloadModel(
+                        onProgress = { done, total ->
+                            val safeTotal = total.coerceAtLeast(1L)
+                            _uiState.update {
+                                it.copy(
+                                    aiDownloadedBytes = done,
+                                    aiDownloadTotalBytes = safeTotal,
+                                    aiDownloadProgress = (done.toFloat() / safeTotal).coerceIn(0f, 1f),
+                                    aiEngineMessage = "Downloading model: ${done * 100 / safeTotal}%"
+                                )
+                            }
+                        },
+                        onLog = ::appendAiSetupLog
+                    )
+                    if (download.isFailure) {
+                        failAiSetup(download.exceptionOrNull()?.message ?: "Model download failed.")
+                        return@launch
+                    }
+                    _uiState.update { it.copy(aiModelPresent = true, aiDownloadProgress = 1f) }
+                }
+
+                _uiState.update {
+                    it.copy(
+                        aiEngineState = AiEngineState.STARTING,
+                        aiEngineMessage = "Loading the model into RAM. This can take 30-90 seconds..."
+                    )
+                }
+                val start = localAi.startServer(::appendAiSetupLog)
+                if (start.isFailure) {
+                    failAiSetup(start.exceptionOrNull()?.message ?: "llama-server did not start.")
+                    return@launch
+                }
+
+                _uiState.update {
+                    it.copy(
+                        aiSetupRunning = false,
+                        aiEngineState = AiEngineState.READY,
+                        aiEngineMessage = "Ready - replies stay on this device.",
+                        aiModelPresent = true,
+                        aiServerPackagePresent = true,
+                        aiDownloadProgress = 1f,
+                        aiModelTokensPerSecond = null
+                    )
+                }
+            } catch (e: CancellationException) {
+                _uiState.update {
+                    it.copy(
+                        aiSetupRunning = false,
+                        aiEngineState = if (it.aiModelPresent) AiEngineState.STOPPED else AiEngineState.NOT_SET_UP,
+                        aiEngineMessage = "Setup canceled."
+                    )
+                }
+                throw e
+            } catch (t: Throwable) {
+                failAiSetup("Setup failed: ${t.message ?: t.javaClass.simpleName}")
+            } finally {
+                _uiState.update { if (it.aiSetupRunning) it.copy(aiSetupRunning = false) else it }
+            }
+        }
+    }
+
+    fun cancelLocalAiSetup() {
+        aiSetupJob?.cancel()
+        aiSetupJob = null
+        _uiState.update {
+            it.copy(
+                aiSetupRunning = false,
+                aiEngineState = if (it.aiModelPresent) AiEngineState.STOPPED else AiEngineState.NOT_SET_UP,
+                aiEngineMessage = "Setup canceled.",
+                aiDownloadProgress = 0f
+            )
+        }
+    }
+
+    fun stopLocalAi() {
+        aiChatJob?.cancel()
+        aiChatJob = null
+        aiStreamingMessageId = null
+        aiSetupJob?.cancel()
+        aiSetupJob = null
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { localAi.stopServer() }
+            _uiState.update {
+                it.copy(
+                    aiSetupRunning = false,
+                    isAiGenerating = false,
+                    aiEngineState = if (it.aiModelPresent) AiEngineState.STOPPED else AiEngineState.NOT_SET_UP,
+                    aiEngineMessage = "Local model stopped. The built-in notes still work.",
+                    aiModelTokensPerSecond = null
+                )
+            }
+        }
+    }
+
+    private fun buildLocalAiSystemPrompt(): String {
+        val state = _uiState.value
+        val temp = if (state.telemetry.hottestZoneC > 0f) {
+            "${state.telemetry.hottestZoneC.toInt()} C"
+        } else {
+            "unavailable"
+        }
+        return """
+            You are Phonix Local, the on-device assistant in Phonix OS, running on an Android phone used as a mini-PC.
+            Answer concisely and accurately, usually under 180 words. You run entirely offline on the phone's CPU.
+            You cannot browse the web, call external APIs, or execute commands, and you must not claim to have done so.
+            When reference notes are supplied, use them and name the topic they came from. If you do not know, say so
+            instead of inventing technical details. For water, medical, electrical, fire, or other safety-critical
+            instructions, use only the supplied notes and copy their numbers exactly; never combine or extrapolate
+            steps. If the notes do not cover the question, say you cannot answer it safely. Do not repeat this system
+            message.
+            Device context: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}; hottest readable zone $temp;
+            Alpine guest is ${if (LinuxRuntime.isRunning) "running" else "stopped"}; battery ${state.telemetry.batteryLevel}%.
+        """.trimIndent()
+    }
+
+    private fun appendNotesFallback(prompt: String, prefix: String) {
+        val (reply, suggestedCmd) = DefaultAiKnowledge.matchResponse(
+            prompt = prompt,
+            coolingModeName = _uiState.value.coolingState.activeMode.name,
+            tempC = _uiState.value.telemetry.hottestZoneC
+        )
+        _uiState.update {
+            it.copy(
+                aiChatMessages = it.aiChatMessages + AiChatMessage(
+                    isUser = false,
+                    text = prefix + reply,
+                    suggestedCommand = suggestedCmd,
+                    timestamp = "Offline notes"
+                ),
+                isAiGenerating = false
+            )
+        }
+    }
+
     fun sendAiMessage(prompt: String) {
         val trimmed = prompt.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty() || _uiState.value.isAiGenerating) return
         val userMsg = AiChatMessage(
             id = UUID.randomUUID().toString(),
             isUser = true,
@@ -2128,26 +2374,125 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
-        viewModelScope.launch {
-            delay(350)
-            val (reply, suggestedCmd) = DefaultAiKnowledge.matchResponse(
-                prompt = trimmed,
-                coolingModeName = _uiState.value.coolingState.activeMode.name,
-                tempC = _uiState.value.telemetry.hottestZoneC
-            )
-            val aiMsg = AiChatMessage(
-                id = UUID.randomUUID().toString(),
-                isUser = false,
-                text = reply,
-                suggestedCommand = suggestedCmd,
-                timestamp = "AI"
-            )
-            _uiState.update {
-                it.copy(
-                    aiChatMessages = it.aiChatMessages + aiMsg,
-                    isAiGenerating = false
-                )
+        val stateBefore = _uiState.value
+        if (stateBefore.aiEngineState != AiEngineState.READY) {
+            val prefix = when (stateBefore.aiEngineState) {
+                AiEngineState.INSTALLING, AiEngineState.DOWNLOADING, AiEngineState.STARTING ->
+                    "The local model is still setting up, so this answer comes from the built-in notes.\n\n"
+                AiEngineState.ERROR ->
+                    "The local model is not available right now, so this answer comes from the built-in notes.\n\n"
+                else ->
+                    "The local model is not running, so this answer comes from the built-in notes.\n\n"
             }
+            aiChatJob = viewModelScope.launch {
+                delay(150L)
+                appendNotesFallback(trimmed, prefix)
+            }
+            return
+        }
+
+        val notes = DefaultAiKnowledge.notesFor(
+            prompt = trimmed,
+            coolingModeName = stateBefore.coolingState.activeMode.name,
+            tempC = stateBefore.telemetry.hottestZoneC
+        )
+        val history = stateBefore.aiChatMessages
+            .drop(1)
+            .filter { it.isUser || it.modelGenerated }
+            .map { LocalAiEngine.ChatTurn(it.isUser, it.text) }
+        val messageId = UUID.randomUUID().toString()
+        aiStreamingMessageId = messageId
+        _uiState.update {
+            it.copy(
+                aiChatMessages = it.aiChatMessages + AiChatMessage(
+                    id = messageId,
+                    isUser = false,
+                    text = "",
+                    modelGenerated = true,
+                    grounded = notes != null,
+                    timestamp = "Local model"
+                )
+            )
+        }
+
+        val systemPrompt = buildLocalAiSystemPrompt()
+        aiChatJob = viewModelScope.launch {
+            val result = localAi.streamChat(
+                systemPrompt = systemPrompt,
+                referenceNotes = notes,
+                history = history
+            ) { token ->
+                _uiState.update { state ->
+                    state.copy(
+                        aiChatMessages = state.aiChatMessages.map {
+                            if (it.id == messageId) it.copy(text = it.text + token) else it
+                        }
+                    )
+                }
+            }
+
+            val response = result.getOrNull()
+            if (response != null) {
+                _uiState.update { state ->
+                    state.copy(
+                        aiChatMessages = state.aiChatMessages.map {
+                            if (it.id == messageId) {
+                                it.copy(
+                                    text = response.text.trim(),
+                                    tokensPerSecond = response.tokensPerSecond,
+                                    tokenCountExact = response.exactTokenCount
+                                )
+                            } else {
+                                it
+                            }
+                        },
+                        isAiGenerating = false,
+                        aiModelTokensPerSecond = response.tokensPerSecond,
+                        aiEngineMessage = "Ready - replies stay on this device."
+                    )
+                }
+            } else {
+                val error = result.exceptionOrNull()?.message ?: "the local model stopped answering"
+                val (reply, suggestedCmd) = DefaultAiKnowledge.matchResponse(
+                    prompt = trimmed,
+                    coolingModeName = _uiState.value.coolingState.activeMode.name,
+                    tempC = _uiState.value.telemetry.hottestZoneC
+                )
+                _uiState.update { state ->
+                    val withoutEmpty = state.aiChatMessages.filterNot {
+                        it.id == messageId && it.text.isBlank()
+                    }
+                    state.copy(
+                        aiChatMessages = withoutEmpty + AiChatMessage(
+                            isUser = false,
+                            text = "Local model request failed: $error\n\nAnswer from the built-in notes:\n\n$reply",
+                            suggestedCommand = suggestedCmd,
+                            timestamp = "Offline notes"
+                        ),
+                        isAiGenerating = false,
+                        aiEngineState = AiEngineState.ERROR,
+                        aiEngineMessage = "The local model stopped answering. Start it again from the card above.",
+                        aiSetupLog = (state.aiSetupLog + error).takeLast(10)
+                    )
+                }
+            }
+            aiStreamingMessageId = null
+        }
+    }
+
+    fun stopAiGeneration() {
+        aiChatJob?.cancel()
+        aiChatJob = null
+        localAi.cancelChat()
+        val messageId = aiStreamingMessageId
+        aiStreamingMessageId = null
+        _uiState.update { state ->
+            val messages = if (messageId == null) {
+                state.aiChatMessages
+            } else {
+                state.aiChatMessages.filterNot { it.id == messageId && it.text.isBlank() }
+            }
+            state.copy(aiChatMessages = messages, isAiGenerating = false)
         }
     }
 
@@ -2159,13 +2504,85 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     // -------------------------------------------------------------
     // VS Code Web Server
     // -------------------------------------------------------------
+    private suspend fun loopbackAcceptsConnections(port: Int, timeoutMs: Int = 350): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress("127.0.0.1", port), timeoutMs)
+                    true
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+    /**
+     * Starts the guest's VS Code web server and only reports it as running after a TCP
+     * connection to loopback succeeds. The CLI is not in the base Alpine image, so a missing
+     * binary now produces a visible failure instead of a green badge over a refused WebView.
+     */
     fun startVsCodeServer() {
-        _uiState.update { it.copy(vsCodeServerRunning = true) }
-        executeTerminalCommand("code serve-web --host 127.0.0.1 --port 8000 --without-connection-token &")
+        if (_uiState.value.vsCodeServerProbing) return
+        _uiState.update {
+            it.copy(
+                vsCodeServerRunning = false,
+                vsCodeServerProbing = true,
+                vsCodeServerStatus = "Starting the server; waiting for 127.0.0.1:8000..."
+            )
+        }
+        viewModelScope.launch {
+            if (loopbackAcceptsConnections(8000)) {
+                _uiState.update {
+                    it.copy(
+                        vsCodeServerProbing = false,
+                        vsCodeServerRunning = true,
+                        vsCodeServerStatus = "Listening on 127.0.0.1:8000"
+                    )
+                }
+                return@launch
+            }
+            if (!LinuxRuntime.isRunning) {
+                _uiState.update {
+                    it.copy(
+                        vsCodeServerProbing = false,
+                        vsCodeServerRunning = false,
+                        vsCodeServerStatus = "Linux container is not running - start it from Terminal, then retry."
+                    )
+                }
+                return@launch
+            }
+
+            executeTerminalCommand("code serve-web --host 127.0.0.1 --port 8000 --without-connection-token &")
+            val deadline = System.currentTimeMillis() + 12_000L
+            var listening = false
+            while (System.currentTimeMillis() < deadline && isActive) {
+                if (loopbackAcceptsConnections(8000)) {
+                    listening = true
+                    break
+                }
+                delay(500L)
+            }
+            _uiState.update {
+                it.copy(
+                    vsCodeServerProbing = false,
+                    vsCodeServerRunning = listening,
+                    vsCodeServerStatus = if (listening) {
+                        "Listening on 127.0.0.1:8000"
+                    } else {
+                        "No listener on 127.0.0.1:8000 - the VS Code CLI is missing or failed. See Terminal."
+                    }
+                )
+            }
+        }
     }
 
     override fun onCleared() {
-        // Detach only: the container belongs to the runtime, not to this activity.
+        // Detach only: the container belongs to the runtime, not to this activity. The model
+        // does stop here, because leaving a 1.5B CPU server resident after the UI closes is a
+        // battery and thermal cost the customer did not ask for.
+        aiChatJob?.cancel()
+        aiSetupJob?.cancel()
+        localAi.stopServerNow()
         networkWatcher?.close()
         LinuxRuntime.removeListener(linuxOutput)
         super.onCleared()
