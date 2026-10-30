@@ -218,8 +218,15 @@ fun PhonixDesktopScreen(
         val isWidescreenMonitor = isHardwareLandscape || customization.displayMode.isWidescreen
 
         val desktopWidth = screenWidth
+        // Windows live in the work area above the 50 dp taskbar. Without this the bottom
+        // edge of a full-height window (and its resize grip) disappears under the bar at
+        // high densities, where the window's 180 dp minimum is the whole desktop.
+        val taskbarHeight = 50.dp
         val bounds = remember(screenWidth, screenHeight) {
-            WindowBounds(screenWidth.value, screenHeight.value)
+            WindowBounds(
+                widthDp = screenWidth.value,
+                heightDp = (screenHeight - taskbarHeight).coerceAtLeast(1.dp).value
+            )
         }
         LaunchedEffect(bounds) { viewModel.normalizeWindows(bounds) }
         val unfoldedLayout = uiState.foldPosture == com.example.model.FoldPosture.FLAT || screenWidth >= 600.dp
@@ -1352,7 +1359,7 @@ fun DesktopWindowFrame(
                 )
             }
             .then(
-                if (window.isMaximized) Modifier.fillMaxSize().padding(bottom = 48.dp)
+                if (window.isMaximized) Modifier.fillMaxSize().padding(bottom = 50.dp)
                 else Modifier.size(width = window.width.dp, height = window.height.dp)
             )
             .zIndex(window.zIndex)
@@ -1388,7 +1395,10 @@ fun DesktopWindowFrame(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .pointerInput(window.id) {
+                        // Keyed on the container bounds, not the window size: a resize or rotation
+                        // must hand the gesture the new clamp, but a drag in progress must not
+                        // restart just because the window itself moved.
+                        .pointerInput(window.id, bounds) {
                             detectDragGestures { change, dragAmount ->
                                 change.consume()
                                 viewModel.moveWindow(window.id, dragAmount.x / density.density, dragAmount.y / density.density, bounds)
@@ -1504,7 +1514,10 @@ fun DesktopWindowFrame(
                             .size(30.dp)
                             .clip(RoundedCornerShape(bottomEnd = 8.dp))
                             .background(accentColor.copy(alpha = 0.72f))
-                            .pointerInput(window.id, window.width, window.height) {
+                            // Do not key this on window.width/height: every resize would
+                            // recompose, restart this detector and cancel the drag after one
+                            // frame. The container bounds are the only input that matters.
+                            .pointerInput(window.id, bounds) {
                                 detectDragGestures { change, dragAmount ->
                                     change.consume()
                                     viewModel.resizeWindow(
