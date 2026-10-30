@@ -16,6 +16,13 @@ data class AiChatMessage(
     val tokenCountExact: Boolean = true
 )
 
+/** One command the shell agent ran, with the output the guest actually returned. */
+data class AgentStep(
+    val command: String,
+    val output: String,
+    val exitNote: String = ""
+)
+
 object DefaultAiKnowledge {
     fun getInitialMessages(): List<AiChatMessage> = listOf(
         AiChatMessage(

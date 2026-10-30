@@ -11,8 +11,8 @@ enum class UpdateCheckState {
 }
 
 data class AppUpdateInfo(
-    val currentVersionName: String = "1.1",
-    val currentVersionCode: Int = 2,
+    val currentVersionName: String = "1.2",
+    val currentVersionCode: Int = 3,
     val latestVersionName: String = "1.2",
     val latestVersionCode: Int = 3,
     val releaseUrl: String = "https://github.com/JamesRBerggren/PhonixOS/releases",

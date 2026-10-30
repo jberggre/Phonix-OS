@@ -9,6 +9,7 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
 import com.example.MainActivity
+import com.example.model.DeviceCompatibilityClassifier
 
 /**
  * Opens the Phonix desktop on the external (DeX) display, maximised.
@@ -65,15 +66,36 @@ object DesktopAutoLaunch {
      * Only for the case where no workspace ever appears (a phone that simply mirrors to HDMI).
      * Launching here while a desktop exists puts the window under DeX's presentation, invisible.
      */
+    fun hasDexWorkspace(context: Context): Boolean = workspaceDisplay(context) != null
+
+    fun externalDisplays(context: Context): List<Display> =
+        (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+            ?.displays
+            ?.filter { it.displayId != Display.DEFAULT_DISPLAY && it.isExternalOutput() }
+            .orEmpty()
+
     fun physicalDisplay(context: Context): Display? {
         val manager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
             ?: return null
         return manager.displays
             .filter { it.displayId != Display.DEFAULT_DISPLAY }
             .filter { (it.flags and Display.FLAG_PRIVATE) == 0 }
-            .filter { it.state == Display.STATE_ON && !it.name.equals("Desktop", ignoreCase = true) }
+            .filter { it.isExternalOutput() && !it.name.equals("Desktop", ignoreCase = true) }
             .maxByOrNull(::areaOf)
     }
+
+    /**
+     * A second panel of the same phone is not a monitor, whatever its display id says.
+     *
+     * Measured on a Pixel 9 Pro Fold (Android 17): the cover panel appears as display 3, without
+     * FLAG_PRIVATE and without FLAG_PRESENTATION. Only a presentation output (HDMI/DP/wireless)
+     * counts here, which is also how DisplayManager filters its presentation category.
+     */
+    private fun Display.isExternalOutput(): Boolean =
+        DeviceCompatibilityClassifier.isPresentationOutput(
+            hasPresentationFlag = (flags and Display.FLAG_PRESENTATION) != 0,
+            isOn = state == Display.STATE_ON
+        )
 
     /** Workspace if it exists, otherwise the physical output (mirroring phones only). */
     fun externalDisplay(context: Context): Display? =
