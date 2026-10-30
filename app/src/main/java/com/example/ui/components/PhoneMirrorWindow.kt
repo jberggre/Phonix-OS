@@ -3,6 +3,8 @@ package com.example.ui.components
 import android.app.Activity
 import android.content.Context
 import android.media.projection.MediaProjectionManager
+import android.os.Build
+import android.view.Display
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -75,6 +77,19 @@ fun PhoneMirrorWindowContent() {
     val frame by ScreenMirror.frame.collectAsState()
     var error by remember { mutableStateOf<String?>(null) }
 
+    // The capture always mirrors the phone panel (display 0). When the desktop itself is hosted
+    // there, the feed can only ever contain Phonix - and then this window inside Phonix - so the
+    // honest thing is to say that instead of drawing a recursive screenshot.
+    val hostDisplayId = remember(context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching { (context as? Activity)?.display?.displayId }.getOrNull()
+                ?: Display.DEFAULT_DISPLAY
+        } else {
+            Display.DEFAULT_DISPLAY
+        }
+    }
+    val desktopIsOnPhonePanel = hostDisplayId == Display.DEFAULT_DISPLAY
+
     val consentLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -118,7 +133,11 @@ fun PhoneMirrorWindowContent() {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Phone Screen", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "Real display capture - read-only",
+                    if (desktopIsOnPhonePanel) {
+                        "The phone display is running Phonix"
+                    } else {
+                        "Real display capture - read-only"
+                    },
                     color = Slate400,
                     fontSize = 8.sp
                 )
@@ -151,7 +170,39 @@ fun PhoneMirrorWindowContent() {
             }
         }
 
-        if (!running) {
+        if (desktopIsOnPhonePanel) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = BorderStroke(1.dp, Slate700)
+            ) {
+                Column(
+                    modifier = Modifier.padding(11.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    Text(
+                        "The phone screen is the desktop right now",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Android is showing Phonix on this display, so capturing it can only return " +
+                            "Phonix again - the recursive picture this window used to draw.",
+                        color = Slate300,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp
+                    )
+                    Text(
+                        "Run the desktop on an external display (DeX or a USB-C monitor) and this " +
+                            "window shows the phone's real screen while you work on the monitor.",
+                        color = Slate400,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp
+                    )
+                }
+            }
+        } else if (!running) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Slate900),
@@ -248,8 +299,7 @@ fun PhoneMirrorWindowContent() {
                 }
             }
             Text(
-                "This is the actual default display, not a mock. The window is read-only; " +
-                    "on the phone's own screen it will contain itself.",
+                "This is the phone display itself, not a mock, and it stays read-only.",
                 color = Slate400,
                 fontSize = 8.sp,
                 lineHeight = 11.sp

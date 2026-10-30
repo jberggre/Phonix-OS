@@ -45,15 +45,35 @@ import com.example.model.OobeSetupConfig
 import com.example.model.AppCategory
 import com.example.model.MiniPcProfile
 import com.example.model.DesktopThemePreset
+import com.example.model.DeviceCapabilityReport
+import com.example.model.DeviceChangeChoices
+import com.example.model.DeviceFormFactor
+import com.example.model.DeviceUseMode
+import com.example.model.DisplayRoute
+import com.example.model.FoldPosture
+import com.example.model.DeviceCompatibilityClassifier
+import com.example.model.WindowBounds
+import com.example.model.WindowGeometry
 import com.example.model.AppUpdateInfo
+import com.example.model.VersionComparator
 import com.example.model.UpdateCheckState
 import com.example.model.AiChatMessage
 import com.example.model.AiEngineState
 import com.example.model.DefaultAiKnowledge
+import com.example.model.AgentStep
+import com.example.model.KnowledgeCategory
+import com.example.model.KnowledgeLibrary
 import com.example.model.PreferredBrowser
+import com.example.model.SetupPersona
 import com.example.util.AppLaunchHelper
+import com.example.util.HostDebloat
+import com.example.util.PackageFacts
 import com.example.util.DeviceTelemetry
+import com.example.util.DeviceSetupPreferences
+import com.example.util.DesktopAutoLaunch
+import com.example.util.DesktopPrefs
 import com.example.util.NetworkOnboarding
+import com.example.util.WallpaperStore
 import android.graphics.Rect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -63,6 +83,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -110,7 +133,7 @@ data class SystemTelemetry(
 
 data class PhonixUiState(
     val activeTab: AppNavTab = AppNavTab.DESKTOP,
-    val containerStatus: ContainerStatus = ContainerStatus.RUNNING,
+    val containerStatus: ContainerStatus = ContainerStatus.STOPPED,
     val availableDistros: List<LinuxDistro> = DistroCatalog.distros,
     val currentDistro: LinuxDistro = DistroCatalog.distros.first(),
     val serverServices: List<ServerServiceItem> = DefaultServerCatalog.getDefaultServices(),
@@ -152,7 +175,27 @@ data class PhonixUiState(
     val isTopNotchExpanded: Boolean = false,
     val activeContextMenu: DesktopContextMenuData? = null,
     val isOobeCompleted: Boolean = false,
+    val deviceChanges: DeviceChangeChoices = DeviceChangeChoices(),
+    val deviceCapabilityReport: DeviceCapabilityReport? = null,
+    val foldPosture: FoldPosture = FoldPosture.UNKNOWN,
     val oobeConfig: OobeSetupConfig = OobeSetupConfig(),
+    /** null until the user answers the welcome question; no silent default persona. */
+    val setupPersona: SetupPersona? = null,
+    /** Browsers that really answer a PackageManager lookup on this phone, with measured sizes. */
+    val installedBrowsers: List<com.example.util.InstalledBrowserInfo> = emptyList(),
+    /** package name -> whether this device actually has it, so the trim list stops guessing. */
+    val debloatInstalled: Map<String, Boolean> = emptyMap(),
+    /** The exact command text copied last, so the UI can confirm the paste really exists. */
+    val debloatCopiedCommand: String? = null,
+    /** Advice about the ticked packages, and whether a model or the built-in summary wrote it. */
+    val debloatAdvice: String? = null,
+    val debloatAdviceBusy: Boolean = false,
+    val debloatAdviceFromModel: Boolean = false,
+    /** True only on a device-owner install, where hiding a package is a real operation. */
+    val canRemoveHostPackages: Boolean = false,
+    /** Non-null while the rename dialog is open; the id is a shortcut or a taskbar pin. */
+    val renameTargetId: String? = null,
+    val renameDraft: String = "",
     val installedApps: List<InstalledAppInfo> = emptyList(),
     val isAddAppDialogOpen: Boolean = false,
     val addAppSearchQuery: String = "",
@@ -171,6 +214,18 @@ data class PhonixUiState(
     val updateInfo: AppUpdateInfo? = null,
     // Local AI: the model is opt-in, downloaded outside the APK, and only READY after /health.
     val aiChatMessages: List<AiChatMessage> = DefaultAiKnowledge.getInitialMessages(),
+    /** null = search every shelf. One shelf keeps a small model's context short and accurate. */
+    val aiKnowledgeScope: KnowledgeCategory? = null,
+    /** Non-null while the library reader is showing a document. */
+    val openKnowledgeDocId: String? = null,
+    val showKnowledgeLibrary: Boolean = false,
+    // Shell agent: the model proposes one command at a time, the user approves each one.
+    val agentTask: String = "",
+    val agentSteps: List<AgentStep> = emptyList(),
+    val agentPendingCommand: String? = null,
+    val agentRunning: Boolean = false,
+    val agentStatus: String = "",
+    val agentAutoRun: Boolean = false,
     val isAiGenerating: Boolean = false,
     val aiEngineState: AiEngineState = AiEngineState.NOT_SET_UP,
     val aiEngineMessage: String = "Local model not set up - the built-in notes still work offline.",
@@ -297,19 +352,59 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     init {
         val prefs = application.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
         val oobeDone = prefs.getBoolean("oobe_completed", false)
-        _uiState.update { it.copy(isOobeCompleted = oobeDone) }
+        val savedChanges = DeviceSetupPreferences.choices(application)
+        val setupConfig = OobeSetupConfig(
+            deviceChanges = savedChanges,
+            enableLinuxDesktop = savedChanges.startLinuxOnLaunch
+        )
+        // Personalisation is remembered across launches: wallpaper, accent, toggles, icon
+        // positions, renames and the taskbar pins.
+        val savedDesktop = DesktopPrefs.load(application)
+        _uiState.update {
+            it.copy(
+                isOobeCompleted = oobeDone,
+                deviceChanges = savedChanges,
+                oobeConfig = setupConfig,
+                customization = savedDesktop ?: it.customization
+            )
+        }
+        persistDesktopLayout()
 
         detectLocalIp()
         initTerminalWelcome()
         startTelemetryLoop()
         loadInstalledApps(application)
         LinuxRuntime.addListener(linuxOutput)
-        bootstrapLinux()
-        NetworkOnboarding.allowSsidReadback(application)
+        if (DeviceSetupPreferences.shouldStartLinuxOnLaunch(application)) bootstrapLinux()
+        if (DeviceSetupPreferences.mayManageDeviceOwnerNetwork(application)) {
+            NetworkOnboarding.allowSsidReadback(application)
+        }
         refreshNetwork(allowFirstRunPrompt = true)
         // Every link change (join, drop, Ethernet plugged in) refreshes the header and screen.
         networkWatcher = NetworkOnboarding.watch(application) { refreshNetwork() }
         refreshLinuxApps()
+    }
+
+    /**
+     * Writes the desktop layout back to disk whenever it changes.
+     *
+     * Debounced because a drag writes a position on every pointer move; without it the app would
+     * serialise the whole layout dozens of times per second while an icon is being dragged.
+     */
+    private fun persistDesktopLayout() {
+        viewModelScope.launch {
+            _uiState
+                .map { it.customization }
+                .distinctUntilChanged()
+                // collectLatest cancels the pending write when another change arrives, so a drag
+                // that fires sixty positions a second still writes once, when the finger stops.
+                .collectLatest { customization ->
+                    delay(600L)
+                    withContext(Dispatchers.IO) {
+                        DesktopPrefs.save(getApplication(), customization)
+                    }
+                }
+        }
     }
 
     /**
@@ -363,11 +458,18 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * the return value of the write, so the customer never sees "connected" while offline.
      */
     fun connectToWifi(ssid: String, password: String) {
+        if (!DeviceSetupPreferences.mayManageDeviceOwnerNetwork(getApplication())) {
+            openAndroidWifiSettings()
+            _uiState.update { it.copy(notificationMessage = "Use Android Wi-Fi settings unless device-owner network management is enabled in setup.") }
+            return
+        }
         if (_uiState.value.networkBusy) return
         _uiState.update { it.copy(networkBusy = true, networkMessage = null) }
         viewModelScope.launch(Dispatchers.IO) {
             val app = getApplication<Application>()
-            NetworkOnboarding.allowSsidReadback(app)
+            if (DeviceSetupPreferences.mayManageDeviceOwnerNetwork(app)) {
+                NetworkOnboarding.allowSsidReadback(app)
+            }
             when (val result = NetworkOnboarding.connectWifi(app, ssid, password)) {
                 is NetworkOnboarding.ConnectResult.Rejected ->
                     _uiState.update { it.copy(networkBusy = false, networkMessage = result.reason) }
@@ -490,9 +592,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 LinuxRuntime.start(getApplication())
-                // A foreground service keeps the process alive when the desktop closes,
-                // which is what makes this behave like a machine rather than an app.
-                startBackgroundServiceIfActive()
+                // A foreground service is only started when the user opted into keeping
+                // Linux alive beyond the visible app session.
+                if (DeviceSetupPreferences.shouldKeepLinuxInBackground(getApplication())) {
+                    startBackgroundServiceIfActive()
+                }
                 LinuxRuntime.send("uname -a; cat /etc/os-release | head -2")
             } catch (t: Throwable) {
                 appendTerminalLine(
@@ -684,6 +788,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun closeWindow(windowId: String) {
+        val closedType = _uiState.value.windows.firstOrNull { it.id == windowId }?.type
         _uiState.update { state ->
             val updated = state.windows.filter { it.id != windowId }
             state.copy(
@@ -691,7 +796,38 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 activeWindowId = updated.maxByOrNull { it.zIndex }?.id
             )
         }
+        // Closing is a reset, minimising is not. A closed window comes back fresh; a minimised
+        // one keeps exactly what was in it, the way a desktop app behaves.
+        if (closedType == WindowType.AI_ASSISTANT) endAiSession()
     }
+
+    /**
+     * Drops the assistant's conversation and library state. Minimising keeps it; closing the
+     * window, or leaving the desktop, throws it away, so the next question starts with a clean
+     * context instead of yesterday's topic leaking into today's answer.
+     */
+    private fun endAiSession() {
+        aiChatJob?.cancel()
+        aiChatJob = null
+        aiStreamingMessageId = null
+        _uiState.update { state ->
+            state.copy(
+                aiChatMessages = DefaultAiKnowledge.getInitialMessages(),
+                aiKnowledgeScope = null,
+                openKnowledgeDocId = null,
+                showKnowledgeLibrary = false,
+                agentTask = "",
+                agentSteps = emptyList(),
+                agentPendingCommand = null,
+                agentRunning = false,
+                agentStatus = "",
+                isAiGenerating = false
+            )
+        }
+    }
+
+    /** Public entry point for "New conversation" in the assistant header. */
+    fun clearAiConversation() = endAiSession()
 
     fun minimizeWindow(windowId: String) {
         _uiState.update { state ->
@@ -728,27 +864,32 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun moveWindow(windowId: String, deltaX: Float, deltaY: Float) {
+    fun normalizeWindows(bounds: WindowBounds) {
+        _uiState.update { state ->
+            state.copy(windows = state.windows.map { if (it.isMaximized) it else WindowGeometry.normalize(it, bounds) })
+        }
+    }
+
+    fun moveWindow(windowId: String, deltaX: Float, deltaY: Float, bounds: WindowBounds? = null) {
         _uiState.update { state ->
             state.copy(
                 windows = state.windows.map { win ->
                     if (win.id == windowId && !win.isMaximized) {
-                        win.copy(
-                            posX = (win.posX + deltaX).coerceIn(-100f, 850f),
-                            posY = (win.posY + deltaY).coerceIn(8f, 750f)
-                        )
+                        if (bounds != null) WindowGeometry.move(win, deltaX, deltaY, bounds)
+                        else win.copy(posX = win.posX + deltaX, posY = win.posY + deltaY)
                     } else win
                 }
             )
         }
     }
 
-    fun resizeWindow(windowId: String, deltaWidth: Float, deltaHeight: Float) {
+    fun resizeWindow(windowId: String, deltaWidth: Float, deltaHeight: Float, bounds: WindowBounds? = null) {
         _uiState.update { state ->
             state.copy(
                 windows = state.windows.map { win ->
                     if (win.id == windowId && !win.isMaximized) {
-                        win.copy(
+                        if (bounds != null) WindowGeometry.resize(win, deltaWidth, deltaHeight, bounds)
+                        else win.copy(
                             width = (win.width + deltaWidth).coerceIn(240f, 900f),
                             height = (win.height + deltaHeight).coerceIn(180f, 800f)
                         )
@@ -780,7 +921,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
         if (trimmed.equals("poweroff", ignoreCase = true) || trimmed.equals("shutdown", ignoreCase = true)) {
             _uiState.update { it.copy(terminalInput = "") }
-            toggleContainerPower()
+            // Shutdown must not toggle: on a stopped container that booted the guest instead.
+            stopContainer()
             return
         }
 
@@ -877,6 +1019,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     fun selectTab(tab: AppNavTab) = setActiveTab(tab)
 
     fun toggleBackgroundService(enabled: Boolean) {
+        if (enabled && !DeviceSetupPreferences.shouldKeepLinuxInBackground(getApplication())) {
+            _uiState.update { it.copy(notificationMessage = "Enable background Linux in Device & Display Setup first.") }
+            return
+        }
         _uiState.update { state ->
             state.copy(
                 notificationMessage = if (enabled) "24/7 background mode enabled" else "Background mode disabled"
@@ -994,13 +1140,26 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 stopBackgroundService()
             } else {
                 _uiState.update { it.copy(containerStatus = ContainerStatus.STARTING) }
-                withContext(Dispatchers.IO) {
+                val started = withContext(Dispatchers.IO) {
                     runCatching { LinuxRuntime.start(getApplication()) }
                         .onFailure { appendTerminalLine(TerminalLine("[container] start failed: ${it.message}", TerminalLine.LineType.ERROR)) }
+                        .isSuccess
                 }
-                _uiState.update { it.copy(containerStatus = ContainerStatus.RUNNING) }
-                startBackgroundServiceIfActive()
+                // A start that threw is not a running guest; the status tile must not claim otherwise.
+                _uiState.update {
+                    it.copy(containerStatus = if (started) ContainerStatus.RUNNING else ContainerStatus.STOPPED)
+                }
+                if (started) startBackgroundServiceIfActive()
             }
+        }
+    }
+
+    /** Stops the guest. Idempotent, unlike the power toggle, so `shutdown` can call it safely. */
+    fun stopContainer() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(containerStatus = ContainerStatus.STOPPED) }
+            withContext(Dispatchers.IO) { LinuxRuntime.stop() }
+            stopBackgroundService()
         }
     }
 
@@ -1015,23 +1174,46 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
     fun dismissNotification() {
         _uiState.update { it.copy(notificationMessage = null) }
+    }    // Hand-holding Walkthrough Installation Wizard Methods
+    fun openInstallationWizard() {
+
+        val completed = _uiState.value.isOobeCompleted
+        _uiState.update {
+            it.copy(isWizardOpen = true, wizardStep = if (completed) 5 else 0, isWizardDeploying = false)
+        }
     }
 
-    // Hand-holding Walkthrough Installation Wizard Methods
-    fun openInstallationWizard() {
-        _uiState.update { it.copy(isWizardOpen = true, wizardStep = 0, isWizardDeploying = false) }
+
+    fun shouldPromptDeviceSetup(): Boolean =
+        !DeviceSetupPreferences.hasSavedChoices(getApplication<Application>())
+
+
+
+    fun setDeviceSetupSaved() {
+        syncOobeDeviceChoices()
+        saveSetupChoices()
+        _uiState.update { it.copy(notificationMessage = "Device choices saved.") }
     }
+
+    fun saveSetupChoices() {
+        val app = getApplication<Application>()
+        DeviceSetupPreferences.save(app, _uiState.value.deviceChanges)
+        app.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("oobe_completed", true).apply()
+        _uiState.update { it.copy(isOobeCompleted = true) }
+    }
+
 
     fun closeInstallationWizard() {
         _uiState.update { it.copy(isWizardOpen = false) }
     }
 
     fun setWizardStep(step: Int) {
-        _uiState.update { it.copy(wizardStep = step.coerceIn(0, 5)) }
+        _uiState.update { it.copy(wizardStep = step.coerceIn(0, 6)) }
     }
 
     fun nextWizardStep() {
-        _uiState.update { it.copy(wizardStep = (it.wizardStep + 1).coerceAtMost(5)) }
+        _uiState.update { it.copy(wizardStep = (it.wizardStep + 1).coerceAtMost(6)) }
     }
 
     fun prevWizardStep() {
@@ -1069,6 +1251,114 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun updateDeviceChanges(choices: DeviceChangeChoices) {
+        _uiState.update { it.copy(deviceChanges = choices, oobeConfig = it.oobeConfig.copy(deviceChanges = choices)) }
+    }
+
+    private fun syncOobeDeviceChoices() {
+        _uiState.update { state ->
+            state.copy(oobeConfig = state.oobeConfig.copy(deviceChanges = state.deviceChanges))
+        }
+    }
+
+    fun refreshDeviceCapabilityReport(context: Context, windowWidthDp: Int) {
+        val foldPosture = _uiState.value.foldPosture
+        val hasDexWorkspace = DesktopAutoLaunch.hasDexWorkspace(context)
+        val externalCount = DesktopAutoLaunch.externalDisplays(context).size
+        val manufacturer = Build.MANUFACTURER
+        val route = DeviceCompatibilityClassifier.displayRoute(
+            manufacturer,
+            hasDexWorkspace,
+            externalCount > 0
+        )
+        val formFactor = DeviceCompatibilityClassifier.formFactor(foldPosture, windowWidthDp)
+        val report = DeviceCapabilityReport(
+            manufacturer = manufacturer,
+            model = Build.MODEL,
+            androidRelease = Build.VERSION.RELEASE,
+            apiLevel = Build.VERSION.SDK_INT,
+            appTargetSdk = context.applicationInfo.targetSdkVersion,
+            route = route,
+            formFactor = formFactor,
+            externalDisplayCount = externalCount,
+            hasDexWorkspace = hasDexWorkspace,
+            isDeviceOwner = NetworkOnboarding.isDeviceOwner(context),
+            canWriteSecureSettings = context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+            recommendedCheck = DeviceCompatibilityClassifier.recommendation(route, manufacturer, Build.VERSION.SDK_INT) +
+                if (context.applicationInfo.targetSdkVersion >= 37 && Build.VERSION.SDK_INT >= 37) {
+                    " Android 17 large-screen resizability restrictions apply; keep the activity resizable."
+                } else ""
+        )
+        _uiState.update { it.copy(deviceCapabilityReport = report) }
+    }
+
+    fun updateFoldPosture(posture: FoldPosture, windowWidthDp: Int) {
+        _uiState.update { it.copy(foldPosture = posture) }
+        refreshDeviceCapabilityReport(getApplication(), windowWidthDp)
+    }
+
+    fun applySavedDeviceChoices() {
+        val app = getApplication<Application>()
+        val wasKeepingLinuxInBackground = DeviceSetupPreferences.shouldKeepLinuxInBackground(app)
+        val choices = _uiState.value.deviceChanges
+        DeviceSetupPreferences.save(app, choices)
+        if (choices.applySystemWallpaper) {
+            Thread { com.example.util.WallpaperProvisioner.applyOnce(app) }.start()
+        }
+        if (choices.keepLinuxInBackground) {
+            if (LinuxRuntime.isRunning || choices.startLinuxOnLaunch) startBackgroundServiceIfActive()
+        } else {
+            if (wasKeepingLinuxInBackground) stopBackgroundService()
+            if (choices.startLinuxOnLaunch && !LinuxRuntime.isRunning) bootstrapLinux()
+        }
+        if (choices.allowDeviceOwnerNetworkManagement && NetworkOnboarding.isDeviceOwner(app)) {
+            NetworkOnboarding.allowSsidReadback(app)
+        }
+        if (choices.watchExternalDisplays) {
+            com.example.service.DesktopAutoLaunchService.start(app)
+        } else {
+            app.stopService(Intent(app, com.example.service.DesktopAutoLaunchService::class.java))
+        }
+        _uiState.update {
+            it.copy(notificationMessage = "Device choices applied. System-wide DNS, device-owner, erase, and debloat actions remain individually gated.")
+        }
+    }
+
+    fun selectDeviceUseMode(mode: DeviceUseMode) {
+        val enabled = mode == DeviceUseMode.CYBERDECK
+        val choices = _uiState.value.deviceChanges.copy(
+            useMode = mode,
+            applySystemWallpaper = enabled,
+            startLinuxOnLaunch = enabled,
+            keepLinuxInBackground = enabled,
+            startLinuxAtBoot = enabled,
+            watchExternalDisplays = enabled,
+            immersiveExternalDisplay = enabled,
+            allowSystemPrivateDns = false,
+            allowDeviceOwnerNetworkManagement = enabled,
+            allowDebloatCommands = enabled,
+            allowFactoryReset = false
+        )
+        _uiState.update {
+            it.copy(
+                deviceChanges = choices,
+                oobeConfig = it.oobeConfig.copy(deviceChanges = choices)
+            )
+        }
+    }
+
+    fun setDeviceChangeChoice(update: (DeviceChangeChoices) -> DeviceChangeChoices) {
+        _uiState.update { state ->
+            val choices = update(state.deviceChanges)
+            state.copy(deviceChanges = choices, oobeConfig = state.oobeConfig.copy(deviceChanges = choices))
+        }
+    }
+
+
+    fun updateCapabilityReport(report: DeviceCapabilityReport) {
+        _uiState.update { it.copy(deviceCapabilityReport = report) }
+    }
+
     fun toggleBatteryRemovedDirectPower(enabled: Boolean) {
         _uiState.update { state ->
             state.copy(
@@ -1104,44 +1394,76 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             _uiState.update { it.copy(isWizardDeploying = true, wizardProgress = 0.05f, wizardLogs = emptyList()) }
-            progress(0.05f, "Starting the Alpine container...")
-
-            val started = withContext(Dispatchers.IO) {
-                runCatching { LinuxRuntime.start(getApplication()) }.isSuccess
-            }
-            if (!started) {
-                log("x Container did not start; see the terminal for the reason.")
-                _uiState.update {
-                    it.copy(isWizardDeploying = false, wizardStatusMessage = "Container failed to start", wizardProgress = 0f)
+            val cfg = _uiState.value.oobeConfig
+            // Selecting Linux in this explicit deployment step starts it for this session;
+            // persistent launch/background behavior remains governed by the saved choices.
+            val startLinux = cfg.enableLinuxDesktop
+            if (startLinux) {
+                progress(0.05f, "Starting the optional Alpine container...")
+                val started = withContext(Dispatchers.IO) {
+                    runCatching { LinuxRuntime.start(getApplication()) }.isSuccess
                 }
-                return@launch
+                if (!started) {
+                    log("x Container did not start; see the terminal for the reason.")
+                    _uiState.update {
+                        it.copy(isWizardDeploying = false, wizardStatusMessage = "Container failed to start", wizardProgress = 0f)
+                    }
+                    return@launch
+                }
+                log("OK  Alpine ${LinuxRuntime.container(getApplication()).version()} container running")
+            } else {
+                progress(0.05f, "Skipping Linux guest setup (not selected).")
+                log("-   Linux guest was not installed or started")
             }
-            log("OK  Alpine ${LinuxRuntime.container(getApplication()).version()} container running")
 
-            // Android does not let one app uninstall another, so this step hands over the
-            // exact commands instead of pretending to remove anything. A previous version
-            // ran "pm uninstall" inside the Alpine guest, where pm does not even exist, and
-            // logged every package as "kept".
-            progress(0.25f, "Preparing the debloat commands...")
-            val selectedCount = copyDebloatCommand()
-            log("OK  copied $selectedCount adb uninstall command(s) to the clipboard")
-            log("-   run them from a PC with USB debugging, or remove the apps in Settings > Apps")
-
-            progress(0.55f, "Installing the X11 desktop inside the guest (first run downloads ~450 MB)...")
-            LinuxDesktop.ensureStarted(getApplication())
-            log("OK  X11 desktop requested (progress appears in the Terminal window)")
-
-            progress(0.9f, "Done.")
-            _uiState.update {
-                it.copy(
-                    isWizardDeploying = false,
-                    wizardProgress = 1f,
-                    wizardStatusMessage = "Setup complete",
-                    containerStatus = ContainerStatus.RUNNING,
-                    notificationMessage = "Phonix setup finished"
-                )
+            if (startLinux) {
+                progress(0.55f, "Installing the X11 desktop inside the guest (first run downloads ~450 MB)...")
+                LinuxDesktop.ensureStarted(getApplication())
+                log("OK  X11 desktop requested (progress appears in the Terminal window)")
+            } else {
+                progress(0.55f, "Optional Linux guest setup skipped.")
             }
-            onFinished()
+
+            // Host package removal happens here, and only where Android allows it. A device-owner
+            // install can hide packages for real; an ordinary install can only hand over commands.
+            val host = getApplication<Application>()
+            val targets = debloatTargets()
+            if (targets.isNotEmpty() && HostDebloat.canRemovePackages(host)) {
+                progress(0.75f, "Removing ${targets.size} selected package(s) from this device...")
+                val removed = hideSelectedPackages(host) { log(it) }
+                log("OK  $removed of ${targets.size} package(s) removed; hiding is reversible")
+            } else if (targets.isNotEmpty()) {
+                log("-   ${targets.size} package(s) selected, but this install is not device owner")
+                log("-   Android gives a normal app no way to uninstall another app; nothing was removed")
+            } else {
+                log("-   nothing selected to remove from the host")
+            }
+
+            progress(0.9f, "Finalizing setup choices and desktop layout...")
+            completeOobeSetup(host) {
+                // OOBE has persisted the opt-in choices before we place anything on the clipboard.
+                if (cfg.deviceChanges.allowDebloatCommands && debloatTargets().isNotEmpty()) {
+                    val selectedCount = copyDebloatCommand()
+                    if (selectedCount > 0) {
+                        log("OK  copied $selectedCount adb uninstall command(s) to the clipboard")
+                        log("-   they stay inert until you paste them into a PC terminal")
+                    } else {
+                        log("x   clipboard copy failed; the command is previewed in the trim step")
+                    }
+                } else {
+                    log("-   automatic command copy is off; use Copy in the trim step if you want it")
+                }
+                _uiState.update {
+                    it.copy(
+                        isWizardDeploying = false,
+                        wizardProgress = 1f,
+                        wizardStatusMessage = "Setup complete",
+                        containerStatus = if (startLinux) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
+                        notificationMessage = "Phonix setup finished"
+                    )
+                }
+                onFinished()
+            }
         }
     }
 
@@ -1205,11 +1527,43 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
     // Desktop Personalization & Customization
     fun updateWallpaper(wallpaper: DesktopWallpaper) {
+        val hasPhoto = _uiState.value.customization.customWallpaperPath != null
         _uiState.update { state ->
             state.copy(
                 customization = state.customization.copy(wallpaper = wallpaper),
-                notificationMessage = "Wallpaper set to ${wallpaper.title}"
+                notificationMessage = when {
+                    wallpaper == DesktopWallpaper.CUSTOM_PHOTO && !hasPhoto ->
+                        "Choose a photo to use as the wallpaper"
+                    else -> "Wallpaper set to ${wallpaper.title}"
+                }
             )
+        }
+    }
+
+    /**
+     * Copies a gallery picture into the app and switches the desktop to it.
+     * The import runs off the main thread because a camera original is tens of megabytes.
+     */
+    fun setCustomWallpaper(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val path = withContext(Dispatchers.IO) {
+                WallpaperStore.import(getApplication(), uri)
+            }
+            if (path == null) {
+                _uiState.update {
+                    it.copy(notificationMessage = "That image could not be read. Try a different one.")
+                }
+            } else {
+                _uiState.update { state ->
+                    state.copy(
+                        customization = state.customization.copy(
+                            wallpaper = DesktopWallpaper.CUSTOM_PHOTO,
+                            customWallpaperPath = path
+                        ),
+                        notificationMessage = "Wallpaper set to your photo"
+                    )
+                }
+            }
         }
     }
 
@@ -1262,9 +1616,64 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 "system" -> state.customization.copy(showSystemMonitorWidget = show)
                 "grid" -> state.customization.copy(showDesktopGrid = show)
                 "labels" -> state.customization.copy(showDesktopLabels = show)
+                "frames" -> state.customization.copy(showIconFrames = show)
                 else -> state.customization
             }
             state.copy(customization = updated)
+        }
+    }
+
+    /**
+     * Renaming is per entry, not per app type: the desktop icon, the taskbar pin and the Start
+     * menu tile share an id, so one rename updates all of them and the artwork is untouched.
+     */
+    fun startRename(id: String) {
+        val state = _uiState.value
+        val current = state.customization.shortcuts.firstOrNull { it.id == id }?.title
+            ?: state.customization.taskbarPins.firstOrNull { it.id == id }?.title
+            ?: return
+        _uiState.update {
+            it.copy(renameTargetId = id, renameDraft = current, activeContextMenu = null)
+        }
+    }
+
+    fun updateRenameDraft(text: String) {
+        _uiState.update { it.copy(renameDraft = text) }
+    }
+
+    fun cancelRename() {
+        _uiState.update { it.copy(renameTargetId = null, renameDraft = "") }
+    }
+
+    fun commitRename() {
+        val state = _uiState.value
+        val id = state.renameTargetId ?: return
+        val newTitle = state.renameDraft.trim()
+        if (newTitle.isEmpty()) {
+            _uiState.update { it.copy(renameTargetId = null, renameDraft = "", notificationMessage = "Name cannot be empty") }
+            return
+        }
+        val rename: (DesktopShortcut) -> DesktopShortcut = { it.copy(title = newTitle) }
+        _uiState.update {
+            it.copy(
+                customization = it.customization.copy(
+                    shortcuts = it.customization.shortcuts.map { sc -> if (sc.id == id) rename(sc) else sc },
+                    taskbarPins = it.customization.taskbarPins.map { pin -> if (pin.id == id) rename(pin) else pin }
+                ),
+                renameTargetId = null,
+                renameDraft = "",
+                notificationMessage = "Renamed to \"$newTitle\""
+            )
+        }
+    }
+
+    fun toggleIconFrames() {
+        _uiState.update { state ->
+            val show = !state.customization.showIconFrames
+            state.copy(
+                customization = state.customization.copy(showIconFrames = show),
+                notificationMessage = if (show) "Icon tiles on" else "Icon tiles off - glyphs only"
+            )
         }
     }
 
@@ -1554,30 +1963,59 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Adds or removes a taskbar entry. This touches only the taskbar's own list, so the desktop
+     * icon is never affected, and a pinned app keeps working when its icon is deleted.
+     */
     fun togglePinShortcutToTaskbar(shortcutId: String) {
         _uiState.update { state ->
-            val updated = state.customization.shortcuts.map { sc ->
-                if (sc.id == shortcutId) {
-                    sc.copy(isPinnedToTaskbar = !sc.isPinnedToTaskbar)
-                } else sc
+            val pins = state.customization.taskbarPins
+            val existing = pins.find { it.id == shortcutId }
+            if (existing != null) {
+                state.copy(
+                    customization = state.customization.copy(taskbarPins = pins - existing),
+                    activeContextMenu = null,
+                    notificationMessage = "Unpinned from taskbar"
+                )
+            } else {
+                val source = state.customization.shortcuts.find { it.id == shortcutId }
+                    ?: return@update state
+                state.copy(
+                    customization = state.customization.copy(taskbarPins = pins + source),
+                    activeContextMenu = null,
+                    notificationMessage = "Pinned to taskbar"
+                )
             }
-            val target = state.customization.shortcuts.find { it.id == shortcutId }
-            val pinnedNow = target?.let { !it.isPinnedToTaskbar } ?: false
+        }
+    }
+
+    /** Long-press on a taskbar icon: drop the pin only, leaving any desktop icon untouched. */
+    fun unpinFromTaskbar(shortcutId: String) {
+        _uiState.update { state ->
+            val pins = state.customization.taskbarPins
+            if (pins.none { it.id == shortcutId }) return@update state
             state.copy(
-                customization = state.customization.copy(shortcuts = updated),
-                activeContextMenu = null,
-                notificationMessage = if (pinnedNow) "Pinned to taskbar" else "Unpinned from taskbar"
+                customization = state.customization.copy(
+                    taskbarPins = pins.filterNot { it.id == shortcutId }
+                ),
+                notificationMessage = "Removed from taskbar"
             )
         }
     }
 
+    /** Removes a desktop icon only. The taskbar has its own list and is left alone. */
     fun removeShortcut(shortcutId: String) {
         _uiState.update { state ->
             val updated = state.customization.shortcuts.filter { it.id != shortcutId }
+            val stillPinned = state.customization.taskbarPins.any { it.id == shortcutId }
             state.copy(
                 customization = state.customization.copy(shortcuts = updated),
                 activeContextMenu = null,
-                notificationMessage = "Shortcut removed from desktop"
+                notificationMessage = if (stillPinned) {
+                    "Removed from the desktop - still in the taskbar"
+                } else {
+                    "Shortcut removed from desktop"
+                }
             )
         }
     }
@@ -1587,16 +2025,172 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(oobeConfig = config) }
     }
 
-    fun selectOobeProfile(profile: MiniPcProfile) {
+    /**
+     * The welcome answer. It pre-configures real state (use mode, workload profile, trim list)
+     * rather than only setting a label, and every piece of it stays editable in the later steps.
+     */
+    fun selectSetupPersona(persona: SetupPersona) {
+        val previous = _uiState.value.setupPersona
         _uiState.update { state ->
-            val recommendLinux = profile == MiniPcProfile.CYBERDECK_DEV || profile == MiniPcProfile.HOMELAB_SERVER || profile == MiniPcProfile.EVERYDAY_DESKTOP
             state.copy(
-                oobeConfig = state.oobeConfig.copy(
-                    profile = profile,
-                    enableLinuxDesktop = recommendLinux
-                )
+                setupPersona = persona,
+                oobeConfig = state.oobeConfig.copy(profile = persona.profile)
             )
         }
+        if (previous == persona) return
+        applyDebloatPreset(trimEverything = persona.trimHostPackages)
+        selectDeviceUseMode(if (persona.applianceMode) DeviceUseMode.CYBERDECK else DeviceUseMode.DAILY_DRIVER)
+    }
+
+    /**
+     * A daily driver keeps only the tracking packages ticked; a dedicated build starts with the
+     * whole catalogue. Either way the list is a suggestion the user can flip in the trim step.
+     */
+    fun applyDebloatPreset(trimEverything: Boolean) {
+        val dailySafe = setOf("Analytics & Tracking", "Carrier Telemetry")
+        _uiState.update { state ->
+            state.copy(
+                debloatPackages = state.debloatPackages.map { pkg ->
+                    pkg.copy(isEnabled = trimEverything || pkg.category in dailySafe)
+                },
+                debloatCopiedCommand = null
+            )
+        }
+    }
+
+    fun selectOobeProfile(profile: MiniPcProfile) {
+        _uiState.update { state ->
+            state.copy(oobeConfig = state.oobeConfig.copy(profile = profile))
+        }
+        // A workstation profile and a headless appliance want very different trim lists.
+        applyDebloatPreset(trimEverything = profile != MiniPcProfile.EVERYDAY_DESKTOP)
+    }
+
+    /**
+     * Reads the facts the setup screens show: storage, which browsers are really installed (with
+     * their measured APK size), which trim targets exist on this device, and whether hiding a
+     * package is possible at all on this install.
+     */
+    fun refreshSetupFacts(context: Context) {
+        refreshStorage()
+        val canRemove = HostDebloat.canRemovePackages(context)
+        _uiState.update { it.copy(canRemoveHostPackages = canRemove) }
+        viewModelScope.launch {
+            val browsers = withContext(Dispatchers.IO) {
+                PreferredBrowser.entries
+                    .mapNotNull { it.packageName }
+                    .mapNotNull { pkg -> PackageFacts.browserInfo(context, pkg) }
+            }
+            val presence = withContext(Dispatchers.IO) {
+                _uiState.value.debloatPackages.associate { it.packageName to PackageFacts.isInstalled(context, it.packageName) }
+            }
+            _uiState.update { it.copy(installedBrowsers = browsers, debloatInstalled = presence) }
+        }
+    }
+
+    /**
+     * Asks the assistant to review the ticked list against what this phone actually has.
+     *
+     * The assistant cannot perform the removal: its shell is the proot Alpine guest, which has
+     * no adb and no authority over Android packages. Removal stays with the deploy step, which
+     * uses DevicePolicyManager on a device-owner install. This is advice, clearly labelled.
+     */
+    fun requestDebloatAdvice() {
+        val state = _uiState.value
+        val ticked = state.debloatPackages.filter { it.isEnabled }
+        if (ticked.isEmpty()) {
+            _uiState.update { it.copy(debloatAdvice = "Nothing is ticked, so nothing would be removed.", debloatAdviceFromModel = false) }
+            return
+        }
+
+        // Deterministic summary, used immediately when no model is running and as the fallback
+        // if the model fails. It only states measured facts about this list.
+        val onDevice = ticked.filter { state.debloatInstalled[it.packageName] != false }
+        val absent = ticked.size - onDevice.size
+        val fallback = buildString {
+            appendLine("${ticked.size} ticked, ${onDevice.size} present on this device" + if (absent > 0) ", $absent absent and therefore a no-op." else ".")
+            appendLine()
+            ticked.groupBy { it.category }.forEach { (category, items) ->
+                appendLine("• $category: " + items.joinToString(", ") { it.displayName })
+            }
+            appendLine()
+            append(
+                if (state.canRemoveHostPackages)
+                    "This install is device owner, so Deploy hides these packages on this device. Hiding is reversible."
+                else
+                    "This install is not device owner, so Phonix cannot remove anything itself; Deploy copies the adb commands for a PC."
+            )
+        }
+
+        if (state.aiEngineState != AiEngineState.READY) {
+            _uiState.update { it.copy(debloatAdvice = fallback, debloatAdviceFromModel = false, debloatAdviceBusy = false) }
+            return
+        }
+
+        _uiState.update { it.copy(debloatAdviceBusy = true) }
+        viewModelScope.launch {
+            val list = ticked.joinToString("\n") { pkg ->
+                val where = when (state.debloatInstalled[pkg.packageName]) {
+                    false -> "not installed on this device"
+                    true -> "installed"
+                    null -> "presence unknown"
+                }
+                "- ${pkg.packageName} - ${pkg.displayName} ($where)"
+            }
+            val prompt = """
+                Device: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}.
+                These Android packages are ticked for removal:
+                $list
+                For each one, say in a single short line what it does and whether removing it could break something the user may still want. Finish with the single biggest risk. Do not mention packages that are not in this list.
+            """.trimIndent()
+            val result = localAi.streamChat(
+                systemPrompt = buildLocalAiSystemPrompt(),
+                referenceNotes = null,
+                history = listOf(LocalAiEngine.ChatTurn(isUser = true, text = prompt))
+            ) { }
+            val reply = result.getOrNull()?.text?.trim().orEmpty()
+            _uiState.update {
+                it.copy(
+                    debloatAdvice = reply.ifBlank { fallback },
+                    debloatAdviceFromModel = reply.isNotBlank(),
+                    debloatAdviceBusy = false
+                )
+            }
+        }
+    }
+
+    fun updateDebloatPresence(presence: Map<String, Boolean>) {
+        _uiState.update { it.copy(debloatInstalled = presence) }
+    }
+
+    /** Hides the selected packages for real. Only meaningful on a device-owner install. */
+    private suspend fun hideSelectedPackages(context: Context, log: (String) -> Unit): Int {
+        val selected = _uiState.value.debloatPackages.filter { it.isEnabled }
+        var removed = 0
+        for (pkg in selected) {
+            if (!PackageFacts.isInstalled(context, pkg.packageName)) {
+                log("-   ${pkg.packageName} is not on this device, skipped")
+                continue
+            }
+            val failure = withContext(Dispatchers.IO) { HostDebloat.hidePackage(context, pkg.packageName) }
+            if (failure == null) {
+                removed++
+                log("OK  removed ${pkg.packageName}")
+            } else {
+                log("x   ${pkg.packageName}: $failure")
+            }
+        }
+        if (removed > 0) {
+            _uiState.update { state ->
+                state.copy(
+                    debloatPackages = state.debloatPackages.map { pkg ->
+                        if (pkg.isEnabled && !PackageFacts.isInstalled(context, pkg.packageName)) pkg.copy(isEnabled = false) else pkg
+                    },
+                    debloatInstalled = state.debloatPackages.associate { it.packageName to PackageFacts.isInstalled(context, it.packageName) }
+                )
+            }
+        }
+        return removed
     }
 
     fun toggleOobeLinuxSubsystem(enabled: Boolean) {
@@ -1629,11 +2223,13 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun completeOobeSetup(context: Context) {
+    fun completeOobeSetup(context: Context, onComplete: () -> Unit = {}) {
+        syncOobeDeviceChoices()
         viewModelScope.launch {
             try {
                 val prefs = context.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
                 prefs.edit().putBoolean("oobe_completed", true).apply()
+                DeviceSetupPreferences.save(context, _uiState.value.deviceChanges)
             } catch (_: Exception) {
             }
 
@@ -1661,20 +2257,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            if (categories.contains(AppCategory.APP_STORE)) {
-                addShortcut(
-                    DesktopShortcut(
-                        id = "sc_store",
-                        title = "App Store",
-                        windowType = WindowType.APP_STORE,
-                        customColor = DesktopAccentColor.CYBER_CYAN,
-                        launchPackage = "com.android.vending",
-                        isPinnedToTaskbar = true,
-                        isAppStore = true
-                    )
-                )
-            }
-
             // Always present, even if the customer trimmed the browser category: this is the
             // Phonix WebView window, and before this it had no shortcut at all — closing it
             // left no way to open it again for the rest of the session.
@@ -1683,8 +2265,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     id = "sc_browser",
                     title = "Phonix Browser",
                     windowType = WindowType.BROWSER,
-                    customColor = DesktopAccentColor.CYBER_CYAN,
-                    isPinnedToTaskbar = true
+                    customColor = DesktopAccentColor.CYBER_CYAN
                 )
             )
 
@@ -1695,23 +2276,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         title = "File Explorer",
                         windowType = WindowType.FILE_EXPLORER,
                         customColor = DesktopAccentColor.AMBER_EMBER,
-                        launchPackage = "com.google.android.documentsui",
-                        isPinnedToTaskbar = true,
-                        isNativeApp = true
-                    )
-                )
-            }
-
-            if (categories.contains(AppCategory.MEDIA_GALLERY)) {
-                addShortcut(
-                    DesktopShortcut(
-                        id = "sc_photos",
-                        title = "Photos & Media",
-                        windowType = WindowType.BROWSER,
-                        customColor = DesktopAccentColor.PURPLE_NEBULA,
-                        launchPackage = "com.google.android.apps.photos",
-                        isPinnedToTaskbar = false,
-                        isNativeApp = true
+                    launchPackage = "com.google.android.documentsui",
+                    isNativeApp = true
                     )
                 )
             }
@@ -1722,47 +2288,12 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         id = "sc_terminal",
                         title = "Phonix Terminal",
                         windowType = WindowType.TERMINAL,
-                        customColor = DesktopAccentColor.EMERALD_LINUX,
-                        isPinnedToTaskbar = true
+                        customColor = DesktopAccentColor.EMERALD_LINUX
                     )
                 )
             }
 
-            if (categories.contains(AppCategory.LINUX_DISTROS)) {
-                addShortcut(
-                    DesktopShortcut(
-                        id = "sc_distro",
-                        title = "Linux System",
-                        windowType = WindowType.DISTRO_STORE,
-                        customColor = DesktopAccentColor.CYBER_CYAN,
-                        isPinnedToTaskbar = true
-                    )
-                )
-            }
-
-            if (categories.contains(AppCategory.SERVER_CENTER)) {
-                addShortcut(
-                    DesktopShortcut(
-                        id = "sc_server",
-                        title = "Server Hub",
-                        windowType = WindowType.SERVER_MANAGER,
-                        customColor = DesktopAccentColor.PURPLE_NEBULA
-                    )
-                )
-            }
-
-            if (categories.contains(AppCategory.HARDWARE_MONITOR)) {
-                addShortcut(
-                    DesktopShortcut(
-                        id = "sc_monitor",
-                        title = "System Monitor",
-                        windowType = WindowType.RESOURCE_MONITOR,
-                        customColor = DesktopAccentColor.CYBER_CYAN
-                    )
-                )
-            }
-
-            // Always add settings and personalize
+            // Settings is always on the desktop; other tools live in the Start menu and taskbar.
             addShortcut(
                 DesktopShortcut(
                     id = "sc_settings",
@@ -1771,18 +2302,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     isNativeApp = true
                 )
             )
-            addShortcut(
-                DesktopShortcut(
-                    id = "sc_personalize",
-                    title = "Personalize",
-                    windowType = WindowType.PERSONALIZE
-                )
-            )
 
             val (themeAccent, themeWallpaper) = when (cfg.themePreset) {
-                DesktopThemePreset.WINDOWS_11_DARK -> Pair(DesktopAccentColor.ELECTRIC_BLUE, DesktopWallpaper.PHOENIX_CYBER_DEFAULT)
-                DesktopThemePreset.CYBER_PHOENIX -> Pair(DesktopAccentColor.AMBER_EMBER, DesktopWallpaper.PHOENIX_CYBER_DEFAULT)
-                DesktopThemePreset.CLEAN_SLATE -> Pair(DesktopAccentColor.SLATE_MONOCHROME, DesktopWallpaper.MATRIX_DEEP_BLUE)
+                DesktopThemePreset.FLUENT_DARK -> Pair(DesktopAccentColor.ELECTRIC_BLUE, DesktopWallpaper.PHOENIX_CYBER_DEFAULT)
+                DesktopThemePreset.CYBER_PHOENIX -> Pair(DesktopAccentColor.AMBER_EMBER, DesktopWallpaper.EMBER_MARK)
+                DesktopThemePreset.CLEAN_SLATE -> Pair(DesktopAccentColor.SLATE_MONOCHROME, DesktopWallpaper.ALPINE_PEAK)
                 DesktopThemePreset.OLED_OBSIDIAN -> Pair(DesktopAccentColor.CYBER_CYAN, DesktopWallpaper.OBSIDIAN_NIGHT)
             }
 
@@ -1798,9 +2322,9 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
 
-            if (cfg.enableAggressiveDebloat) {
-                runScreenlessMiniPcDebloat()
-            }
+            saveSetupChoices()
+            applySavedDeviceChoices()
+            onComplete()
         }
     }
 
@@ -1946,38 +2470,58 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
     /** The one-line commands a technician can run from a PC; never executed by Phonix. */
     fun debloatCommand(): String {
-        val selected = _uiState.value.debloatPackages.filter { it.isEnabled }
-        return selected.joinToString("\n") { "adb shell pm uninstall --user 0 ${it.packageName}" }
+        val packages = debloatTargets()
+        return packages.joinToString("\n") { "adb shell pm uninstall --user 0 ${it.packageName}" }
     }
 
     /**
-     * Copies the debloat commands and says so. An unrooted app has no way to uninstall
-     * another app, so this is the honest version of the old "one-click debloat" button.
+     * Ticked packages that this device actually has. A Samsung-only package on a Pixel is not a
+     * removal target, and listing it in a command would just produce a no-op error at the PC.
+     */
+    fun debloatTargets(): List<DebloatPackage> {
+        val state = _uiState.value
+        val presence = state.debloatInstalled
+        return state.debloatPackages.filter { pkg ->
+            pkg.isEnabled && (presence.isEmpty() || presence[pkg.packageName] != false)
+        }
+    }
+
+    /**
+     * Copies the debloat commands and says so. Pressing copy is itself the intent - the text is
+     * inert until someone pastes it - so this no longer hides behind the Cyberdeck opt-in; that
+     * switch now only governs the automatic copy at the end of setup.
      */
     fun copyDebloatCommand(): Int {
-        val selected = _uiState.value.debloatPackages.filter { it.isEnabled }
-        val copied = try {
+        val selected = debloatTargets()
+        val command = selected.joinToString("\n") { "adb shell pm uninstall --user 0 ${it.packageName}" }
+        val copied = if (selected.isEmpty()) false else try {
             val clipboard = getApplication<Application>()
                 .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Phonix debloat", debloatCommand()))
+            clipboard.setPrimaryClip(ClipData.newPlainText("Phonix debloat", command))
             true
         } catch (_: Throwable) {
             false
         }
         _uiState.update {
             it.copy(
+                debloatCopiedCommand = if (copied) command else it.debloatCopiedCommand,
                 notificationMessage = when {
                     selected.isEmpty() -> "Nothing selected to remove"
                     copied -> "Copied ${selected.size} adb command(s) - run them from a PC with USB debugging"
-                    else -> "${selected.size} package(s) selected"
+                    else -> "${selected.size} package(s) selected (clipboard unavailable)"
                 }
             )
         }
-        return selected.size
+        return if (copied) selected.size else 0
     }
 
     // Screenless Mini PC Debloat Batch: selects the suggested set, then hands over the commands.
     fun runScreenlessMiniPcDebloat() {
+        val choices = DeviceSetupPreferences.choices(getApplication())
+        if (choices.useMode != DeviceUseMode.CYBERDECK || !choices.allowDebloatCommands) {
+            _uiState.update { it.copy(notificationMessage = "Debloat commands require Cyberdeck mode and explicit permission in Device & Display Setup.") }
+            return
+        }
         _uiState.update { state ->
             val updatedPkgs = state.debloatPackages.map { pkg ->
                 if (pkg.category.equals("Telephony & Carrier", ignoreCase = true) ||
@@ -1985,14 +2529,18 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     pkg.category.equals("OEM Bloat", ignoreCase = true)
                 ) {
                     pkg.copy(isEnabled = true)
-                } else pkg
+                } else {
+                    pkg
+                }
             }
             state.copy(debloatPackages = updatedPkgs)
         }
+
         copyDebloatCommand()
     }
 
     private fun startBackgroundServiceIfActive() {
+        if (!DeviceSetupPreferences.shouldKeepLinuxInBackground(getApplication())) return
         try {
             val app = getApplication<Application>()
             val intent = Intent(app, LinuxServerService::class.java).apply {
@@ -2023,6 +2571,14 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     // -------------------------------------------------------------
     fun checkAppUpdates() {
         _uiState.update { it.copy(updateState = UpdateCheckState.CHECKING) }
+        val packageInfo = runCatching {
+            getApplication<Application>().packageManager.getPackageInfo(getApplication<Application>().packageName, 0)
+        }.getOrNull()
+        val currentVersionName = packageInfo?.versionName ?: "1.2"
+        val currentVersionCode = packageInfo?.let {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
+            else @Suppress("DEPRECATION") it.versionCode
+        } ?: 3
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val url = java.net.URL("https://api.github.com/repos/JamesRBerggren/PhonixOS/releases/latest")
@@ -2038,9 +2594,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     val notes = extractJsonString(body, "body") ?: "Latest bug fixes and performance enhancements."
                     val downloadUrl = extractAssetDownloadUrl(body) ?: "https://github.com/JamesRBerggren/PhonixOS/releases"
 
-                    val isAvailable = tagName.replace("v", "") > "1.1"
+                    val isAvailable = isNewerVersion(tagName, currentVersionName)
                     val info = AppUpdateInfo(
-                        currentVersionName = "1.1",
+                        currentVersionName = currentVersionName,
+                        currentVersionCode = currentVersionCode,
                         latestVersionName = tagName,
                         releaseNotes = notes,
                         apkDownloadUrl = downloadUrl,
@@ -2055,8 +2612,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 } else {
                     val info = AppUpdateInfo(
-                        currentVersionName = "1.1",
-                        latestVersionName = "1.1",
+                        currentVersionName = currentVersionName,
+                        currentVersionCode = currentVersionCode,
+                        latestVersionName = currentVersionName,
+                        latestVersionCode = currentVersionCode,
                         releaseNotes = "System is running the verified Phonix OS release.",
                         apkDownloadUrl = "",
                         releaseUrl = "https://github.com/JamesRBerggren/PhonixOS/releases",
@@ -2068,9 +2627,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (_: Exception) {
                 val info = AppUpdateInfo(
-                    currentVersionName = "1.1",
-                    latestVersionName = "1.1",
-                    releaseNotes = "Checked offline: Version 1.1 installed. (Connect to Wi-Fi to check for online updates).",
+                    currentVersionName = currentVersionName,
+                    currentVersionCode = currentVersionCode,
+                    latestVersionName = currentVersionName,
+                    latestVersionCode = currentVersionCode,
+                    releaseNotes = "Checked offline: Version $currentVersionName installed. (Connect to Wi-Fi to check for online updates).",
                     apkDownloadUrl = "",
                     releaseUrl = "https://github.com/JamesRBerggren/PhonixOS/releases",
                     isUpdateAvailable = false
@@ -2091,6 +2652,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             context.startActivity(intent)
         } catch (_: Exception) {
         }
+    }
+
+    private fun isNewerVersion(candidate: String, current: String): Boolean {
+        return VersionComparator.isNewer(candidate, current)
     }
 
     private fun extractJsonString(json: String, key: String): String? {
@@ -2327,8 +2892,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
         return """
             You are Phonix Local, the on-device assistant in Phonix OS, running on an Android phone used as a mini-PC.
-            Answer concisely and accurately, usually under 180 words. You run entirely offline on the phone's CPU.
-            You cannot browse the web, call external APIs, or execute commands, and you must not claim to have done so.
+            Answer accurately and concisely; use as many words as the question needs, and never pad. You run
+            entirely offline on the phone's CPU. You cannot browse the web or call external APIs, and you must not
+            claim to have done so. You CAN write code: when asked for a program, give complete runnable code in a
+            single block, with no placeholder comments like "your code here", and say how to run it in two lines
+            or fewer. The Alpine guest has python3, sh, and gcc after apk add gcc musl-dev.
             When reference notes are supplied, use them and name the topic they came from. If you do not know, say so
             instead of inventing technical details. For water, medical, electrical, fire, or other safety-critical
             instructions, use only the supplied notes and copy their numbers exactly; never combine or extrapolate
@@ -2391,11 +2959,14 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        val notes = DefaultAiKnowledge.notesFor(
-            prompt = trimmed,
-            coolingModeName = stateBefore.coolingState.activeMode.name,
-            tempC = stateBefore.telemetry.hottestZoneC
-        )
+        // The library is the primary grounding source and honours the chosen shelf; the old
+        // topic table stays as a fallback for questions the library has no document for.
+        val notes = KnowledgeLibrary.contextFor(trimmed, stateBefore.aiKnowledgeScope)
+            ?: DefaultAiKnowledge.notesFor(
+                prompt = trimmed,
+                coolingModeName = stateBefore.coolingState.activeMode.name,
+                tempC = stateBefore.telemetry.hottestZoneC
+            )
         val history = stateBefore.aiChatMessages
             .drop(1)
             .filter { it.isUser || it.modelGenerated }
@@ -2478,6 +3049,194 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
             aiStreamingMessageId = null
         }
+    }
+
+    // -------------------------------------------------------------
+    // Offline library
+    // -------------------------------------------------------------
+
+    fun setAiKnowledgeScope(category: KnowledgeCategory?) {
+        _uiState.update {
+            it.copy(
+                aiKnowledgeScope = category,
+                notificationMessage = "Knowledge scope: ${category?.title ?: "all shelves"}"
+            )
+        }
+    }
+
+    fun toggleKnowledgeLibrary() {
+        _uiState.update { it.copy(showKnowledgeLibrary = !it.showKnowledgeLibrary, openKnowledgeDocId = null) }
+    }
+
+    fun openKnowledgeDoc(id: String?) {
+        _uiState.update { it.copy(openKnowledgeDocId = id) }
+    }
+
+    fun copyText(text: String, label: String) {
+        val copied = try {
+            val clipboard = getApplication<Application>()
+                .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+            true
+        } catch (_: Throwable) {
+            false
+        }
+        _uiState.update {
+            it.copy(notificationMessage = if (copied) "Copied $label" else "Clipboard unavailable")
+        }
+    }
+
+    /** Closes the reader and asks the model about the document, on that shelf. */
+    fun askAboutDocument(doc: com.example.model.KnowledgeDoc) {
+        _uiState.update { it.copy(openKnowledgeDocId = null, showKnowledgeLibrary = false, aiKnowledgeScope = doc.category) }
+        sendAiMessage("Using the offline notes on \"${doc.title}\", answer: how do I do this on this device, step by step?")
+        _uiState.update { it.copy(aiKnowledgeScope = null) }
+    }
+
+    // -------------------------------------------------------------
+    // Shell agent: one command per turn, approved by the user
+    // -------------------------------------------------------------
+
+    private val agentSystemPrompt = """
+        You are Phonix Shell, a command-line agent working inside an Alpine Linux guest on this phone.
+        You guide a user through a task by issuing one shell command at a time and reading its output.
+        Reply with exactly ONE line, in one of these two forms:
+        RUN <command>
+        DONE <one sentence summary of what was achieved>
+        Rules: no explanation, no markdown, no code fences, one command per reply. Prefer python3 or sh.
+        Use relative paths in the guest home. Never run rm -rf /, mkfs, dd to a device, or anything that
+        reboots or wipes the device. Check before you create: use ls and cat first.
+    """.trimIndent()
+
+    fun setAgentTask(task: String) {
+        _uiState.update { it.copy(agentTask = task) }
+    }
+
+    fun setAgentAutoRun(enabled: Boolean) {
+        _uiState.update { it.copy(agentAutoRun = enabled) }
+    }
+
+    fun stopAgent() {
+        agentJob?.cancel()
+        agentJob = null
+        _uiState.update { it.copy(agentRunning = false, agentPendingCommand = null, agentStatus = "Stopped") }
+    }
+
+    fun startAgentTask(task: String = _uiState.value.agentTask) {
+        val trimmed = task.trim()
+        if (trimmed.isEmpty()) return
+        if (!LinuxRuntime.isRunning) {
+            _uiState.update {
+                it.copy(
+                    agentTask = trimmed,
+                    agentStatus = "Start the Linux guest first (Terminal power button); the agent runs commands inside it."
+                )
+            }
+            return
+        }
+        if (_uiState.value.aiEngineState != AiEngineState.READY) {
+            _uiState.update { it.copy(agentTask = trimmed, agentStatus = "The agent needs the local model running.") }
+            return
+        }
+        _uiState.update {
+            it.copy(
+                agentTask = trimmed,
+                agentSteps = emptyList(),
+                agentPendingCommand = null,
+                agentRunning = true,
+                agentStatus = "Thinking about step 1..."
+            )
+        }
+        requestNextAgentCommand()
+    }
+
+    private var agentJob: kotlinx.coroutines.Job? = null
+
+    private fun requestNextAgentCommand() {
+        val state = _uiState.value
+        if (state.agentSteps.size >= 8) {
+            _uiState.update { it.copy(agentRunning = false, agentStatus = "Stopped after 8 steps. Start a new task to continue.") }
+            return
+        }
+        agentJob = viewModelScope.launch {
+            val transcript = buildString {
+                appendLine("Task: ${state.agentTask}")
+                if (state.agentSteps.isEmpty()) {
+                    appendLine("Nothing has run yet.")
+                } else {
+                    for ((index, step) in state.agentSteps.withIndex()) {
+                        appendLine("Step ${index + 1}: RUN ${step.command}")
+                        appendLine("Output: ${step.output.takeLast(1500)}")
+                    }
+                    appendLine("That is ${state.agentSteps.size} of at most 8 steps. Continue, or answer DONE.")
+                }
+            }
+            _uiState.update { it.copy(agentStatus = "Step ${it.agentSteps.size + 1} of 8: asking the model...") }
+
+            val result = localAi.streamChat(
+                systemPrompt = agentSystemPrompt,
+                referenceNotes = KnowledgeLibrary.contextFor(state.agentTask, KnowledgeCategory.CODING),
+                history = listOf(LocalAiEngine.ChatTurn(isUser = true, text = transcript))
+            ) { }
+
+            val reply = result.getOrNull()?.text?.trim().orEmpty()
+            if (reply.isBlank()) {
+                _uiState.update {
+                    it.copy(
+                        agentRunning = false,
+                        agentStatus = "The model did not answer (${result.exceptionOrNull()?.message ?: "empty reply"})."
+                    )
+                }
+                return@launch
+            }
+
+            val runLine = reply.lines().firstOrNull { it.trim().uppercase().startsWith("RUN ") }
+            val doneLine = reply.lines().firstOrNull { it.trim().uppercase().startsWith("DONE") }
+            when {
+                runLine != null -> {
+                    val command = runLine.trim().removePrefix("RUN ").removePrefix("run ").trim()
+                    _uiState.update {
+                        it.copy(
+                            agentRunning = false,
+                            agentPendingCommand = command,
+                            agentStatus = "Proposed step ${it.agentSteps.size + 1}: review and run it."
+                        )
+                    }
+                    if (_uiState.value.agentAutoRun) approveAgentCommand()
+                }
+                doneLine != null -> _uiState.update {
+                    it.copy(agentRunning = false, agentPendingCommand = null, agentStatus = doneLine.trim())
+                }
+                else -> _uiState.update {
+                    it.copy(
+                        agentRunning = false,
+                        agentStatus = "The model replied without a RUN line: ${reply.take(120)}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun approveAgentCommand() {
+        val command = _uiState.value.agentPendingCommand ?: return
+        _uiState.update { it.copy(agentPendingCommand = null, agentRunning = true, agentStatus = "Running: $command") }
+        viewModelScope.launch {
+            val output = withContext(Dispatchers.IO) {
+                runCatching { LinuxRuntime.run(command, 60_000) }.getOrNull()
+            }
+            val text = output?.trim().takeUnless { it.isNullOrBlank() }
+                ?: "(no output)"
+            appendTerminalLine(TerminalLine("$ $command", TerminalLine.LineType.INPUT))
+            appendTerminalLine(TerminalLine(text, TerminalLine.LineType.SYSTEM))
+            _uiState.update {
+                it.copy(agentSteps = it.agentSteps + AgentStep(command = command, output = text))
+            }
+            requestNextAgentCommand()
+        }
+    }
+
+    fun rejectAgentCommand() {
+        _uiState.update { it.copy(agentPendingCommand = null, agentRunning = false, agentStatus = "Rejected that command.") }
     }
 
     fun stopAiGeneration() {

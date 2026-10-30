@@ -1,5 +1,12 @@
 package com.example.ui.components
 
+import android.content.Intent
+import android.os.Build
+import com.example.engine.LinuxRuntime
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Settings
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -92,6 +99,7 @@ fun DesktopContextMenu(
             val shortcut = uiState.customization.shortcuts.find { it.id == menuData.shortcutId } ?: return
             ShortcutContextMenuView(
                 shortcut = shortcut,
+                isPinned = uiState.customization.taskbarPins.any { it.id == shortcut.id },
                 posX = menuData.posX,
                 posY = menuData.posY,
                 onDismiss = { viewModel.closeContextMenu() },
@@ -100,6 +108,7 @@ fun DesktopContextMenu(
                     viewModel.updateShortcutStyle(shortcut.id, size, shape, color, bg)
                 },
                 onTogglePin = { viewModel.togglePinShortcutToTaskbar(shortcut.id) },
+                onRename = { viewModel.startRename(shortcut.id) },
                 onRemove = { viewModel.removeShortcut(shortcut.id) },
                 modifier = modifier
             )
@@ -130,9 +139,55 @@ fun DesktopContextMenu(
                     viewModel.toggleWindow(WindowType.PERSONALIZE)
                 },
                 onToggleGrid = {
+                    // Same switch as Personalize → Lock Icons to Grid. It used to toggle the
+                    // alignment-grid overlay instead, so the label changed but nothing snapped.
                     val current = uiState.customization.lockIconsToGrid
-                    viewModel.toggleDesktopWidget("grid", !current)
+                    viewModel.toggleLockIconsToGrid(!current)
                     viewModel.closeContextMenu()
+                },
+                onToggleIconFrames = {
+                    viewModel.toggleIconFrames()
+                    viewModel.closeContextMenu()
+                },
+                onOpenAndroidDeveloperOptions = {
+                    viewModel.closeContextMenu()
+                    runCatching {
+                        context.startActivity(
+                            Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }.onFailure {
+                        viewModel.copyText(
+                            "Open Android Settings > System > Developer options",
+                            "developer options path"
+                        )
+                    }
+                },
+                onCopyDeviceReport = {
+                    viewModel.closeContextMenu()
+                    val dm = context.resources.displayMetrics
+                    val report = buildString {
+                        appendLine("Phonix OS device report")
+                        appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+                        appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                        appendLine("ABI: ${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"}")
+                        appendLine("Display: ${dm.widthPixels}x${dm.heightPixels} @ ${dm.densityDpi} dpi (${dm.density}x)")
+                        appendLine("External displays: ${uiState.deviceCapabilityReport?.externalDisplayCount ?: 0}")
+                        appendLine("Display route: ${uiState.deviceCapabilityReport?.route?.name ?: "unknown"}")
+                        appendLine("Form factor: ${uiState.deviceCapabilityReport?.formFactor?.name ?: "unknown"}")
+                        appendLine("Device owner: ${uiState.canRemoveHostPackages}")
+                        appendLine("Linux guest: ${if (LinuxRuntime.isRunning) "running" else "stopped"}")
+                        appendLine("App target SDK: ${context.applicationInfo.targetSdkVersion}")
+                    }
+                    viewModel.copyText(report, "device report")
+                },
+                onToggleDesktopGrid = {
+                    viewModel.toggleDesktopWidget("grid", !uiState.customization.showDesktopGrid)
+                    viewModel.closeContextMenu()
+                },
+                onRestartLinuxGuest = {
+                    viewModel.closeContextMenu()
+                    viewModel.restartContainer()
                 },
                 onResetShortcuts = {
                     viewModel.resetShortcutGrid()
@@ -151,15 +206,24 @@ fun DesktopContextMenu(
 @Composable
 private fun ShortcutContextMenuView(
     shortcut: DesktopShortcut,
+    isPinned: Boolean,
     posX: Float,
     posY: Float,
     onDismiss: () -> Unit,
     onLaunch: () -> Unit,
     onUpdateStyle: (IconSizeMode?, ShortcutShape, DesktopAccentColor?, ShortcutBgStyle) -> Unit,
     onTogglePin: () -> Unit,
+    onRename: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // The menu opens under the finger that long-pressed the icon, so the release can land on
+    // the first row (observed on the S10: long-press opened "My Files" as well as the menu).
+    // Rows ignore input for a moment after the menu appears.
+    var armedAt by remember { mutableStateOf(0L) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { armedAt = System.currentTimeMillis() }
+    val isArmed: () -> Boolean = { System.currentTimeMillis() - armedAt > 300L }
+
     var selectedSize by remember { mutableStateOf(shortcut.customSize) }
     var selectedShape by remember { mutableStateOf(shortcut.customShape) }
     var selectedColor by remember { mutableStateOf(shortcut.customColor) }
@@ -209,7 +273,7 @@ private fun ShortcutContextMenuView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
-                    .clickable { onLaunch() }
+                    .clickable { if (isArmed()) onLaunch() }
                     .testTag("ctx_menu_open_btn"),
                 color = PhonixBlue.copy(alpha = 0.2f),
                 border = androidx.compose.foundation.BorderStroke(1.dp, PhonixBlueLight.copy(alpha = 0.5f))
@@ -222,6 +286,20 @@ private fun ShortcutContextMenuView(
                     Icon(Icons.Default.OpenInNew, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(14.dp))
                     Text("Open App", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
+            }
+
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { if (isArmed()) onRename() }
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = null, tint = Slate200, modifier = Modifier.size(14.dp))
+                Text("Rename \"${shortcut.title}\"...", color = Color.White, fontSize = 11.sp)
             }
 
             Spacer(Modifier.height(10.dp))
@@ -383,7 +461,7 @@ private fun ShortcutContextMenuView(
                     ) {
                         Icon(Icons.Default.PushPin, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(12.dp))
                         Text(
-                            text = if (shortcut.isPinnedToTaskbar) "Unpin" else "Pin to Taskbar",
+                            text = if (isPinned) "Unpin from Taskbar" else "Pin to Taskbar",
                             color = Color.White,
                             fontSize = 10.sp
                         )
@@ -402,7 +480,8 @@ private fun ShortcutContextMenuView(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(Icons.Default.Delete, contentDescription = null, tint = PhonixRed, modifier = Modifier.size(12.dp))
-                        Text("Delete", color = PhonixRed, fontSize = 10.sp)
+                        // "Delete" read as removing the app; it only removes this desktop icon.
+                        Text("Remove from Desktop", color = PhonixRed, fontSize = 10.sp)
                     }
                 }
             }
@@ -422,6 +501,11 @@ private fun WallpaperContextMenuView(
     onResetOobe: () -> Unit,
     onPersonalize: () -> Unit,
     onToggleGrid: () -> Unit,
+    onToggleIconFrames: () -> Unit,
+    onOpenAndroidDeveloperOptions: () -> Unit,
+    onCopyDeviceReport: () -> Unit,
+    onToggleDesktopGrid: () -> Unit,
+    onRestartLinuxGuest: () -> Unit,
     onResetShortcuts: () -> Unit,
     onRunDebloat: () -> Unit,
     modifier: Modifier = Modifier
@@ -465,6 +549,12 @@ private fun WallpaperContextMenuView(
                 onClick = onToggleGrid
             )
             ContextMenuItem(
+                icon = Icons.Default.GridView,
+                title = if (uiState.customization.showIconFrames) "Icon Tiles: On (click to flatten)" else "Icon Tiles: Off (click to restore)",
+                tint = PhonixCyan,
+                onClick = onToggleIconFrames
+            )
+            ContextMenuItem(
                 icon = Icons.Default.Palette,
                 title = "Personalize Desktop...",
                 tint = PhonixAmber,
@@ -488,6 +578,38 @@ private fun WallpaperContextMenuView(
                 title = "Reset for New User (OOBE Setup)",
                 tint = PhonixCyan,
                 onClick = onResetOobe
+            )
+            HorizontalDivider(color = Slate800, modifier = Modifier.padding(vertical = 3.dp))
+            Text(
+                "DEVELOPER",
+                color = Slate400,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 10.dp, top = 2.dp, bottom = 2.dp)
+            )
+            ContextMenuItem(
+                icon = Icons.Default.Settings,
+                title = "Android Developer Options...",
+                tint = PhonixCyan,
+                onClick = onOpenAndroidDeveloperOptions
+            )
+            ContextMenuItem(
+                icon = Icons.Default.ContentCopy,
+                title = "Copy Device Report to Clipboard",
+                tint = PhonixBlueLight,
+                onClick = onCopyDeviceReport
+            )
+            ContextMenuItem(
+                icon = Icons.Default.GridView,
+                title = if (uiState.customization.showDesktopGrid) "Hide Alignment Grid" else "Show Alignment Grid",
+                tint = PhonixCyan,
+                onClick = onToggleDesktopGrid
+            )
+            ContextMenuItem(
+                icon = Icons.Default.RestartAlt,
+                title = "Restart Linux Guest",
+                tint = PhonixGreen,
+                onClick = onRestartLinuxGuest
             )
         }
     }

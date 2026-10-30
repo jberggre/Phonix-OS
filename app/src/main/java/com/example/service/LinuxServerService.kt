@@ -16,6 +16,7 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.engine.LinuxRuntime
+import com.example.util.DeviceSetupPreferences
 
 class LinuxServerService : Service() {
 
@@ -38,15 +39,23 @@ class LinuxServerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP_SERVER) {
+            // Turning off background persistence must release the service's locks without
+            // overriding the separate Linux-on-launch choice for the active app session.
+            releaseLocks()
+            isServiceRunning = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (!DeviceSetupPreferences.shouldKeepLinuxInBackground(applicationContext)) {
+            releaseLocks()
+            isServiceRunning = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
-            ACTION_STOP_SERVER -> {
-                LinuxRuntime.stop()
-                releaseLocks()
-                isServiceRunning = false
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-                return START_NOT_STICKY
-            }
             ACTION_START_SERVER, null -> {
                 acquireLocks()
                 // Boot the guests once, on a worker: first run unpacks a rootfs.
