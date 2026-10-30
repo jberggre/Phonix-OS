@@ -2627,18 +2627,19 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         } ?: 3
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val url = java.net.URL("https://api.github.com/repos/JamesRBerggren/PhonixOS/releases/latest")
+                val url = java.net.URL("https://api.github.com/repos/jberggre/Phonix-OS/releases/latest")
                 val conn = url.openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 4000
                 conn.readTimeout = 4000
                 conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
                 conn.setRequestProperty("User-Agent", "PhonixOS-Updater")
 
-                if (conn.responseCode == 200) {
+                val responseCode = conn.responseCode
+                if (responseCode == 200) {
                     val body = conn.inputStream.bufferedReader().use { it.readText() }
                     val tagName = extractJsonString(body, "tag_name") ?: "v1.2"
                     val notes = extractJsonString(body, "body") ?: "Latest bug fixes and performance enhancements."
-                    val downloadUrl = extractAssetDownloadUrl(body) ?: "https://github.com/JamesRBerggren/PhonixOS/releases"
+                    val downloadUrl = extractAssetDownloadUrl(body) ?: "https://github.com/jberggre/Phonix-OS/releases"
 
                     val isAvailable = isNewerVersion(tagName, currentVersionName)
                     val info = AppUpdateInfo(
@@ -2647,7 +2648,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         latestVersionName = tagName,
                         releaseNotes = notes,
                         apkDownloadUrl = downloadUrl,
-                        releaseUrl = "https://github.com/JamesRBerggren/PhonixOS/releases",
+                        releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
                         isUpdateAvailable = isAvailable
                     )
                     _uiState.update {
@@ -2662,13 +2663,17 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         currentVersionCode = currentVersionCode,
                         latestVersionName = currentVersionName,
                         latestVersionCode = currentVersionCode,
-                        releaseNotes = "System is running the verified Phonix OS release.",
+                        releaseNotes = if (responseCode == 404) {
+                            "No public update feed is configured for this build. No update status is known."
+                        } else {
+                            "Update check failed (HTTP $responseCode). No update status is known."
+                        },
                         apkDownloadUrl = "",
-                        releaseUrl = "https://github.com/JamesRBerggren/PhonixOS/releases",
+                        releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
                         isUpdateAvailable = false
                     )
                     _uiState.update {
-                        it.copy(updateState = UpdateCheckState.UP_TO_DATE, updateInfo = info)
+                        it.copy(updateState = UpdateCheckState.ERROR, updateInfo = info)
                     }
                 }
             } catch (_: Exception) {
@@ -2677,20 +2682,20 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     currentVersionCode = currentVersionCode,
                     latestVersionName = currentVersionName,
                     latestVersionCode = currentVersionCode,
-                    releaseNotes = "Checked offline: Version $currentVersionName installed. (Connect to Wi-Fi to check for online updates).",
+                    releaseNotes = "Could not reach the update feed. No update status is known.",
                     apkDownloadUrl = "",
-                    releaseUrl = "https://github.com/JamesRBerggren/PhonixOS/releases",
+                    releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
                     isUpdateAvailable = false
                 )
                 _uiState.update {
-                    it.copy(updateState = UpdateCheckState.UP_TO_DATE, updateInfo = info)
+                    it.copy(updateState = UpdateCheckState.ERROR, updateInfo = info)
                 }
             }
         }
     }
 
     fun downloadAndInstallUpdate(context: Context) {
-        val downloadUrl = _uiState.value.updateInfo?.downloadUrl ?: "https://github.com/JamesRBerggren/PhonixOS/releases"
+        val downloadUrl = _uiState.value.updateInfo?.downloadUrl ?: "https://github.com/jberggre/Phonix-OS/releases"
         try {
             val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(downloadUrl)).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK

@@ -2607,11 +2607,11 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                     Text("Manual Only", color = PhonixGreen, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Text(
-                    "Transparent GitHub updates. You are in full control — no hidden or backdoor background updates.",
+                    "Manual update check. Nothing installs in the background.",
                     color = Slate400,
                     fontSize = 10.sp
                 )
-                AboutRow("Repository", "JamesRBerggren/PhonixOS")
+                AboutRow("Repository", "jberggre/Phonix-OS")
 
                 when (uiState.updateState) {
                     UpdateCheckState.IDLE -> {
@@ -2679,12 +2679,16 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                             ) {
                                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Download & Install Update", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Open Download Page", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                     else -> {
-                        Text("Could not reach GitHub. Offline mode.", color = Slate400, fontSize = 10.sp)
+                        Text(
+                            uiState.updateInfo?.releaseNotes ?: "Could not check for updates.",
+                            color = Slate400,
+                            fontSize = 10.sp
+                        )
                         OutlinedButton(
                             onClick = { viewModel.checkAppUpdates() },
                             modifier = Modifier.fillMaxWidth(),
