@@ -2,6 +2,7 @@ package com.example.model
 
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 data class WindowBounds(val widthDp: Float, val heightDp: Float)
 
@@ -9,6 +10,17 @@ object WindowGeometry {
     private const val MIN_WIDTH_DP = 240f
     private const val MIN_HEIGHT_DP = 180f
     private const val TITLE_VISIBLE_DP = 48f
+
+    /**
+     * The persistence key for one desktop size. Bucketed to 8 dp so a fractional Compose
+     * measurement (411.4 x 869.2 dp) still finds the layout saved at 411 x 869 dp, while a
+     * monitor and a phone remain separate layouts.
+     */
+    fun layoutKey(bounds: WindowBounds): String {
+        fun bucket(value: Float): Int =
+            ((value.coerceAtLeast(1f) / 8f).roundToInt() * 8).coerceAtLeast(8)
+        return "${bucket(bounds.widthDp)}x${bucket(bounds.heightDp)}"
+    }
 
     fun normalize(window: DesktopWindow, bounds: WindowBounds): DesktopWindow {
         val maxWidth = max(1f, bounds.widthDp)
