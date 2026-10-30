@@ -6,6 +6,7 @@ import android.util.Log
 import com.example.model.DesktopAccentColor
 import com.example.model.DesktopCustomization
 import com.example.model.DesktopShortcut
+import com.example.model.DesktopWindow
 import com.example.model.DesktopWallpaper
 import com.example.model.IconSizeMode
 import com.example.model.MonitorDisplayMode
@@ -30,6 +31,8 @@ object DesktopPrefs {
     private const val TAG = "PhonixDesktopPrefs"
     private const val PREFS = "phonix_desktop_prefs"
     private const val KEY_STATE = "desktop_state_v1"
+    private const val KEY_WINDOWS = "window_layouts_v1"
+    private const val MAX_RESTORED_WINDOWS = 16
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -92,8 +95,79 @@ object DesktopPrefs {
         }
     }
 
+    /**
+     * Saves the open windows for one desktop size. A desktop can be docked to a monitor and
+     * returned to the phone, so each size keeps its own layout instead of one display moving the
+     * other display's windows around.
+     */
+    @Synchronized
+    fun saveWindows(context: Context, layoutKey: String, windows: List<DesktopWindow>) {
+        try {
+            val all = prefs(context).getString(KEY_WINDOWS, null)
+                ?.let { runCatching { JSONObject(it) }.getOrNull() }
+                ?: JSONObject()
+            all.put(layoutKey, windowsToJson(windows))
+            prefs(context).edit().putString(KEY_WINDOWS, all.toString()).apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "could not save window layout", e)
+        }
+    }
+
+    /** Null means this size has never been saved; an empty list is a saved empty desktop. */
+    @Synchronized
+    fun loadWindows(context: Context, layoutKey: String): List<DesktopWindow>? {
+        val raw = prefs(context).getString(KEY_WINDOWS, null) ?: return null
+        return try {
+            val all = JSONObject(raw)
+            if (!all.has(layoutKey)) return null
+            windowsFromJson(all.optJSONArray(layoutKey))
+        } catch (e: Exception) {
+            Log.w(TAG, "saved window layout unreadable", e)
+            null
+        }
+    }
+
     fun clear(context: Context) {
-        prefs(context).edit().remove(KEY_STATE).apply()
+        prefs(context).edit().remove(KEY_STATE).remove(KEY_WINDOWS).apply()
+    }
+
+    private fun windowsToJson(list: List<DesktopWindow>): JSONArray = JSONArray().apply {
+        list.take(MAX_RESTORED_WINDOWS).forEach { w ->
+            put(JSONObject().apply {
+                put("id", w.id)
+                put("type", w.type.name)
+                put("title", w.title)
+                put("posX", w.posX.toDouble())
+                put("posY", w.posY.toDouble())
+                put("width", w.width.toDouble())
+                put("height", w.height.toDouble())
+                put("isMinimized", w.isMinimized)
+                put("isMaximized", w.isMaximized)
+                put("zIndex", w.zIndex.toDouble())
+            })
+        }
+    }
+
+    private fun windowsFromJson(array: JSONArray?): List<DesktopWindow> {
+        if (array == null) return emptyList()
+        val parsed = ArrayList<DesktopWindow>(array.length())
+        for (i in 0 until minOf(array.length(), MAX_RESTORED_WINDOWS)) {
+            val o = array.optJSONObject(i) ?: continue
+            val type = runCatching { WindowType.valueOf(o.optString("type")) }.getOrNull() ?: continue
+            parsed += DesktopWindow(
+                id = o.optString("id").ifBlank { "win_${type.name}_$i" },
+                type = type,
+                title = o.optString("title").ifBlank { type.defaultTitle },
+                posX = o.optDouble("posX", 24.0).toFloat(),
+                posY = o.optDouble("posY", 24.0).toFloat(),
+                width = o.optDouble("width", 360.0).toFloat(),
+                height = o.optDouble("height", 340.0).toFloat(),
+                isMinimized = o.optBoolean("isMinimized", false),
+                isMaximized = o.optBoolean("isMaximized", false),
+                zIndex = o.optDouble("zIndex", 1.0).toFloat()
+            )
+        }
+        return parsed
     }
 
     private fun shortcutsToJson(list: List<DesktopShortcut>): JSONArray = JSONArray().apply {

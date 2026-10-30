@@ -84,6 +84,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -344,6 +345,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     private var telemetryJob: Job? = null
     private var networkWatcher: AutoCloseable? = null
     private var maxZIndex: Float = 3f
+    /** Null until the desktop reports its first measured size; each size has its own layout. */
+    private val windowBounds = MutableStateFlow<WindowBounds?>(null)
     private val localAi = LocalAiEngine(application)
     private var aiSetupJob: Job? = null
     private var aiChatJob: Job? = null
@@ -369,6 +372,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         persistDesktopLayout()
+        persistWindowLayout()
 
         detectLocalIp()
         initTerminalWelcome()
@@ -402,6 +406,27 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     delay(600L)
                     withContext(Dispatchers.IO) {
                         DesktopPrefs.save(getApplication(), customization)
+                    }
+                }
+        }
+    }
+
+    /**
+     * Writes the open windows under the current desktop size. Restoring happens once, when the
+     * first measured bounds arrive, so a live rotation or dock/undock still normalises the
+     * windows the user has now instead of swapping in an old layout.
+     */
+    private fun persistWindowLayout() {
+        viewModelScope.launch {
+            combine(_uiState.map { it.windows }.distinctUntilChanged(), windowBounds) { windows, bounds ->
+                windows to bounds
+            }
+                .distinctUntilChanged()
+                .collectLatest { (windows, bounds) ->
+                    if (bounds == null) return@collectLatest
+                    delay(600L)
+                    withContext(Dispatchers.IO) {
+                        DesktopPrefs.saveWindows(getApplication(), WindowGeometry.layoutKey(bounds), windows)
                     }
                 }
         }
@@ -865,9 +890,30 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun normalizeWindows(bounds: WindowBounds) {
-        _uiState.update { state ->
-            state.copy(windows = state.windows.map { if (it.isMaximized) it else WindowGeometry.normalize(it, bounds) })
+        val firstBounds = windowBounds.value == null
+        val currentWindows = _uiState.value.windows
+        // Only the first size is restored. Later bounds changes are live drags/rotations; loading
+        // another size's saved windows there would make a window the user just closed reappear.
+        val restored = if (firstBounds && currentWindows.isEmpty()) {
+            DesktopPrefs.loadWindows(getApplication(), WindowGeometry.layoutKey(bounds))
+        } else {
+            null
         }
+        val baseWindows = restored ?: currentWindows
+        _uiState.update { state ->
+            state.copy(
+                windows = baseWindows.map { if (it.isMaximized) it else WindowGeometry.normalize(it, bounds) },
+                activeWindowId = if (restored != null) {
+                    baseWindows.filter { !it.isMinimized }.maxByOrNull { it.zIndex }?.id
+                } else {
+                    state.activeWindowId
+                }
+            )
+        }
+        if (restored != null && restored.isNotEmpty()) {
+            maxZIndex = maxOf(maxZIndex, restored.maxOf { it.zIndex }) + 1f
+        }
+        windowBounds.value = bounds
     }
 
     fun moveWindow(windowId: String, deltaX: Float, deltaY: Float, bounds: WindowBounds? = null) {
