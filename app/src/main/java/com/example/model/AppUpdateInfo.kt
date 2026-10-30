@@ -15,7 +15,7 @@ data class AppUpdateInfo(
     val currentVersionCode: Int = 3,
     val latestVersionName: String = "1.2",
     val latestVersionCode: Int = 3,
-    val releaseUrl: String = "https://github.com/JamesRBerggren/PhonixOS/releases",
+    val releaseUrl: String = "https://github.com/jberggre/Phonix-OS/releases",
     val apkDownloadUrl: String = "",
     val releaseNotes: String = "",
     val publishedDate: String = "",
