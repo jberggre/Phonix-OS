@@ -424,6 +424,7 @@ class ExampleRobolectricTest {
                         id = "sc_terminal",
                         title = "My Shell",
                         windowType = WindowType.TERMINAL,
+                        customArtKey = "terminal",
                         posX = 210f,
                         posY = 96f,
                         hasCustomPosition = true
@@ -441,9 +442,13 @@ class ExampleRobolectricTest {
             assertTrue(loaded.lockIconsToGrid)
             assertEquals(1, loaded.shortcuts.size)
             assertEquals("My Shell", loaded.shortcuts.first().title)
+            assertEquals("terminal", loaded.shortcuts.first().customArtKey)
             assertEquals(210f, loaded.shortcuts.first().posX)
             // The taskbar has its own list and must survive on its own.
             assertEquals(saved.taskbarPins.map { it.id }, loaded.taskbarPins.map { it.id })
+
+            // Verify default desktop configuration starts with showIconFrames = false
+            assertFalse(DesktopCustomization().showIconFrames)
         } finally {
             DesktopPrefs.clear(context)
         }

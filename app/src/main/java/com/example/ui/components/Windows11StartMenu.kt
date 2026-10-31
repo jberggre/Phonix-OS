@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
@@ -89,6 +90,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.horizontalScroll
 import com.example.model.DesktopShortcut
 import com.example.model.InstalledAppInfo
 import com.example.model.WindowType
@@ -106,9 +108,12 @@ import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import com.example.util.AppLaunchHelper
+import com.example.util.HostDebloat
+import com.example.util.PackageFacts
 import com.example.viewmodel.PhonixUiState
 import com.example.viewmodel.PhonixViewModel
 import com.example.model.DeviceUseMode
+
 
 private data class StartMenuItem(
     val id: String,
@@ -118,6 +123,12 @@ private data class StartMenuItem(
     val iconTint: Color,
     val onClick: () -> Unit
 )
+
+enum class AppViewMode(val label: String) {
+    CATEGORIES("Category Tabs"),
+    COMPACT_LIST("Compact List"),
+    STORAGE_WEIGHT("Storage Weight")
+}
 
 @Composable
 fun Windows11StartMenu(
@@ -129,6 +140,8 @@ fun Windows11StartMenu(
     var showPowerMenu by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showAllApps by remember { mutableStateOf(false) }
+    var appViewMode by remember { mutableStateOf(AppViewMode.CATEGORIES) }
+    var selectedCategoryTab by remember { mutableStateOf("All") }
 
     val allMenuItems = remember(uiState.customization.shortcuts) {
         listOf(
@@ -161,13 +174,13 @@ fun Windows11StartMenu(
                 AppLaunchHelper.launchPhotos(context)
             },
             StartMenuItem(
-                "app_distro", "Linux System", "Alpine, installed and running",
+                "app_distro", "Linux System", "Multi-distro runtime & packages",
                 Icons.Default.Widgets, PhonixAmber
             ) {
                 viewModel.toggleWindow(WindowType.DISTRO_STORE)
             },
             StartMenuItem(
-                "app_terminal", "Terminal", "Alpine shell, proot, no root",
+                "app_terminal", "Terminal", "Linux shell, proot, no root",
                 Icons.Default.Terminal, PhonixGreen
             ) {
                 viewModel.toggleWindow(WindowType.TERMINAL)
@@ -203,10 +216,10 @@ fun Windows11StartMenu(
                 AppLaunchHelper.launchSettings(context)
             },
             StartMenuItem(
-                "app_debloat", "Android Debloater", "Copy reviewed adb commands (opt-in)",
+                "app_debloat", "System Debloater", "Walkthrough preloads to recover RAM & disk",
                 Icons.Default.Security, PhonixBlueLight
             ) {
-                viewModel.runScreenlessMiniPcDebloat()
+                viewModel.toggleWindow(WindowType.DEBLOAT_MANAGER)
             },
             StartMenuItem(
                 "app_personalize", "Personalize", "Wallpapers, Icons & Shapes",
@@ -243,7 +256,7 @@ fun Windows11StartMenu(
         }
     }
 
-    val filteredInstalledApps = remember(searchQuery, uiState.installedApps) {
+    val rawFilteredInstalledApps = remember(searchQuery, uiState.installedApps) {
         if (searchQuery.isBlank()) uiState.installedApps
         else uiState.installedApps.filter {
             it.label.contains(searchQuery, ignoreCase = true) ||
@@ -251,10 +264,36 @@ fun Windows11StartMenu(
         }
     }
 
+    // App categories
+    val categoryTabs = listOf("All", "Tools & System", "Browsers & Web", "Media", "Debloat Candidates")
+
+    fun matchesCategory(app: InstalledAppInfo, tab: String): Boolean {
+        if (tab == "All") return true
+        val pkg = app.packageName.lowercase()
+        val lbl = app.label.lowercase()
+        return when (tab) {
+            "Tools & System" -> pkg.contains("settings") || pkg.contains("file") || pkg.contains("tool") || pkg.contains("android") || lbl.contains("files") || lbl.contains("settings")
+            "Browsers & Web" -> pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("firefox") || pkg.contains("web") || lbl.contains("chrome") || lbl.contains("browser")
+            "Media" -> pkg.contains("camera") || pkg.contains("gallery") || pkg.contains("photo") || pkg.contains("media") || pkg.contains("music") || pkg.contains("player")
+            "Debloat Candidates" -> pkg.contains("samsung") || pkg.contains("facebook") || pkg.contains("bixby") || pkg.contains("carrier") || pkg.contains("telemetry") || pkg.contains("diag")
+            else -> true
+        }
+    }
+
+    val filteredInstalledApps = remember(rawFilteredInstalledApps, selectedCategoryTab, appViewMode) {
+        if (appViewMode == AppViewMode.STORAGE_WEIGHT) {
+            rawFilteredInstalledApps.sortedByDescending { HostDebloat.getPackageApkSize(context, it.packageName) }
+        } else if (appViewMode == AppViewMode.CATEGORIES) {
+            rawFilteredInstalledApps.filter { matchesCategory(it, selectedCategoryTab) }
+        } else {
+            rawFilteredInstalledApps
+        }
+    }
+
     Surface(
         modifier = modifier
             .widthIn(min = 320.dp, max = 560.dp)
-            .heightIn(max = 520.dp)
+            .heightIn(max = 560.dp)
             .shadow(24.dp, RoundedCornerShape(16.dp))
             .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             .testTag("windows_11_start_menu"),
@@ -300,7 +339,7 @@ fun Windows11StartMenu(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (showAllApps) "All Apps (${filteredInstalledApps.size})" else "Pinned",
+                    text = if (showAllApps) "App Collection (${filteredInstalledApps.size})" else "Pinned",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
@@ -326,9 +365,69 @@ fun Windows11StartMenu(
                 }
             }
 
+            // View Mode Selectors (When viewing All Apps)
+            if (showAllApps) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    AppViewMode.entries.forEach { mode ->
+                        val isSelected = appViewMode == mode
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSelected) PhonixBlue.copy(alpha = 0.4f) else Slate800)
+                                .border(1.dp, if (isSelected) PhonixCyan else Color.Transparent, RoundedCornerShape(6.dp))
+                                .clickable { appViewMode = mode }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = mode.label,
+                                color = if (isSelected) Color.White else Slate400,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+
+                // Category Sub-tabs if CATEGORIES mode is active
+                if (appViewMode == AppViewMode.CATEGORIES) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        categoryTabs.forEach { tab ->
+                            val isTabSelected = selectedCategoryTab == tab
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isTabSelected) PhonixAmber.copy(alpha = 0.25f) else Slate900)
+                                    .border(1.dp, if (isTabSelected) PhonixAmber else Slate800, RoundedCornerShape(4.dp))
+                                    .clickable { selectedCategoryTab = tab }
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = tab,
+                                    color = if (isTabSelected) PhonixAmber else Slate400,
+                                    fontSize = 9.sp,
+                                    fontWeight = if (isTabSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(10.dp))
 
-            // 3. Main Body: Pinned Grid OR All Apps List
+            // 3. Main Body: Pinned Grid OR All Apps Views
             AnimatedContent(
                 targetState = showAllApps,
                 transitionSpec = {
@@ -343,98 +442,214 @@ fun Windows11StartMenu(
                 label = "start_menu_view_transition"
             ) { isAllApps ->
                 if (isAllApps) {
-                    // All Installed Phone Apps List (Alphabetical with real icons and Pin button)
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 240.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (filteredInstalledApps.isEmpty()) {
-                            item {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(24.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("No matching apps found", color = Slate400, fontSize = 11.sp)
-                                }
-                            }
-                        } else {
-                            items(filteredInstalledApps) { app ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            viewModel.closeStartMenu()
-                                            AppLaunchHelper.launchNativeApp(context, app.packageName)
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // App Icon
-                                    Box(
+                    when (appViewMode) {
+                        AppViewMode.COMPACT_LIST -> {
+                            // 2-Column Compact Grid
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 260.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(filteredInstalledApps) { app ->
+                                    Row(
                                         modifier = Modifier
-                                            .size(28.dp)
+                                            .fillMaxWidth()
                                             .clip(RoundedCornerShape(6.dp))
-                                            .background(Slate800),
-                                        contentAlignment = Alignment.Center
+                                            .background(Slate800.copy(alpha = 0.5f))
+                                            .clickable {
+                                                viewModel.closeStartMenu()
+                                                AppLaunchHelper.launchNativeApp(context, app.packageName)
+                                            }
+                                            .padding(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        val bmp = remember(app.iconDrawable) {
-                                            drawableToImageBitmap(app.iconDrawable)
-                                        }
+                                        val bmp = remember(app.iconDrawable) { drawableToImageBitmap(app.iconDrawable) }
                                         if (bmp != null) {
-                                            Image(
-                                                bitmap = bmp,
-                                                contentDescription = app.label,
-                                                modifier = Modifier.size(24.dp)
-                                            )
+                                            Image(bitmap = bmp, contentDescription = app.label, modifier = Modifier.size(20.dp))
                                         } else {
-                                            Icon(
-                                                Icons.Default.Widgets,
-                                                contentDescription = app.label,
-                                                tint = PhonixCyan,
-                                                modifier = Modifier.size(18.dp)
-                                            )
+                                            Icon(Icons.Default.Widgets, contentDescription = app.label, tint = PhonixCyan, modifier = Modifier.size(16.dp))
                                         }
-                                    }
-
-                                    Spacer(Modifier.width(10.dp))
-
-                                    Column(modifier = Modifier.weight(1f)) {
+                                        Spacer(Modifier.width(6.dp))
                                         Text(
                                             text = app.label,
                                             color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium,
+                                            fontSize = 10.sp,
                                             maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = app.packageName,
-                                            color = Slate400,
-                                            fontSize = 9.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
                                         )
                                     }
+                                }
+                            }
+                        }
 
-                                    // Pin to Desktop Action
-                                    Box(
+                        AppViewMode.STORAGE_WEIGHT -> {
+                            // Apps sorted by APK size with size badges and direct settings jump
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 260.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                items(filteredInstalledApps) { app ->
+                                    val apkBytes = remember(app.packageName) { HostDebloat.getPackageApkSize(context, app.packageName) }
+                                    Row(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Slate800)
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Slate800.copy(alpha = 0.4f))
                                             .clickable {
-                                                viewModel.pinInstalledApp(context, app)
+                                                viewModel.closeStartMenu()
+                                                AppLaunchHelper.launchNativeApp(context, app.packageName)
                                             }
-                                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Add, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(10.dp))
-                                            Spacer(Modifier.width(2.dp))
-                                            Text("Pin", color = PhonixCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        val bmp = remember(app.iconDrawable) { drawableToImageBitmap(app.iconDrawable) }
+                                        if (bmp != null) {
+                                            Image(bitmap = bmp, contentDescription = app.label, modifier = Modifier.size(24.dp))
+                                        } else {
+                                            Icon(Icons.Default.Widgets, contentDescription = app.label, tint = PhonixCyan, modifier = Modifier.size(20.dp))
+                                        }
+
+                                        Spacer(Modifier.width(8.dp))
+
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(app.label, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(app.packageName, color = Slate400, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+
+                                        // Size badge
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(PhonixAmber.copy(alpha = 0.2f))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = if (apkBytes > 0) PackageFacts.formatBytes(apkBytes) else "< 1 MB",
+                                                color = PhonixAmber,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+
+                                        Spacer(Modifier.width(6.dp))
+
+                                        // App Settings / Disable
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Slate800)
+                                                .clickable { HostDebloat.launchAppDetails(context, app.packageName) }
+                                                .padding(horizontal = 5.dp, vertical = 3.dp)
+                                        ) {
+                                            Text("Info", color = Slate300, fontSize = 8.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        AppViewMode.CATEGORIES -> {
+                            // Categorized list
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 260.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (filteredInstalledApps.isEmpty()) {
+                                    item {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(24.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("No matching apps in this category", color = Slate400, fontSize = 11.sp)
+                                        }
+                                    }
+                                } else {
+                                    items(filteredInstalledApps) { app ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    viewModel.closeStartMenu()
+                                                    AppLaunchHelper.launchNativeApp(context, app.packageName)
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // App Icon
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Slate800),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                val bmp = remember(app.iconDrawable) {
+                                                    drawableToImageBitmap(app.iconDrawable)
+                                                }
+                                                if (bmp != null) {
+                                                    Image(
+                                                        bitmap = bmp,
+                                                        contentDescription = app.label,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        Icons.Default.Widgets,
+                                                        contentDescription = app.label,
+                                                        tint = PhonixCyan,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Spacer(Modifier.width(10.dp))
+
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = app.label,
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = app.packageName,
+                                                    color = Slate400,
+                                                    fontSize = 9.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+
+                                            // Pin to Desktop Action
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(Slate800)
+                                                    .clickable {
+                                                        viewModel.pinInstalledApp(context, app)
+                                                    }
+                                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(Icons.Default.Add, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(10.dp))
+                                                    Spacer(Modifier.width(2.dp))
+                                                    Text("Pin", color = PhonixCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -448,6 +663,7 @@ fun Windows11StartMenu(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 240.dp),
+
                         contentPadding = PaddingValues(2.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)

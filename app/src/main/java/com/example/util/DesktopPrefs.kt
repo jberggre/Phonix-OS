@@ -176,6 +176,7 @@ object DesktopPrefs {
                 put("id", s.id)
                 put("title", s.title)
                 put("windowType", s.windowType.name)
+                s.customArtKey?.let { put("customArtKey", it) }
                 s.customSize?.let { put("customSize", it.name) }
                 put("customShape", s.customShape.name)
                 s.customColor?.let { put("customColor", it.name) }
@@ -202,6 +203,7 @@ object DesktopPrefs {
                 id = o.optString("id").ifBlank { "sc_${i}" },
                 title = o.optString("title").ifBlank { type.name },
                 windowType = type,
+                customArtKey = o.optString("customArtKey").takeIf { it.isNotBlank() && it != "null" },
                 gridCol = o.optInt("gridCol", 0),
                 gridRow = o.optInt("gridRow", 0),
                 posX = o.optDouble("posX", 0.0).toFloat(),

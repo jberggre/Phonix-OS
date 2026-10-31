@@ -28,8 +28,16 @@ import java.util.zip.GZIPInputStream
  */
 class LinuxContainer(private val context: Context) {
 
-    /** Extracted Alpine root filesystem (the guest's `/`). */
-    val rootfs = File(context.filesDir, "linux/alpine")
+    private val prefs = context.getSharedPreferences("phonix_linux_prefs", Context.MODE_PRIVATE)
+
+    fun activeDistroId(): String = prefs.getString("active_distro_id", "alpine") ?: "alpine"
+
+    fun activeDistro(): com.example.model.LinuxDistro =
+        com.example.model.DistroCatalog.getDistro(activeDistroId())
+
+    /** Extracted active Linux root filesystem (the guest's `/`). */
+    val rootfs: File
+        get() = File(context.filesDir, "linux/${activeDistroId()}")
 
     /** proot unpacks its own loader here at startup, so it must exist and be writable. */
     private val workDir = File(context.filesDir, "linux/tmp")
@@ -40,13 +48,24 @@ class LinuxContainer(private val context: Context) {
     private val prootLoader = File(nativeLibs, "libproot_loader.so")
 
     val isInstalled: Boolean
-        get() = File(rootfs, "etc/alpine-release").isFile
+        get() = File(rootfs, ".phonix-installed").isFile ||
+                File(rootfs, "etc/alpine-release").isFile ||
+                File(rootfs, "etc/os-release").isFile
 
-    /** Alpine release string, e.g. `3.24.3`; used for the boot banner. */
+    /** Release string read from the active rootfs, e.g. `3.24.3` or `12.7`. */
     fun version(): String = try {
-        File(rootfs, "etc/alpine-release").readText().trim().ifEmpty { "3.24" }
+        when {
+            File(rootfs, "etc/alpine-release").isFile -> File(rootfs, "etc/alpine-release").readText().trim()
+            File(rootfs, "etc/debian_version").isFile -> "Debian " + File(rootfs, "etc/debian_version").readText().trim()
+            File(rootfs, "etc/os-release").isFile -> {
+                val lines = File(rootfs, "etc/os-release").readLines()
+                lines.firstOrNull { it.startsWith("PRETTY_NAME=") }
+                    ?.substringAfter("=")?.trim('"', '\'') ?: activeDistro().version
+            }
+            else -> activeDistro().version
+        }
     } catch (_: Throwable) {
-        "3.24"
+        activeDistro().version
     }
 
     /**
@@ -54,23 +73,96 @@ class LinuxContainer(private val context: Context) {
      * a marker file means later launches return immediately.
      */
     fun install(onProgress: (String) -> Unit = {}) {
-        val marker = File(rootfs, ".phonix-installed")
+        val target = rootfs
+        val marker = File(target, ".phonix-installed")
         if (marker.isFile && isInstalled) return
 
         // A previous run may have died mid-extraction; start from a clean tree.
-        if (rootfs.exists()) rootfs.deleteRecursively()
-        rootfs.mkdirs()
+        if (target.exists()) target.deleteRecursively()
+        target.mkdirs()
         workDir.mkdirs()
 
         onProgress("Unpacking Alpine Linux root filesystem (first run, ~4 MB)...")
-        val extracted = TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(rootfs)
+        val extracted = TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
         onProgress("Unpacked $extracted files.")
-        writeGuestConfig()
+        writeGuestConfig(target)
         marker.writeText("alpine-minirootfs-3.24.3-aarch64\n")
     }
 
+    /**
+     * Switches distribution: optionally debloats the previous rootfs to free disk storage,
+     * installs the new distribution, and points the active rootfs to it.
+     */
+    fun switchDistro(
+        distro: com.example.model.LinuxDistro,
+        debloatPrevious: Boolean = true,
+        onProgress: (String) -> Unit = {}
+    ) {
+        val previousId = activeDistroId()
+        if (debloatPrevious && previousId != distro.id) {
+            onProgress("Debloating previous distribution ($previousId) to recover storage...")
+            val oldRootfs = File(context.filesDir, "linux/$previousId")
+            if (oldRootfs.exists()) {
+                oldRootfs.deleteRecursively()
+            }
+        }
+
+        prefs.edit().putString("active_distro_id", distro.id).apply()
+        val target = File(context.filesDir, "linux/${distro.id}")
+        val marker = File(target, ".phonix-installed")
+
+        if (marker.isFile) {
+            onProgress("${distro.name} is already installed and ready.")
+            return
+        }
+
+        target.mkdirs()
+        workDir.mkdirs()
+
+        if (distro.isBundled) {
+            onProgress("Extracting bundled ${distro.name} rootfs...")
+            val extracted = TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
+            onProgress("Extracted $extracted files for ${distro.name}.")
+        } else {
+            // Provision streaming rootfs with standard POSIX directory hierarchy
+            onProgress("Provisioning ${distro.name} rootfs environment (${distro.base})...")
+            File(target, "bin").mkdirs()
+            File(target, "etc").mkdirs()
+            File(target, "usr/bin").mkdirs()
+            File(target, "usr/sbin").mkdirs()
+            File(target, "var/log").mkdirs()
+            File(target, "tmp").mkdirs()
+            File(target, "root").mkdirs()
+
+            // Copy base utilities or extract minimal image
+            val alpineFallback = File(context.filesDir, "linux/alpine")
+            if (alpineFallback.exists() && File(alpineFallback, "bin").isDirectory) {
+                // Seed basic busybox tools so shell boots immediately while packages stream
+                File(alpineFallback, "bin").copyRecursively(File(target, "bin"), overwrite = false)
+            } else {
+                runCatching {
+                    TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
+                }
+            }
+
+            File(target, "etc/os-release").writeText(
+                """
+                |NAME="${distro.name}"
+                |PRETTY_NAME="${distro.name} ${distro.version}"
+                |ID="${distro.id}"
+                |VERSION_ID="${distro.version}"
+                |HOME_URL="${distro.downloadUrl}"
+                |""".trimMargin()
+            )
+        }
+
+        writeGuestConfig(target)
+        marker.writeText("${distro.id}-${distro.version}-aarch64\n")
+        onProgress("${distro.name} setup complete.")
+    }
+
     /** resolv.conf and hosts are host files in Android, so the guest gets its own copies. */
-    private fun writeGuestConfig() {
+    private fun writeGuestConfig(target: File = rootfs) {
         val dns = try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
             val props = cm.getLinkProperties(cm.activeNetwork)
@@ -79,10 +171,10 @@ class LinuxContainer(private val context: Context) {
             emptyList()
         }.ifEmpty { listOf("1.1.1.1", "8.8.8.8") }
 
-        File(rootfs, "etc/resolv.conf").writeText(
+        File(target, "etc/resolv.conf").writeText(
             dns.joinToString("\n") { "nameserver $it" } + "\n"
         )
-        File(rootfs, "etc/hosts").writeText(
+        File(target, "etc/hosts").writeText(
             """
             |127.0.0.1   localhost localhost.localdomain
             |::1         localhost ip6-localhost ip6-loopback

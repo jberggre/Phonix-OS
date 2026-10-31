@@ -71,6 +71,7 @@ data class DesktopShortcut(
     val id: String,
     val title: String,
     val windowType: WindowType,
+    val customArtKey: String? = null,
     val gridCol: Int = 0,
     val gridRow: Int = 0,
     val posX: Float = 0f,
@@ -228,7 +229,7 @@ data class DesktopCustomization(
      * Draw the tile and outline behind a desktop icon. Off gives the flat "just the glyph and the
      * caption" look some desktops prefer; the icons stay hit-testable either way.
      */
-    val showIconFrames: Boolean = true,
+    val showIconFrames: Boolean = false,
     val showClockInTaskbar: Boolean = true,
     val showBatteryInTaskbar: Boolean = true,
     val lockIconsToGrid: Boolean = false, // Freeform movement enabled by default

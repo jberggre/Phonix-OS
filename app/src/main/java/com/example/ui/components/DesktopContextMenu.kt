@@ -7,8 +7,10 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Settings
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -104,8 +106,8 @@ fun DesktopContextMenu(
                 posY = menuData.posY,
                 onDismiss = { viewModel.closeContextMenu() },
                 onLaunch = { viewModel.launchShortcutOrHostApp(context, shortcut) },
-                onUpdateStyle = { size, shape, color, bg ->
-                    viewModel.updateShortcutStyle(shortcut.id, size, shape, color, bg)
+                onUpdateStyle = { size, shape, color, bg, artKey ->
+                    viewModel.updateShortcutStyle(shortcut.id, size, shape, color, bg, artKey)
                 },
                 onTogglePin = { viewModel.togglePinShortcutToTaskbar(shortcut.id) },
                 onRename = { viewModel.startRename(shortcut.id) },
@@ -193,12 +195,17 @@ fun DesktopContextMenu(
                     viewModel.resetShortcutGrid()
                     viewModel.closeContextMenu()
                 },
+                onResetDesktopDefaults = {
+                    viewModel.resetDesktopCustomizations(context)
+                    viewModel.closeContextMenu()
+                },
                 onRunDebloat = {
-                    viewModel.runScreenlessMiniPcDebloat()
+                    viewModel.toggleWindow(WindowType.DEBLOAT_MANAGER)
                     viewModel.closeContextMenu()
                 },
                 modifier = modifier
             )
+
         }
     }
 }
@@ -211,7 +218,7 @@ private fun ShortcutContextMenuView(
     posY: Float,
     onDismiss: () -> Unit,
     onLaunch: () -> Unit,
-    onUpdateStyle: (IconSizeMode?, ShortcutShape, DesktopAccentColor?, ShortcutBgStyle) -> Unit,
+    onUpdateStyle: (IconSizeMode?, ShortcutShape, DesktopAccentColor?, ShortcutBgStyle, String?) -> Unit,
     onTogglePin: () -> Unit,
     onRename: () -> Unit,
     onRemove: () -> Unit,
@@ -228,6 +235,7 @@ private fun ShortcutContextMenuView(
     var selectedShape by remember { mutableStateOf(shortcut.customShape) }
     var selectedColor by remember { mutableStateOf(shortcut.customColor) }
     var selectedBg by remember { mutableStateOf(shortcut.customBackground) }
+    var selectedArtKey by remember(shortcut.id) { mutableStateOf(shortcut.customArtKey) }
 
     Surface(
         modifier = modifier
@@ -306,6 +314,58 @@ private fun ShortcutContextMenuView(
             HorizontalDivider(color = Slate800)
             Spacer(Modifier.height(8.dp))
 
+            // 0. Icon Sprite Style Picker
+            Text("Icon Artwork Style", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val isAutoSelected = selectedArtKey == null
+                Surface(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            selectedArtKey = null
+                            onUpdateStyle(selectedSize, selectedShape, selectedColor, selectedBg, null)
+                        },
+                    color = if (isAutoSelected) PhonixBlue.copy(alpha = 0.35f) else Slate800.copy(alpha = 0.4f),
+                    border = if (isAutoSelected) androidx.compose.foundation.BorderStroke(1.5.dp, PhonixCyan) else null
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("Auto", color = if (isAutoSelected) Color.White else Slate400, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                AppIconGlyphs.availableSprites.forEach { sprite ->
+                    val isSelected = selectedArtKey == sprite.key
+                    Surface(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                selectedArtKey = sprite.key
+                                onUpdateStyle(selectedSize, selectedShape, selectedColor, selectedBg, sprite.key)
+                            },
+                        color = if (isSelected) PhonixBlue.copy(alpha = 0.35f) else Slate800.copy(alpha = 0.4f),
+                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, PhonixCyan) else null
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Image(
+                                painter = painterResource(id = sprite.resId),
+                                contentDescription = sprite.label,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
             // 1. Icon Shape Picker
             Text("Shortcut Shape", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
@@ -322,7 +382,7 @@ private fun ShortcutContextMenuView(
                             .clip(RoundedCornerShape(4.dp))
                             .clickable {
                                 selectedShape = shape
-                                onUpdateStyle(selectedSize, shape, selectedColor, selectedBg)
+                                onUpdateStyle(selectedSize, shape, selectedColor, selectedBg, selectedArtKey)
                             },
                         color = if (isSelected) PhonixBlue.copy(alpha = 0.3f) else Slate800.copy(alpha = 0.4f),
                         border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, PhonixBlueLight) else null
@@ -355,7 +415,7 @@ private fun ShortcutContextMenuView(
                             .clip(RoundedCornerShape(4.dp))
                             .clickable {
                                 selectedSize = size
-                                onUpdateStyle(size, selectedShape, selectedColor, selectedBg)
+                                onUpdateStyle(size, selectedShape, selectedColor, selectedBg, selectedArtKey)
                             },
                         color = if (isSelected) PhonixBlue.copy(alpha = 0.3f) else Slate800.copy(alpha = 0.4f),
                         border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, PhonixBlueLight) else null
@@ -395,7 +455,7 @@ private fun ShortcutContextMenuView(
                             )
                             .clickable {
                                 selectedColor = color
-                                onUpdateStyle(selectedSize, selectedShape, color, selectedBg)
+                                onUpdateStyle(selectedSize, selectedShape, color, selectedBg, selectedArtKey)
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -424,7 +484,7 @@ private fun ShortcutContextMenuView(
                             .clip(RoundedCornerShape(4.dp))
                             .clickable {
                                 selectedBg = bg
-                                onUpdateStyle(selectedSize, selectedShape, selectedColor, bg)
+                                onUpdateStyle(selectedSize, selectedShape, selectedColor, bg, selectedArtKey)
                             },
                         color = if (isSelected) PhonixBlue.copy(alpha = 0.3f) else Slate800.copy(alpha = 0.4f),
                         border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, PhonixBlueLight) else null
@@ -507,6 +567,7 @@ private fun WallpaperContextMenuView(
     onToggleDesktopGrid: () -> Unit,
     onRestartLinuxGuest: () -> Unit,
     onResetShortcuts: () -> Unit,
+    onResetDesktopDefaults: () -> Unit,
     onRunDebloat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -544,6 +605,12 @@ private fun WallpaperContextMenuView(
             )
             ContextMenuItem(
                 icon = Icons.Default.GridView,
+                title = if (uiState.customization.showDesktopGrid) "Hide Alignment Grid" else "Show Alignment Grid",
+                tint = PhonixCyan,
+                onClick = onToggleDesktopGrid
+            )
+            ContextMenuItem(
+                icon = Icons.Default.GridView,
                 title = if (uiState.customization.lockIconsToGrid) "Disable Grid Snap" else "Enable Grid Snap",
                 tint = PhonixCyan,
                 onClick = onToggleGrid
@@ -562,15 +629,22 @@ private fun WallpaperContextMenuView(
             )
             ContextMenuItem(
                 icon = Icons.Default.Security,
-                title = "Debloat Screenless Phone",
+                title = "System Debloater (RAM & Storage)...",
                 tint = PhonixBlueLight,
                 onClick = onRunDebloat
             )
+
             ContextMenuItem(
                 icon = Icons.Default.Refresh,
                 title = "Align Shortcuts to Bottom-Left",
                 tint = Slate400,
                 onClick = onResetShortcuts
+            )
+            ContextMenuItem(
+                icon = Icons.Default.RestartAlt,
+                title = "Reset Desktop Layout & Icons to Defaults",
+                tint = PhonixAmber,
+                onClick = onResetDesktopDefaults
             )
             HorizontalDivider(color = Slate800, modifier = Modifier.padding(vertical = 3.dp))
             ContextMenuItem(

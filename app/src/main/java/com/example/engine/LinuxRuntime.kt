@@ -88,7 +88,25 @@ object LinuxRuntime {
         session = started
         state = State.RUNNING
         generation++
-        emit("Alpine Linux ${guest.version()} (aarch64) — real shell, proot, no root needed", true)
+        emit("${guest.activeDistro().name} ${guest.version()} (aarch64) — real shell, proot, no root needed", true)
+    }
+
+    @Synchronized
+    fun switchDistro(
+        context: Context,
+        distro: com.example.model.LinuxDistro,
+        debloatPrevious: Boolean = true,
+        onProgress: (String) -> Unit = {}
+    ) {
+        stop()
+        state = State.INSTALLING
+        val guest = container(context)
+        guest.switchDistro(distro, debloatPrevious) { msg ->
+            emit(msg, true)
+            onProgress(msg)
+        }
+        state = State.STOPPED
+        start(context)
     }
 
     /**

@@ -1988,25 +1988,46 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         size: IconSizeMode?,
         shape: ShortcutShape,
         color: DesktopAccentColor?,
-        bgStyle: ShortcutBgStyle
+        bgStyle: ShortcutBgStyle,
+        artKey: String? = null
     ) {
         _uiState.update { state ->
+            val updateSc = { sc: DesktopShortcut ->
+                sc.copy(
+                    customSize = size,
+                    customShape = shape,
+                    customColor = color,
+                    customBackground = bgStyle,
+                    customArtKey = artKey
+                )
+            }
             val updated = state.customization.shortcuts.map { sc ->
-                if (sc.id == shortcutId) {
-                    sc.copy(
-                        customSize = size,
-                        customShape = shape,
-                        customColor = color,
-                        customBackground = bgStyle
-                    )
-                } else sc
+                if (sc.id == shortcutId) updateSc(sc) else sc
+            }
+            val updatedPins = state.customization.taskbarPins.map { pin ->
+                if (pin.id == shortcutId) updateSc(pin) else pin
             }
             state.copy(
-                customization = state.customization.copy(shortcuts = updated),
+                customization = state.customization.copy(
+                    shortcuts = updated,
+                    taskbarPins = updatedPins
+                ),
                 activeContextMenu = null,
                 notificationMessage = "Updated shortcut appearance"
             )
         }
+    }
+
+    fun resetDesktopCustomizations(context: Context? = null) {
+        val defaults = DesktopCustomization()
+        _uiState.update { state ->
+            state.copy(
+                customization = defaults,
+                activeContextMenu = null,
+                notificationMessage = "Desktop layout and icon themes reset to defaults"
+            )
+        }
+        context?.let { DesktopPrefs.clear(it) }
     }
 
     /**
@@ -2303,17 +2324,45 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            // Always present, even if the customer trimmed the browser category: this is the
-            // Phonix WebView window, and before this it had no shortcut at all — closing it
-            // left no way to open it again for the rest of the session.
-            addShortcut(
-                DesktopShortcut(
+            // Handle Chrome debloat if requested by user in OOBE
+            if (cfg.debloatChrome) {
+                if (HostDebloat.canRemovePackages(context)) {
+                    HostDebloat.hidePackage(context, "com.android.chrome")
+                } else {
+                    HostDebloat.launchUninstall(context, "com.android.chrome")
+                }
+            }
+
+            // Configure offline knowledge library tier
+            KnowledgeLibrary.setTier(cfg.offlineLibraryTier)
+
+            // Configure browser shortcut according to user's chosen browser
+            val browserShortcut = when (cfg.preferredBrowser) {
+                PreferredBrowser.CHROMIUM -> DesktopShortcut(
+                    id = "sc_browser",
+                    title = "Chromium",
+                    windowType = WindowType.BROWSER,
+                    launchPackage = "org.chromium.chrome",
+                    isNativeApp = true,
+                    customColor = DesktopAccentColor.CYBER_CYAN
+                )
+                PreferredBrowser.FIREFOX -> DesktopShortcut(
+                    id = "sc_browser",
+                    title = "Mozilla Firefox",
+                    windowType = WindowType.BROWSER,
+                    launchPackage = "org.mozilla.firefox",
+                    isNativeApp = true,
+                    customColor = DesktopAccentColor.AMBER_EMBER
+                )
+                PreferredBrowser.PHONIX_BROWSER -> DesktopShortcut(
                     id = "sc_browser",
                     title = "Phonix Browser",
                     windowType = WindowType.BROWSER,
                     customColor = DesktopAccentColor.CYBER_CYAN
                 )
-            )
+            }
+            addShortcut(browserShortcut)
+
 
             if (categories.contains(AppCategory.FILE_MANAGER)) {
                 addShortcut(
@@ -2379,6 +2428,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val prefs = context.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
                 prefs.edit().putBoolean("oobe_completed", false).apply()
+                DesktopPrefs.clear(context)
             } catch (_: Exception) {
             }
 
@@ -2386,6 +2436,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 state.copy(
                     isOobeCompleted = false,
                     oobeConfig = OobeSetupConfig(),
+                    customization = DesktopCustomization(),
                     isStartMenuOpen = false,
                     activeContextMenu = null,
                     notificationMessage = "Mini PC prepared for new user. Launching Out-of-Box Setup Wizard..."

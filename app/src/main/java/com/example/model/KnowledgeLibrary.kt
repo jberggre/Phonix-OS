@@ -19,6 +19,12 @@ enum class KnowledgeCategory(val title: String, val glyph: String) {
     HARDWARE("Hardware & Linux", "⚙️")
 }
 
+enum class KnowledgeTier(val title: String, val subtitle: String, val approxSize: String) {
+    LIGHTWEIGHT("Lightweight (Essential)", "Core survival, emergency triage, water & shell", "~800 KB"),
+    MEDIUM("Standard (Civilization Starter)", "Adds crop cycles, animal husbandry, forge, offline Python/C & 12V solar", "~2.8 MB"),
+    LARGE("Comprehensive (Rebuild Vault)", "Full encyclopedia: seed vaults, micro-hydro, packet radio, kernel internals & offline algorithms", "~7.5 MB")
+}
+
 data class KnowledgeDoc(
     val id: String,
     val category: KnowledgeCategory,
@@ -27,8 +33,10 @@ data class KnowledgeDoc(
     val body: String,
     val keywords: List<String>,
     /** A command worth running in the guest, offered with a Run button rather than typed by hand. */
-    val command: String? = null
+    val command: String? = null,
+    val tier: KnowledgeTier = KnowledgeTier.LIGHTWEIGHT
 )
+
 
 object KnowledgeLibrary {
 
@@ -435,12 +443,366 @@ object KnowledgeLibrary {
                 • htop, or: top -b -n1 | head -20
                 • Per-core load: cat /proc/loadavg
             """.trimIndent(),
-            command = "cat /sys/class/thermal/thermal_zone0/temp"
+            command = "cat /sys/class/thermal/thermal_zone0/temp",
+            tier = KnowledgeTier.LIGHTWEIGHT
+        ),
+
+        // =================================================================
+        // MEDIUM TIER: CIVILIZATION STARTER (Agriculture, Food Storage, Solar, Offline Coding)
+        // =================================================================
+        KnowledgeDoc(
+            id = "farm_crop_cycles",
+            category = KnowledgeCategory.FARMING,
+            title = "Crop rotation & soil fertility",
+            summary = "Nitrogen fixing legumes, crop rotation cycles, and compost thermal piles.",
+            keywords = listOf("farming", "crops", "soil", "rotation", "nitrogen", "compost", "legumes", "seeds", "heirloom"),
+            body = """
+                THE 4-YEAR ROTATION SYSTEM
+                Year 1: Heavy feeders (Corn, Squash, Brassicas, Tomatoes) — require rich, composted soil.
+                Year 2: Legumes (Beans, Peas, Clover) — bacteria (Rhizobium) in root nodules fix atmospheric nitrogen.
+                Year 3: Light feeders (Root crops: Carrots, Beets, Onions, Turnips) — excess nitrogen causes split roots.
+                Year 4: Cover crop or Green Manure (Rye, Buckwheat, Winter Vetch) — tilled under to build humus.
+
+                COMPOST THERMAL PILE (140°F - 160°F / 60°C - 70°C)
+                • Carbon (Browns) to Nitrogen (Greens) ratio: 30:1 by volume.
+                • Browns: Dry leaves, straw, untreated wood chips, shredded cardboard.
+                • Greens: Kitchen scraps, fresh grass, manure (chicken, rabbit, goat, horse — NEVER dog/cat/pig).
+                • Turn every 7-10 days when internal core temperature drops below 110°F.
+                • High heat (above 135°F for 3 consecutive days) kills weed seeds and plant pathogens.
+
+                SEED SAVING & HEIRLOOM PRESERVATION
+                • Save only open-pollinated (heirloom) seeds; F1 hybrids will not breed true in generation F2.
+                • Beans & Peas: Let pods dry completely brown and brittle on the vine before shelling.
+                • Tomatoes: Ferment seeds in their pulp for 3 days to digest the germination-inhibiting gel, then rinse and air dry.
+                • Moisture test: A dry seed will shatter under a hammer, not smash flat. Store below 10% humidity in airtight jars with desiccant or wood ash.
+            """.trimIndent(),
+            command = "echo 'Rotation: Heavy Feeders -> Legumes -> Roots -> Cover Crop'",
+            tier = KnowledgeTier.MEDIUM
+        ),
+        KnowledgeDoc(
+            id = "surv_food_preserve",
+            category = KnowledgeCategory.SURVIVAL,
+            title = "Long-term food preservation (No power)",
+            summary = "Root cellaring, dry salting, vinegar pickling, and wood smoke curing.",
+            keywords = listOf("preserve", "curing", "smoke", "salt", "cellar", "root", "storage", "food", "shelf"),
+            body = """
+                ROOT CELLARING (32°F - 40°F / 0°C - 4°C, 85-95% humidity)
+                • Unwashed root crops: Potatoes, Carrots, Beets, Parsnips.
+                • Pack in dry sand or damp sawdust inside dark, ventilated wooden bins.
+                • Keep potatoes and apples separated: apples emit ethylene gas which induces potato sprouting.
+                • Winter squash and pumpkins prefer dry storage (50°F - 55°F, 60% humidity).
+
+                SALT CURING (Meat preservation)
+                • Dry salt cure ratio: 3% - 4% salt by weight of fresh meat (minimum 35 g non-iodized salt per 1 kg meat).
+                • Rub salt into all muscle creases and around bones; bone souring occurs if salt penetrates too slowly.
+                • Rule of thumb: 2 days of curing per inch of meat thickness at cool temperature (< 40°F / 4°C).
+
+                SMOKING FOR PRESERVATION
+                • Cold smoke (< 90°F / 32°C): Does not cook meat; deposits antimicrobial phenols and dries tissue.
+                • Requires hardwood sawdust (Oak, Hickory, Apple, Alder). Avoid all resinous conifers (Pine, Cedar).
+                • Cure in salt first, smoke for 24-72 hours until surface develops a dark, leathery pellicle.
+            """.trimIndent(),
+            command = "echo 'Meat cure: 35g non-iodized salt per 1kg meat; chill < 4C'",
+            tier = KnowledgeTier.MEDIUM
+        ),
+        KnowledgeDoc(
+            id = "power_solar_sizing",
+            category = KnowledgeCategory.POWER,
+            title = "Off-grid 12V/24V solar & battery sizing",
+            summary = "Watt-hour budgeting, battery chemistry, MPPT vs PWM, wire gauge AWG selection.",
+            keywords = listOf("solar", "battery", "12v", "24v", "inverter", "mppt", "amp", "watt", "wire", "gauge"),
+            body = """
+                DAILY WATT-HOUR (Wh) BUDGET
+                • Wh = Watts × Hours of daily runtime. Example: 15W phone/mini-PC × 24h = 360 Wh.
+                • Inverter / charge controller efficiency losses: multiply total Wh by 1.25. (360 × 1.25 = 450 Wh).
+
+                BATTERY CAPACITY (Amp-Hours @ 12V)
+                • Lead-Acid (AGM/Flooded): Max 50% Depth of Discharge (DoD) for longevity.
+                  Capacity needed = (Daily Wh ÷ 12V) × 2. (450 Wh ÷ 12V × 2 = 75 Ah).
+                • Lithium Iron Phosphate (LiFePO4): 80% DoD, 3000+ cycles.
+                  Capacity needed = (Daily Wh ÷ 12V) × 1.25. (450 Wh ÷ 12V × 1.25 = 47 Ah).
+
+                SOLAR ARRAY SIZING
+                • Average peak sun hours: 4.0 hours per winter day in temperate zones.
+                • Array Watts needed = Daily Wh ÷ Peak Sun Hours ÷ 0.75 (dust/temp derate).
+                  450 Wh ÷ 4.0h ÷ 0.75 ≈ 150 Watts of PV panels.
+
+                WIRE GAUGE (AWG) FOR 12V DC (Limit voltage drop to < 3%)
+                • 10 Amps at 10 feet: 12 AWG
+                • 20 Amps at 10 feet: 10 AWG (or 8 AWG for 20 feet)
+                • 50 Amps at 10 feet: 4 AWG
+                • Formula: Voltage Drop (V) = 2 × Length(ft) × Current(A) × Ohms_per_1000ft ÷ 1000.
+            """.trimIndent(),
+            command = "echo 'Wh = W * hrs; LiFePO4 Ah = Wh / 12 * 1.25; Array W = Wh / (SunHours * 0.75)'",
+            tier = KnowledgeTier.MEDIUM
+        ),
+        KnowledgeDoc(
+            id = "aid_wound_closure",
+            category = KnowledgeCategory.FIRST_AID,
+            title = "Wound closure, splints & burn triage",
+            summary = "Irrigation volume, butterfly closure vs suturing, fracture immobilization, burn degrees.",
+            keywords = listOf("wound", "suture", "splint", "burn", "infection", "closure", "iodine", "bandage"),
+            body = """
+                WOUND IRRIGATION (The golden rule)
+                • The solution to pollution is dilution: Irrigate with 500 mL - 1000 mL of sterile saline or boiled clean water.
+                • Use a 20 mL syringe with an 18-gauge catheter to generate ~8 psi of pressure.
+                • Never pour full-strength hydrogen peroxide or rubbing alcohol into deep tissue; it destroys healthy granulating cells.
+
+                CLOSURE CRITERIA
+                • Close only clean, fresh wounds (< 6 to 8 hours old on the body, < 12 hours on the face).
+                • DO NOT CLOSE: Animal or human bites, puncture wounds, contaminated wounds, or wounds older than 8 hours. Pack open with sterile wet-to-dry gauze to drain.
+                • Closure methods: Steri-Strips or butterfly bandages placed across tension lines. Cyanoacrylate (superglue) works on clean, shallow superficial incisions (avoid eye area).
+
+                BURNS
+                • 1st Degree: Red, painful, dry (sunburn). Cool clean water, aloe vera.
+                • 2nd Degree: Blisters, intense pain, weeping. Do not pop blisters. Cover with sterile non-adherent dressing.
+                • 3rd Degree: Leathery, white or charred, painless in center (nerve endings destroyed). Medical emergency. Cover sterile, hydrate orally with ORS if patient can swallow.
+            """.trimIndent(),
+            command = "echo 'Irrigate with 500-1000ml sterile water. Do NOT close animal bites or old wounds.'",
+            tier = KnowledgeTier.MEDIUM
+        ),
+        KnowledgeDoc(
+            id = "code_python_offline",
+            category = KnowledgeCategory.CODING,
+            title = "Offline Python stdlib reference",
+            summary = "Built-in HTTP server, socket networking, SQLite3 database, file parsing.",
+            keywords = listOf("python", "coding", "offline", "server", "socket", "sqlite", "http", "script"),
+            body = """
+                INSTANT LOCAL HTTP SERVER
+                ${'$'} python3 -m http.server 8080 --bind 0.0.0.0
+
+                SQLITE3 DATABASE IN 6 LINES (No dependencies)
+                import sqlite3
+                con = sqlite3.connect("vault.db")
+                cur = con.cursor()
+                cur.execute("CREATE TABLE IF NOT EXISTS inventory(item TEXT, qty INT)")
+                cur.execute("INSERT INTO inventory VALUES ('Seeds - Bean', 500)")
+                con.commit()
+                for row in cur.execute("SELECT * FROM inventory"): print(row)
+
+                TCP SOCKET SERVER (Raw networking)
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(('0.0.0.0', 9999))
+                s.listen(1)
+                conn, addr = s.accept()
+                conn.sendall(b"PHONIX OFFLINE NODE READY\n")
+                conn.close()
+            """.trimIndent(),
+            command = "python3 -c \"import sys; print(f'Python {sys.version}')\"",
+            tier = KnowledgeTier.MEDIUM
+        ),
+        KnowledgeDoc(
+            id = "code_c_minimal",
+            category = KnowledgeCategory.CODING,
+            title = "Minimal C on Linux (GCC / Clang)",
+            summary = "Compilation, POSIX file descriptors, syscalls, raw terminal IO.",
+            keywords = listOf("c", "clang", "gcc", "compile", "posix", "syscall", "memory", "terminal"),
+            body = """
+                COMPILE WITHOUT EXTERNAL LIBS
+                ${'$'} gcc -O2 -Wall -o tool main.c
+                ${'$'} apk add build-base  # Installs gcc, musl-dev, make
+
+                DIRECT FILE IO VIA SYSCALLS
+                #include <unistd.h>
+                #include <fcntl.h>
+                int main() {
+                    int fd = open("log.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
+                    const char msg[] = "Device rebooted\n";
+                    write(fd, msg, sizeof(msg) - 1);
+                    close(fd);
+                    return 0;
+                }
+            """.trimIndent(),
+            command = "echo -e '#include <stdio.h>\nint main(){printf(\"C OK\\n\");return 0;}' > /tmp/t.c && gcc /tmp/t.c -o /tmp/t && /tmp/t",
+            tier = KnowledgeTier.MEDIUM
+        ),
+
+        // =================================================================
+        // LARGE TIER: COMPREHENSIVE VAULT (End-of-World Rebuild Manual)
+        // =================================================================
+        KnowledgeDoc(
+            id = "farm_caloric_yield",
+            category = KnowledgeCategory.FARMING,
+            title = "Calorie & protein yield per acre (Survival agriculture)",
+            summary = "Potatoes vs grain vs legumes, companion guild planting, goat/chicken feed ratios.",
+            keywords = listOf("calories", "yield", "acre", "protein", "survival", "potatoes", "wheat", "chickens", "livestock"),
+            body = """
+                TOP CALORIC DENSITY CROPS (Per 1000 sq ft / ~93 sq meters)
+                1. Potatoes (White/Russet): ~1,200,000 kcal / 1000 sq ft. High Vitamin C, potassium, protein balance.
+                2. Sweet Potatoes: ~1,100,000 kcal. Excellent storage in warm climates, leaves are edible greens.
+                3. Corn (Flint / Dent for meal): ~600,000 kcal. Requires nitrogen; stores for years as dry grain.
+                4. Winter Squash (Butternut/Hubbard): ~450,000 kcal. Stores 6+ months without processing.
+                5. Dry Beans (Pinto/Black/Navy): ~350,000 kcal. Crucial plant protein (21% protein by dry weight).
+
+                THE THREE SISTERS GUILD
+                • Plant Corn first. When 6 inches high, plant Pole Beans around stalk, and Winter Squash in basins between.
+                • Corn provides living trellis for beans.
+                • Beans fix atmospheric nitrogen for high-nitrogen corn.
+                • Squash broad prickly leaves shade ground to suppress weeds and retain soil moisture.
+
+                LIVESTOCK CONVERSION RATIOS
+                • Chickens: 2 kg grain produces ~1 kg eggs or meat. Feed kitchen scraps and free-range insects.
+                • Dairy Goats: 1 acre browse supports 2-3 dairy goats, producing 2-4 liters milk per day on forage.
+                • Rabbits: 1 doe produces 40-50 lbs dressed meat per year on greens and hay.
+            """.trimIndent(),
+            command = "echo 'Top survival calories: Potatoes (1.2M kcal/1000sqft) > Sweet Potatoes > Corn > Squash > Beans'",
+            tier = KnowledgeTier.LARGE
+        ),
+        KnowledgeDoc(
+            id = "surv_water_turbine",
+            category = KnowledgeCategory.POWER,
+            title = "Micro-hydro power generation (Pelton wheels)",
+            summary = "Head height vs flow rate equations, alternator conversion, penstock pipe friction.",
+            keywords = listOf("hydro", "turbine", "pelton", "water", "head", "generator", "alternator", "watts"),
+            body = """
+                HYDROELECTRIC POWER FORMULA
+                Watts = Head (meters) × Flow Rate (litres per second) × 9.81 × System Efficiency (typically 0.50 to 0.60)
+                Example: 10 meters head (vertical drop) with 5 L/sec stream flow:
+                Watts = 10 × 5 × 9.81 × 0.55 ≈ 270 Watts continuous (6.48 kWh per day!).
+
+                KEY COMPONENTS
+                1. Intake & Settling Box: Screen out leaves, gravel, and silt before penstock pipe.
+                2. Penstock (Pipe): Smooth PVC or HDPE. Friction loss drops available head; size pipe so water velocity stays under 1.5 m/s.
+                3. Jet Nozzle: Converts water pressure into high-velocity water jet directed at turbine cups.
+                4. Pelton Runner: Spoon-shaped split buckets split jet in half and reverse momentum.
+                5. Permanent Magnet Alternator (PMA): Low RPM car alternator rewound or brushless stepper/servo motor rectified with 3-phase diode bridge.
+            """.trimIndent(),
+            command = "echo 'Watts = Head(m) * Flow(L/s) * 9.81 * 0.55'",
+            tier = KnowledgeTier.LARGE
+        ),
+        KnowledgeDoc(
+            id = "radio_packet_lora",
+            category = KnowledgeCategory.RADIO,
+            title = "Off-grid packet radio & LoRa mesh networks",
+            summary = "Meshtastic/AX.25 packet frequencies, field dipole calculation, solar repeater nodes.",
+            keywords = listOf("radio", "lora", "meshtastic", "mesh", "packet", "ax25", "antenna", "dipole", "aprs"),
+            body = """
+                MESHTASTIC & LORA FREQUENCIES
+                • North America: 906.875 MHz - 915 MHz (Ch 0: 906.875 MHz)
+                • Europe / UK: 869.525 MHz / 433 MHz
+                • Line of sight range: 5 km ground-to-ground; 50-100+ km mountain-to-valley.
+
+                CALCULATING WIRE ANTENNA LENGTHS (Half-wave Dipole)
+                • Total length in feet = 468 ÷ Frequency in MHz
+                • Total length in meters = 143 ÷ Frequency in MHz
+                • Example for 146.520 MHz (2m VHF National Calling):
+                  143 ÷ 146.520 = 0.976 meters total (each leg of the dipole is 48.8 cm).
+
+                STANDALONE SOLAR REPEATER NODE
+                • 1× ESP32/nRF52 LoRa module (draws ~15-25 mA idle, 120 mA transmit).
+                • 1× 18650 Li-ion cell (3.7V 3000 mAh = 11.1 Wh).
+                • 1× 5V 5W solar panel with TP4056 or BQ25180 charge controller.
+                • Run indefinitely on high elevation / roof trees as autonomous store-and-forward mesh repeater.
+            """.trimIndent(),
+            command = "echo 'Half-wave dipole meters = 143 / Freq_MHz (each leg = half)'",
+            tier = KnowledgeTier.LARGE
+        ),
+        KnowledgeDoc(
+            id = "aid_wilderness_pharm",
+            category = KnowledgeCategory.FIRST_AID,
+            title = "Emergency wilderness medicine & botany",
+            summary = "Willow bark salicin, activated charcoal dosing, hyperthermia/hypothermia resuscitation.",
+            keywords = listOf("medicine", "botany", "charcoal", "willow", "salicin", "hypothermia", "rehydration", "poison"),
+            body = """
+                ACTIVATED CHARCOAL (Ingested poisons)
+                • Dose: 1 gram per kg body weight (approx. 50g to 100g for adults) mixed into clean water.
+                • Must be given within 1 to 2 hours of toxin ingestion to bind chemicals in GI tract.
+                • Ineffective for: Strong acids, alkalis, heavy metals (iron/lead), petroleum distillates, and ethanol.
+
+                WHITE WILLOW BARK (Salix spp. - Natural analgesic / antipyretic)
+                • Contains salicin, metabolized in the liver to salicylic acid (aspirin precursor).
+                • Harvest inner bark (greenish cambium layer) in spring.
+                • Decoction: Simmer 2-3 teaspoons of crushed inner bark in 1 cup water for 15 minutes. Strain and drink up to 3 times daily.
+                • Contraindications: Same as aspirin (never give to children under 16 with viral fevers due to risk of Reye's syndrome).
+
+                HYPOTHERMIA RESUSCITATION
+                • Mild (32°C - 35°C): Shivering present. Dry clothes, warm sweet fluids, gentle active rewarming.
+                • Severe (< 28°C): Shivering stops, altered mental state, rigid muscles.
+                • Handle very gently: rough movement can trigger fatal ventricular fibrillation.
+                • Rewarm core first (chest, neck, groin with warm water bottles). Never massage cold extremities (causes cold shock to heart).
+            """.trimIndent(),
+            command = "echo 'Activated charcoal: 1g/kg within 1-2 hours of toxin ingestion'",
+            tier = KnowledgeTier.LARGE
+        ),
+        KnowledgeDoc(
+            id = "code_linux_kernel",
+            category = KnowledgeCategory.CODING,
+            title = "Linux kernel, sysfs & proot internals",
+            summary = "Proot ptrace interception, rootfs layout, sysfs hardware control, loop mounts.",
+            keywords = listOf("linux", "kernel", "proot", "ptrace", "sysfs", "proc", "chroot", "syscall"),
+            body = """
+                HOW PROOT WORKS ON ANDROID
+                • Proot uses the ptrace(2) system call to trace system calls made by guest binaries.
+                • When a binary calls open("/etc/passwd", ...), proot traps the syscall before the Android kernel sees it,
+                  rewrites the path argument in registers to "/data/user/0/.../files/linux/alpine/etc/passwd",
+                  and lets the kernel execute the translated call.
+                • Result: Full guest Linux filesystem without root privileges, loop mounts, or kernel modifications.
+
+                SYSFS HARDWARE TELEMETRY PATHS
+                • Thermal zones: /sys/class/thermal/thermal_zone*/temp (divide value by 1000 for °C).
+                • Battery status: /sys/class/power_supply/battery/status, current_now, voltage_now.
+                • CPU frequency: /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq.
+                • Display brightness: /sys/class/backlight/*/brightness.
+            """.trimIndent(),
+            command = "cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || cat /proc/cpuinfo | head -10",
+            tier = KnowledgeTier.LARGE
+        ),
+        KnowledgeDoc(
+            id = "code_algorithms_vault",
+            category = KnowledgeCategory.CODING,
+            title = "Core algorithms & crypto primitives",
+            summary = "Dijkstra shortest path, binary search, SHA-256 bitwise rotations, Huffman compression.",
+            keywords = listOf("algorithms", "dijkstra", "sha256", "crypto", "huffman", "binary", "search", "math"),
+            body = """
+                BINARY SEARCH (O(log n))
+                def binary_search(arr, target):
+                    low, high = 0, len(arr) - 1
+                    while low <= high:
+                        mid = (low + high) // 2
+                        if arr[mid] == target: return mid
+                        elif arr[mid] < target: low = mid + 1
+                        else: high = mid - 1
+                    return -1
+
+                DIJKSTRA SHORTEST PATH (Graph routing)
+                import heapq
+                def dijkstra(graph, start):
+                    distances = {node: float('inf') for node in graph}
+                    distances[start] = 0
+                    pq = [(0, start)]
+                    while pq:
+                        curr_dist, curr_node = heapq.heappop(pq)
+                        if curr_dist > distances[curr_node]: continue
+                        for neighbor, weight in graph[curr_node].items():
+                            distance = curr_dist + weight
+                            if distance < distances[neighbor]:
+                                distances[neighbor] = distance
+                                heapq.heappush(pq, (distance, neighbor))
+                    return distances
+            """.trimIndent(),
+            command = "echo 'Binary Search O(log n) | Dijkstra O((V + E) log V)'",
+            tier = KnowledgeTier.LARGE
         )
     )
 
-    fun docsFor(category: KnowledgeCategory?): List<KnowledgeDoc> =
-        if (category == null) docs else docs.filter { it.category == category }
+    var activeTier: KnowledgeTier = KnowledgeTier.LIGHTWEIGHT
+
+    fun setTier(tier: KnowledgeTier) {
+        activeTier = tier
+    }
+
+    private fun isDocInTier(doc: KnowledgeDoc, tier: KnowledgeTier): Boolean = when (tier) {
+        KnowledgeTier.LIGHTWEIGHT -> doc.tier == KnowledgeTier.LIGHTWEIGHT
+        KnowledgeTier.MEDIUM -> doc.tier in setOf(KnowledgeTier.LIGHTWEIGHT, KnowledgeTier.MEDIUM)
+        KnowledgeTier.LARGE -> true
+    }
+
+    fun docsFor(category: KnowledgeCategory?, tier: KnowledgeTier = activeTier): List<KnowledgeDoc> =
+        docs.filter { doc ->
+            isDocInTier(doc, tier) && (category == null || doc.category == category)
+        }
 
     fun document(id: String): KnowledgeDoc? = docs.firstOrNull { it.id == id }
 
@@ -454,14 +816,14 @@ object KnowledgeLibrary {
      * keeps a 1.5B model's context short and on-topic; "All" searches everything and is the slower,
      * broader option.
      */
-    fun retrieve(query: String, category: KnowledgeCategory?, limit: Int = 2): List<KnowledgeDoc> {
+    fun retrieve(query: String, category: KnowledgeCategory?, tier: KnowledgeTier = activeTier, limit: Int = 2): List<KnowledgeDoc> {
         val terms = query.lowercase(java.util.Locale.ROOT)
             .split(Regex("[^a-z0-9]+"))
             .filter { it.length > 2 && it !in stopWords }
             .toSet()
         if (terms.isEmpty()) return emptyList()
 
-        return docsFor(category)
+        return docsFor(category, tier)
             .map { doc ->
                 val haystack = (doc.title + " " + doc.summary + " " + doc.keywords.joinToString(" ") + " " + doc.body)
                     .lowercase(java.util.Locale.ROOT)
@@ -480,11 +842,12 @@ object KnowledgeLibrary {
     }
 
     /** The block handed to the model as reference material, with the shelf it came from. */
-    fun contextFor(query: String, category: KnowledgeCategory?): String? {
-        val hits = retrieve(query, category)
+    fun contextFor(query: String, category: KnowledgeCategory?, tier: KnowledgeTier = activeTier): String? {
+        val hits = retrieve(query, category, tier)
         if (hits.isEmpty()) return null
         return hits.joinToString("\n\n") { doc ->
             "[${doc.category.title}] ${doc.title}\n${doc.body}"
         }
     }
 }
+

@@ -182,5 +182,7 @@ data class OobeSetupConfig(
     val enableAggressiveDebloat: Boolean = true,
     val themePreset: DesktopThemePreset = DesktopThemePreset.FLUENT_DARK,
     val taskbarCentered: Boolean = true,
-    val deviceChanges: DeviceChangeChoices = DeviceChangeChoices()
+    val deviceChanges: DeviceChangeChoices = DeviceChangeChoices(),
+    val offlineLibraryTier: KnowledgeTier = KnowledgeTier.LIGHTWEIGHT
 )
+

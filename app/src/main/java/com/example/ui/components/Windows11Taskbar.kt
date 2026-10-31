@@ -324,9 +324,16 @@ fun Windows11Taskbar(
                             .testTag("taskbar_app_${app.id.lowercase()}"),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (app.shortcut?.launchPackage == null) {
+                        val customArt = app.shortcut?.customArtKey?.let { AppIconGlyphs.artForKey(it) }
+                        val artRes = customArt ?: if (app.shortcut?.id?.startsWith("sc_") == true || app.shortcut?.isNativeApp != true || app.shortcut?.windowType != WindowType.BROWSER) {
+                            AppIconGlyphs.artFor(app.windowType)
+                        } else {
+                            null
+                        }
+
+                        if (artRes != null) {
                             Image(
-                                painter = painterResource(id = AppIconGlyphs.artFor(app.windowType)),
+                                painter = painterResource(id = artRes),
                                 contentDescription = app.title,
                                 contentScale = ContentScale.Fit,
                                 modifier = Modifier.size(22.dp)

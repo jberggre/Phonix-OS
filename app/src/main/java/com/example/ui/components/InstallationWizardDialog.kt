@@ -62,8 +62,11 @@ import com.example.R
 import com.example.model.MiniPcProfile
 import com.example.model.PreferredBrowser
 import com.example.model.SetupPersona
+import com.example.model.KnowledgeTier
 import com.example.util.PackageFacts
+import com.example.util.HostDebloat
 import com.example.model.DeviceChangeChoices
+
 import com.example.model.DeviceUseMode
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -848,20 +851,97 @@ fun Step4DebloatOptimization(
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth().border(1.dp, if (uiState.oobeConfig.debloatChrome) PhonixGreen else PhonixCyan, RoundedCornerShape(10.dp))
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Debloat Google Chrome", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("Disable Chrome from the desktop and route all web queries to your chosen private browser.", color = Slate300, fontSize = 10.sp)
+            Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Debloat Google Chrome", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("Reclaim ~180MB storage & background RAM. Routes web requests to your chosen browser.", color = Slate300, fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = uiState.oobeConfig.debloatChrome,
+                        onCheckedChange = { viewModel.toggleOobeDebloatChrome(it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
+                    )
                 }
-                Switch(
-                    checked = uiState.oobeConfig.debloatChrome,
-                    onCheckedChange = { viewModel.toggleOobeDebloatChrome(it) },
-                    colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
+
+                if (uiState.oobeConfig.debloatChrome) {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { HostDebloat.launchUninstall(context, "com.android.chrome") },
+                            colors = ButtonDefaults.buttonColors(containerColor = PhonixRed.copy(alpha = 0.85f)),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("1-Click Uninstall Chrome", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { HostDebloat.launchAppDetails(context, "com.android.chrome") },
+                            colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("App Info (Disable)", fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // OFFLINE AI KNOWLEDGE LIBRARY TIER SELECTION
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth().border(1.dp, PhonixCyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.SmartToy, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Offline AI Knowledge Library Size", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    "Select how extensive the offline vault and AI grounding corpus should be. All tiers run 100% locally with zero internet.",
+                    color = Slate300,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp
                 )
+
+                KnowledgeTier.entries.forEach { tier ->
+                    val isSelected = uiState.oobeConfig.offlineLibraryTier == tier
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) Color(0xFF0F261C) else Slate950
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.updateOobeConfig(uiState.oobeConfig.copy(offlineLibraryTier = tier))
+                            }
+                            .border(1.dp, if (isSelected) PhonixGreen else Slate800, RoundedCornerShape(8.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(tier.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(tier.approxSize, color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                }
+                                Text(tier.subtitle, color = Slate400, fontSize = 9.sp)
+                            }
+                            if (isSelected) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -891,7 +971,7 @@ fun Step4DebloatOptimization(
                     text = if (uiState.canRemoveHostPackages)
                         "This install is device owner, so Phonix can remove these itself when you press Deploy. Removal is a hide, and it is reversible."
                     else
-                        "This install is not device owner, so Phonix cannot uninstall another app. It can only hand you the exact adb commands to run from a PC.",
+                        "This install is not device owner, so Phonix cannot uninstall another app silently. Tap individual packages to trigger 1-click removal or copy PC commands.",
                     color = if (uiState.canRemoveHostPackages) PhonixGreen else PhonixAmber,
                     fontSize = 10.sp,
                     lineHeight = 14.sp
@@ -935,6 +1015,7 @@ fun Step4DebloatOptimization(
 
         Text("Ticked packages are the trim list:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
 
+        val context = androidx.compose.ui.platform.LocalContext.current
         uiState.debloatPackages.forEach { pkg ->
             val onDevice = uiState.debloatInstalled[pkg.packageName]
             Card(
@@ -948,38 +1029,60 @@ fun Step4DebloatOptimization(
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().border(1.dp, if (pkg.isEnabled && onDevice != false) PhonixCyan else Slate800, RoundedCornerShape(8.dp))
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            pkg.displayName,
-                            color = if (onDevice == false) Slate400 else Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(pkg.packageName, color = PhonixBlueLight, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                        Text(
-                            when (onDevice) {
-                                false -> "Not on this phone - nothing to remove"
-                                true -> pkg.category
-                                null -> "${pkg.category} - checking…"
-                            },
-                            color = if (onDevice == false) PhonixAmber else Slate400,
-                            fontSize = 9.sp
+                Column(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                pkg.displayName,
+                                color = if (onDevice == false) Slate400 else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(pkg.packageName, color = PhonixBlueLight, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                            Text(
+                                when (onDevice) {
+                                    false -> "Not on this phone - nothing to remove"
+                                    true -> "${pkg.category} • ~${pkg.estimatedStorageMb}MB disk • ~${pkg.estimatedRamMb}MB RAM"
+                                    null -> "${pkg.category} - checking…"
+                                },
+                                color = if (onDevice == false) PhonixAmber else Slate400,
+                                fontSize = 9.sp
+                            )
+                        }
+                        Switch(
+                            checked = pkg.isEnabled && onDevice != false,
+                            onCheckedChange = { viewModel.toggleDebloatPackage(pkg.packageName) },
+                            enabled = onDevice != false,
+                            colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
                         )
                     }
-                    Switch(
-                        checked = pkg.isEnabled && onDevice != false,
-                        onCheckedChange = { viewModel.toggleDebloatPackage(pkg.packageName) },
-                        enabled = onDevice != false,
-                        colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
-                    )
+
+                    if (onDevice == true) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(
+                                onClick = { HostDebloat.launchUninstall(context, pkg.packageName) },
+                                colors = ButtonDefaults.buttonColors(containerColor = PhonixRed.copy(alpha = 0.8f)),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text("1-Click Uninstall", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = { HostDebloat.launchAppDetails(context, pkg.packageName) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text("App Info (Disable)", fontSize = 9.sp)
+                            }
+                        }
+                    }
                 }
             }
         }
+
 
         // The assistant reviews the real list, but it does not remove anything: its shell is the
         // Alpine guest, which has no adb and no authority over Android packages.

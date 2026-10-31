@@ -797,13 +797,13 @@ fun DesktopWallpaperBackground(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val columnStep = 90.dp.toPx()
                 val rowStep = 88.dp.toPx()
-                val dotRadius = 1.4.dp.toPx()
+                val dotRadius = 2.4.dp.toPx()
                 var x = 12.dp.toPx()
                 while (x < size.width) {
                     var y = 10.dp.toPx()
                     while (y < size.height) {
                         drawCircle(
-                            color = accentColor.copy(alpha = 0.28f),
+                            color = accentColor.copy(alpha = 0.65f),
                             radius = dotRadius,
                             center = Offset(x, y)
                         )
@@ -813,6 +813,7 @@ fun DesktopWallpaperBackground(
                 }
             }
         }
+
     }
 }
 
@@ -876,12 +877,20 @@ fun DraggableDesktopShortcut(
     // already a finished tile, so a card behind it doubles the border: the artwork is drawn
     // bare and the frames switch only affects real app icons and the glyph fallback.
     val phoneIcon = appIconDrawable
+    val customArt = AppIconGlyphs.artForKey(shortcut.customArtKey)
     val artRes = when {
+        customArt != null -> customArt
+        // When frames are off, do not use the badged container artwork for File Explorer so all apps have flat, uniform glyphs
+        !showFrames && shortcut.windowType == WindowType.FILE_EXPLORER -> null
+        // Pre-loaded Phonix apps always use their crafted Phonix artwork directly
+        shortcut.id.startsWith("sc_") || !shortcut.isNativeApp || shortcut.windowType != WindowType.BROWSER ->
+            AppIconGlyphs.artFor(shortcut.windowType)
         phoneIcon != null -> null
-        shortcut.isNativeApp && shortcut.launchPackage != null && shortcut.windowType == WindowType.BROWSER ->
+        shortcut.isNativeApp && shortcut.launchPackage != null ->
             AppIconGlyphs.artForApp(shortcut.title, shortcut.launchPackage)
         else -> AppIconGlyphs.artFor(shortcut.windowType)
     }
+
 
     Box(
         modifier = Modifier
@@ -1013,7 +1022,7 @@ fun DraggableDesktopShortcut(
             }
             .zIndex(if (isDragging) 100f else 1f)
             .then(
-                if (showFrames && artRes == null) {
+                if (showFrames) {
                     Modifier
                         .shadow(
                             elevation = if (isDragging) 12.dp else 1.dp,
@@ -1052,7 +1061,7 @@ fun DraggableDesktopShortcut(
                 modifier = Modifier
                     .size(sizeDp)
                     .then(
-                        if (showFrames && phoneIcon != null) {
+                        if (showFrames && phoneIcon != null && artRes == null) {
                             Modifier
                                 .clip(RoundedCornerShape(shapeRadius))
                                 .background(iconTint.copy(alpha = 0.16f))
@@ -1063,31 +1072,32 @@ fun DraggableDesktopShortcut(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                if (phoneIcon != null) {
-                    Image(
-                        bitmap = remember(phoneIcon) {
-                            phoneIcon.toBitmap(width = 96, height = 96).asImageBitmap()
-                        },
-                        contentDescription = shortcut.title,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.size(sizeDp * 0.72f)
-                    )
-                } else if (artRes != null) {
+                if (artRes != null) {
                     Image(
                         painter = painterResource(id = artRes),
                         contentDescription = shortcut.title,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier.size(sizeDp)
                     )
+                } else if (phoneIcon != null) {
+                    Image(
+                        bitmap = remember(phoneIcon) {
+                            phoneIcon.toBitmap(width = 96, height = 96).asImageBitmap()
+                        },
+                        contentDescription = shortcut.title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(if (showFrames) sizeDp * 0.72f else sizeDp)
+                    )
                 } else {
                     Icon(
                         imageVector = icon,
                         contentDescription = shortcut.title,
                         tint = iconTint,
-                        modifier = Modifier.size(sizeDp * 0.55f)
+                        modifier = Modifier.size(sizeDp * 0.75f)
                     )
                 }
             }
+
             if (showLabel) {
                 Spacer(modifier = Modifier.height(4.dp))
                 // Windows/Linux desktops wrap an icon caption to two lines; one line clipped
@@ -1492,7 +1502,7 @@ fun DesktopWindowFrame(
                 when (window.type) {
                     WindowType.BROWSER -> BrowserWindowContent(uiState, viewModel)
                     WindowType.LINUX_DESKTOP -> LinuxDesktopWindowContent(viewModel)
-                    WindowType.DISTRO_STORE -> LinuxSystemWindowContent(uiState, viewModel)
+                    WindowType.DISTRO_STORE -> DistroHubScreen(uiState, viewModel)
                     WindowType.PERSONALIZE -> PersonalizeWindowContent(uiState, viewModel)
                     WindowType.TERMINAL -> TerminalWindowContent(uiState, viewModel)
                     WindowType.SERVER_MANAGER -> ServerManagerWindowContent(uiState, viewModel)
@@ -1505,8 +1515,10 @@ fun DesktopWindowFrame(
                     WindowType.VS_CODE -> VsCodeWindowContent(uiState, viewModel)
                     WindowType.PHONE_MIRROR -> PhoneMirrorWindowContent()
                     WindowType.AI_ASSISTANT -> OfflineKnowledgeWindowContent(uiState, viewModel)
+                    WindowType.DEBLOAT_MANAGER -> DebloatManagerContent(uiState, viewModel)
                     else -> TerminalWindowContent(uiState, viewModel)
                 }
+
                 if (!window.isMaximized) {
                     Box(
                         modifier = Modifier
@@ -3402,24 +3414,54 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                 }
 
                 if (doc == null) {
+                    var selectedTier by remember { mutableStateOf(KnowledgeLibrary.activeTier) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        com.example.model.KnowledgeTier.entries.forEach { tier ->
+                            val isSel = selectedTier == tier
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSel) PhonixCyan.copy(alpha = 0.25f) else Slate900)
+                                    .border(1.dp, if (isSel) PhonixCyan else Slate800, RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        selectedTier = tier
+                                        KnowledgeLibrary.setTier(tier)
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    "${tier.title} (${tier.approxSize})",
+                                    color = if (isSel) PhonixCyan else Slate400,
+                                    fontSize = 9.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        "Everything here works with no model, no network and no second device. ${KnowledgeLibrary.docs.size} documents on ${KnowledgeCategory.entries.size} shelves.",
+                        "Everything here works with no model, no network and no second device. ${KnowledgeLibrary.docsFor(null, selectedTier).size} active documents on ${KnowledgeCategory.entries.size} shelves.",
                         color = Slate400,
                         fontSize = 9.sp,
                         lineHeight = 13.sp
                     )
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         KnowledgeCategory.entries.forEach { category ->
-                            item {
-                                Text(
-                                    "${category.glyph} ${category.title}",
-                                    color = PhonixAmber,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
-                            items(KnowledgeLibrary.docsFor(category)) { entry ->
+                            val shelfDocs = KnowledgeLibrary.docsFor(category, selectedTier)
+                            if (shelfDocs.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        "${category.glyph} ${category.title} (${shelfDocs.size})",
+                                        color = PhonixAmber,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+                                items(shelfDocs) { entry ->
+
                                 Card(
                                     colors = CardDefaults.cardColors(containerColor = Slate900),
                                     modifier = Modifier
@@ -3433,6 +3475,7 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                                 }
                             }
                         }
+                    }
                     }
                 } else {
                     Text("${doc.category.glyph} ${doc.category.title}", color = PhonixAmber, fontSize = 9.sp)

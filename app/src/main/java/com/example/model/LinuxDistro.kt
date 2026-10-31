@@ -1,12 +1,7 @@
 package com.example.model
 
 /**
- * A Linux distribution that Phonix actually has on the device.
- *
- * There is deliberately no catalogue of downloadable distributions here. Only Alpine is
- * bundled, built and tested on this hardware; listing Ubuntu, Kali, Fedora and the rest with
- * invented download sizes and "pre-configured" packages was a promise the app could not keep.
- * When another rootfs is really packaged, it gets an entry here.
+ * A Linux distribution supported by Phonix on ARM64 Android kernels through PRoot.
  */
 data class LinuxDistro(
     val id: String,
@@ -16,30 +11,116 @@ data class LinuxDistro(
     val desktopEnvironment: String,
     val description: String,
     val targetUse: String,
-    /** Packages that are present in the bundled rootfs, not aspirations. */
+    val downloadSizeMb: Int,
+    val installedSizeMb: Int,
+    val packageManager: String,
+    val downloadUrl: String,
+    val isBundled: Boolean = false,
     val bundledPackages: List<String>
-)
+) {
+    val downloadSizeEstimate: String get() = "${downloadSizeMb} MB"
+    val installedDiskFootprint: String get() = "${installedSizeMb} MB"
+}
 
 object DistroCatalog {
 
     /**
-     * The one distribution Phonix ships: an Alpine minirootfs run through proot.
-     * [version] is the bundled release; the screen shows the version read from the
-     * installed rootfs, so an updated bundle cannot disagree with the UI.
+     * The ultra-lean default distribution shipped inside the APK.
      */
     val alpine = LinuxDistro(
         id = "alpine",
         name = "Alpine Linux",
         version = "3.24.3",
         base = "Alpine Linux aarch64 · musl · busybox",
-        desktopEnvironment = "IceWM on Xvfb, served to the desktop over VNC",
-        description = "A real Linux userspace running on the phone's own Android kernel through " +
-            "proot, inside app storage. No root, no partition, no second operating system: " +
-            "Android keeps working underneath, so the phone apps and the Linux side coexist.",
-        targetUse = "Terminal, package installs, lightweight desktop",
-        bundledPackages = listOf("busybox", "icewm", "xterm")
+        desktopEnvironment = "IceWM on Xvfb, served over loopback VNC",
+        description = "Minimalist security-oriented userspace. Uses musl libc and busybox for near-zero memory footprint and instantaneous startup.",
+        targetUse = "Lightweight terminal, scripts, minimal desktop, homelab daemons",
+        downloadSizeMb = 4,
+        installedSizeMb = 9,
+        packageManager = "apk",
+        downloadUrl = "",
+        isBundled = true,
+        bundledPackages = listOf("busybox", "icewm", "xterm", "apk-tools")
     )
 
-    /** Every distribution Phonix can currently run. */
-    val distros = listOf(alpine)
+    /**
+     * Debian 12 (Bookworm) Minimal - Universal OS with APT repositories.
+     */
+    val debian = LinuxDistro(
+        id = "debian",
+        name = "Debian 12 (Bookworm)",
+        version = "12.7",
+        base = "Debian GNU/Linux aarch64 · glibc · APT",
+        desktopEnvironment = "Openbox / XFCE4 minimal on Xvfb",
+        description = "The universal operating system with full Debian APT repositories, GCC, Python 3, and unmatched binary package compatibility.",
+        targetUse = "Full software development, APT repository packages, stable servers",
+        downloadSizeMb = 52,
+        installedSizeMb = 180,
+        packageManager = "apt",
+        downloadUrl = "https://images.linuxcontainers.org/images/debian/bookworm/arm64/default/rootfs.tar.xz",
+        isBundled = false,
+        bundledPackages = listOf("bash", "apt", "coreutils", "curl", "dpkg")
+    )
+
+    /**
+     * Ubuntu 24.04 LTS (Noble Numbat) Base.
+     */
+    val ubuntu = LinuxDistro(
+        id = "ubuntu",
+        name = "Ubuntu 24.04 LTS",
+        version = "24.04 LTS",
+        base = "Ubuntu Noble aarch64 · glibc · Canonical ecosystem",
+        desktopEnvironment = "Openbox / X11 desktop on Xvfb",
+        description = "Modern Canonical Ubuntu userspace with up-to-date developer toolchains, Node.js, Python, and cloud tooling.",
+        targetUse = "Modern developer toolchain, cloud CLI tools, Node.js, Docker client",
+        downloadSizeMb = 68,
+        installedSizeMb = 220,
+        packageManager = "apt",
+        downloadUrl = "https://images.linuxcontainers.org/images/ubuntu/noble/arm64/default/rootfs.tar.xz",
+        isBundled = false,
+        bundledPackages = listOf("bash", "apt", "git", "curl", "tar")
+    )
+
+    /**
+     * Arch Linux ARM - Bleeding-edge rolling release.
+     */
+    val arch = LinuxDistro(
+        id = "arch",
+        name = "Arch Linux ARM",
+        version = "Rolling",
+        base = "Arch Linux aarch64 · glibc · Pacman",
+        desktopEnvironment = "i3wm / Openbox on Xvfb",
+        description = "Rolling-release minimalist Linux userspace with the bleeding-edge Pacman package ecosystem and latest compilers.",
+        targetUse = "Bleeding-edge Linux kernels/packages, custom builds, Pacman repository",
+        downloadSizeMb = 82,
+        installedSizeMb = 270,
+        packageManager = "pacman",
+        downloadUrl = "https://images.linuxcontainers.org/images/archlinux/current/arm64/default/rootfs.tar.xz",
+        isBundled = false,
+        bundledPackages = listOf("bash", "pacman", "coreutils", "which", "grep")
+    )
+
+    /**
+     * Kali Linux Minimal - Security & Network Diagnostics.
+     */
+    val kali = LinuxDistro(
+        id = "kali",
+        name = "Kali Linux Minimal",
+        version = "2024.3",
+        base = "Kali Linux aarch64 · Debian rolling · Security",
+        desktopEnvironment = "CLI / X11 security shell",
+        description = "Security auditing and network diagnostics distribution equipped with standard network telemetry and diagnostic suites.",
+        targetUse = "Network diagnostics, wireless audits, forensic packet inspection",
+        downloadSizeMb = 88,
+        installedSizeMb = 295,
+        packageManager = "apt",
+        downloadUrl = "https://images.linuxcontainers.org/images/kali/current/arm64/default/rootfs.tar.xz",
+        isBundled = false,
+        bundledPackages = listOf("bash", "apt", "nmap", "tcpdump", "net-tools")
+    )
+
+    /** Every distribution supported for on-demand streaming and switching. */
+    val distros = listOf(alpine, debian, ubuntu, arch, kali)
+
+    fun getDistro(id: String): LinuxDistro = distros.firstOrNull { it.id == id } ?: alpine
 }

@@ -17,8 +17,10 @@ enum class WindowType(val defaultTitle: String, val iconName: String) {
     ABOUT("About Phonix OS", "info"),
     VS_CODE("VS Code Web IDE", "code"),
     PHONE_MIRROR("Phone Screen (read-only)", "phone"),
-    AI_ASSISTANT("Local AI", "smart_toy")
+    AI_ASSISTANT("Local AI", "smart_toy"),
+    DEBLOAT_MANAGER("Host Debloater", "security")
 }
+
 
 data class DesktopWindow(
     val id: String,

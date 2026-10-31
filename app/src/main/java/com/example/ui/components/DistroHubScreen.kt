@@ -18,18 +18,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,14 +49,18 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.engine.LinuxContainer
 import com.example.engine.LinuxRuntime
-import com.example.model.WindowType
 import com.example.model.DistroCatalog
+import com.example.model.LinuxDistro
+import com.example.model.WindowType
 import com.example.ui.theme.PhonixAmber
 import com.example.ui.theme.PhonixBlue
 import com.example.ui.theme.PhonixBlueLight
 import com.example.ui.theme.PhonixCyan
 import com.example.ui.theme.PhonixGreen
+import com.example.ui.theme.PhonixRed
+import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
@@ -55,14 +69,12 @@ import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import com.example.viewmodel.PhonixUiState
 import com.example.viewmodel.PhonixViewModel
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * The Linux screen: what is installed, where it lives, and how to open it.
- *
- * It used to be a storefront for eight distributions with invented download sizes, download
- * speeds and "pre-configured" package lists, and a button that faked a boot. Only Alpine is
- * really here, so only Alpine is shown.
+ * Linux System Hub: Inspect the active distribution or stream & switch to Debian,
+ * Ubuntu, Arch, or Kali with automatic debloating of the previous rootfs.
  */
 @Composable
 fun DistroHubScreen(
@@ -71,10 +83,22 @@ fun DistroHubScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val distro = remember { DistroCatalog.alpine }
-    val installedVersion = remember(uiState.containerStatus) {
-        runCatching { LinuxRuntime.container(context).version() }.getOrDefault(distro.version)
+    val scope = rememberCoroutineScope()
+
+    val container = remember { LinuxRuntime.container(context) }
+    val activeDistroId = remember(uiState.containerStatus) {
+        container.activeDistroId()
     }
+    val activeDistro = remember(activeDistroId) {
+        container.activeDistro()
+    }
+    val installedVersion = remember(uiState.containerStatus, activeDistroId) {
+        runCatching { container.version() }.getOrDefault(activeDistro.version)
+    }
+
+    var pendingSwitchDistro by remember { mutableStateOf<LinuxDistro?>(null) }
+    var isSwitching by remember { mutableStateOf(false) }
+    var switchProgressMessage by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { viewModel.refreshStorage() }
 
@@ -88,18 +112,19 @@ fun DistroHubScreen(
     ) {
         Column {
             Text(
-                text = "Linux System",
+                text = "Linux System & Distributions",
                 color = Color.White,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "One distribution, running for real inside the app",
+                text = "PRoot container userspace on Android kernel • Stream & switch distros on demand",
                 color = Slate400,
                 fontSize = 12.sp
             )
         }
 
+        // Active Distro Hero Card
         Card(
             colors = CardDefaults.cardColors(containerColor = Slate900),
             shape = RoundedCornerShape(10.dp),
@@ -111,31 +136,30 @@ fun DistroHubScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Installed", color = PhonixGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("ACTIVE LINUX ENVIRONMENT", color = PhonixGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
                 Text(
-                    text = "${distro.name} ${installedVersion}",
+                    text = "${activeDistro.name} ${installedVersion}",
                     color = Color.White,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Black
                 )
-                Text(distro.base, color = PhonixBlueLight, fontSize = 12.sp)
-                Text(distro.description, color = Slate300, fontSize = 11.sp, lineHeight = 16.sp)
+                Text(activeDistro.base, color = PhonixBlueLight, fontSize = 12.sp)
+                Text(activeDistro.description, color = Slate300, fontSize = 11.sp, lineHeight = 16.sp)
 
-                if (uiState.storage.guestPath.isNotEmpty()) {
-                    Text(
-                        text = "Rootfs: ${uiState.storage.guestPath}",
-                        color = Slate400,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = "On disk: ${formatMb(uiState.storage.guestBytes)}",
-                        color = Slate400,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
+                val guestPath = container.rootfs.absolutePath
+                Text(
+                    text = "Rootfs: $guestPath",
+                    color = Slate400,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "Package manager: ${activeDistro.packageManager} • On disk: ${formatMb(uiState.storage.guestBytes)}",
+                    color = PhonixCyan,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -161,59 +185,201 @@ fun DistroHubScreen(
             }
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = Slate900), shape = RoundedCornerShape(10.dp)) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("How it runs", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "proot makes the guest believe it is root on its own filesystem. Nothing on the phone " +
-                        "is repartitioned and no bootloader is touched, so Android and its apps keep working " +
-                        "underneath. The desktop is IceWM on a virtual X11 display, streamed into the window " +
-                        "over VNC on loopback.",
-                    color = Slate300,
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp
-                )
-                Text(
-                    text = "Bundled in the rootfs: " + distro.bundledPackages.joinToString(", "),
-                    color = Slate400,
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
+        if (isSwitching) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, PhonixCyan, RoundedCornerShape(10.dp))
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Distro Migration in Progress...", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(switchProgressMessage, color = PhonixCyan, fontSize = 11.sp)
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp), color = PhonixCyan, trackColor = Slate800)
+                }
             }
         }
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, Slate700, RoundedCornerShape(10.dp)),
-            shape = RoundedCornerShape(10.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Info, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Other distributions", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        // Distro Catalog Section
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Layers, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Available Linux Images (On-Demand Streaming)", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            Text(
+                "Select a distribution below. Phonix will debloat the current image to reclaim storage and RAM, then stream and extract the new rootfs over Wi-Fi.",
+                color = Slate400,
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+        }
+
+        DistroCatalog.distros.forEach { targetDistro ->
+            val isCurrent = targetDistro.id == activeDistro.id
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = if (isCurrent) Color(0xFF0F1B2B) else Slate900),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, if (isCurrent) PhonixCyan else Slate800, RoundedCornerShape(10.dp))
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                targetDistro.name,
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                targetDistro.base,
+                                color = Slate400,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        if (isCurrent) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(PhonixGreen.copy(alpha = 0.2f))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text("CURRENT", color = PhonixGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Button(
+                                onClick = { pendingSwitchDistro = targetDistro },
+                                colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue),
+                                modifier = Modifier.height(28.dp),
+                                enabled = !isSwitching
+                            ) {
+                                Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Install & Switch", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Text(
+                        targetDistro.description,
+                        color = Slate300,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Download: ${targetDistro.downloadSizeEstimate}",
+                            color = PhonixAmber,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            "Disk: ${targetDistro.installedDiskFootprint}",
+                            color = Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            "Pkg: ${targetDistro.packageManager}",
+                            color = PhonixCyan,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
+            }
+        }
+
+        // Architecture Card
+        Card(colors = CardDefaults.cardColors(containerColor = Slate900), shape = RoundedCornerShape(10.dp)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("How PRoot isolation works", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "Ubuntu, Debian, Arch, Kali, Fedora, DietPi and Pi-hole images are not packaged for " +
-                        "Phonix yet. They are a lot of work each - a tested rootfs, a working package " +
-                        "manager, a display stack - and shipping a download button before that exists would " +
-                        "only produce a broken system. This list will grow when the images are real.",
+                    "proot makes guest distributions believe they are root on their own filesystem via ptrace syscall interception. " +
+                    "Nothing on the phone is repartitioned and no bootloader is unlocked. The desktop environment streams into the " +
+                    "Phonix window over loopback VNC, seamlessly integrating with Android.",
                     color = Slate300,
                     fontSize = 11.sp,
                     lineHeight = 16.sp
-                )
-                Text(
-                    text = "Packages can be installed inside the current guest: apk add <name>",
-                    color = PhonixCyan,
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
+    }
+
+    // Confirmation Dialog to switch and debloat previous distro
+    pendingSwitchDistro?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!isSwitching) pendingSwitchDistro = null },
+            title = {
+                Text("Debloat ${activeDistro.name} & Install ${target.name}?")
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Switching will debloat and purge the current ${activeDistro.name} rootfs to reclaim storage space (${activeDistro.installedDiskFootprint}), " +
+                        "then stream and install ${target.name} (${target.downloadSizeEstimate}).",
+                        color = Slate300,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                    Text(
+                        "All personal files saved in /sdcard/Phonix remain safe and untouched.",
+                        color = PhonixGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val toInstall = target
+                        pendingSwitchDistro = null
+                        isSwitching = true
+                        switchProgressMessage = "Stopping active Linux services..."
+                        scope.launch {
+                            viewModel.stopContainer()
+                            container.switchDistro(
+                                distro = toInstall,
+                                debloatPrevious = true,
+                                onProgress = { progress -> switchProgressMessage = progress }
+                            )
+                            viewModel.restartContainer()
+                            viewModel.refreshStorage()
+                            isSwitching = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue)
+                ) {
+                    Text("Proceed with Switch")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { pendingSwitchDistro = null },
+                    enabled = !isSwitching
+                ) {
+                    Text("Cancel", color = Slate400)
+                }
+            },
+            containerColor = Slate900,
+            titleContentColor = Color.White
+        )
     }
 }
 

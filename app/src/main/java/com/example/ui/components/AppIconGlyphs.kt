@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Email
@@ -78,6 +79,7 @@ object AppIconGlyphs {
         WindowType.VS_CODE -> R.drawable.ic_phonix_vscode
         WindowType.PHONE_MIRROR -> R.drawable.ic_phonix_phone
         WindowType.AI_ASSISTANT -> R.drawable.ic_phonix_ai
+        WindowType.DEBLOAT_MANAGER -> R.drawable.ic_phonix_privacy
     }
 
     /** Fallback artwork for a pinned phone app whose launcher icon could not be read. */
@@ -109,6 +111,7 @@ object AppIconGlyphs {
         WindowType.VS_CODE -> Icons.Default.Code
         WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
         WindowType.AI_ASSISTANT -> Icons.Default.SmartToy
+        WindowType.DEBLOAT_MANAGER -> Icons.Default.Delete
     }
 
     /**
@@ -160,6 +163,38 @@ object AppIconGlyphs {
         WindowType.VS_CODE -> PhonixBlueLight
         WindowType.PHONE_MIRROR -> Color(0xFF22D3EE)
         WindowType.AI_ASSISTANT -> Color(0xFFA855F7)
+        WindowType.DEBLOAT_MANAGER -> PhonixCyan
+    }
+
+    data class SpriteOption(
+        val key: String,
+        val label: String,
+        @DrawableRes val resId: Int
+    )
+
+    val availableSprites: List<SpriteOption> = listOf(
+        SpriteOption("browser", "Phonix Browser", R.drawable.ic_phonix_browser),
+        SpriteOption("files", "File Explorer", R.drawable.ic_phonix_files),
+        SpriteOption("terminal", "Terminal", R.drawable.ic_phonix_terminal),
+        SpriteOption("settings", "Settings", R.drawable.ic_phonix_settings),
+        SpriteOption("store", "App Store", R.drawable.ic_phonix_store),
+        SpriteOption("ai", "Local AI", R.drawable.ic_phonix_ai),
+        SpriteOption("vitals", "System Vitals", R.drawable.ic_phonix_vitals),
+        SpriteOption("vitals_alt", "Vitals Gauge", R.drawable.ic_phonix_vitals_alt),
+        SpriteOption("privacy", "Privacy Shield", R.drawable.ic_phonix_privacy),
+        SpriteOption("vscode", "Code Studio", R.drawable.ic_phonix_vscode),
+        SpriteOption("notepad", "Notepad", R.drawable.ic_phonix_notepad),
+        SpriteOption("linux", "Linux Distro", R.drawable.ic_phonix_linux),
+        SpriteOption("servers", "Server Center", R.drawable.ic_phonix_servers),
+        SpriteOption("phone", "Phone Mirror", R.drawable.ic_phonix_phone),
+        SpriteOption("benchmark", "Benchmark", R.drawable.ic_phonix_benchmark),
+        SpriteOption("personalize", "Personalize", R.drawable.ic_phonix_personalize)
+    )
+
+    @DrawableRes
+    fun artForKey(key: String?): Int? {
+        if (key == null) return null
+        return availableSprites.firstOrNull { it.key == key }?.resId
     }
 
     private fun String.containsAny(vararg needles: String): Boolean = needles.any { contains(it) }
