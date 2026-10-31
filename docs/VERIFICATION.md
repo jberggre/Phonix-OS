@@ -1003,8 +1003,10 @@ Local AI was not deleted. `LocalAiEngine.kt` (524 lines, committed in `726ff84`)
 the phone's saved prefs still carried a `win_ai_assistant_97e3` layout from an earlier session.
 Two things made it look absent:
 
-1. **No start-menu entry.** `Windows11StartMenu` listed ten apps and never included the assistant,
-   so the only way in was the desktop shortcut, which the Linux window covering the desktop hides.
+1. **No start-menu entry.** `Windows11StartMenu` listed ten apps and never included the assistant.
+   It ships as a taskbar pin (`sc_ai` in `getDefaultTaskbarPins()`), and the phone's saved
+   `taskbarPins` still list it - the purple glyph at the right of the bar is Local AI, captured on
+   the monitor - but a user looking in Start found nothing, and the icons carry no labels.
 2. **The installer ran Alpine's `apk add llama-server` unconditionally**, in whatever guest was
    active. Debian has been the active guest since the switch, so setup died on its first step with
    `apk: not found` and never reached the model download.
@@ -1026,3 +1028,7 @@ Not claimed: the 1 GB model download and an in-app "Set up local AI" tap were **
 this round — the guest package lists and the Alpine index were measured instead. `uiautomator`
 dumps only the phone display, not the 1920x1080 DeX display, so the menu entry itself is verified
 by code and build, not by an automated tap.
+
+Correction: an earlier draft of this section claimed the saved four-item *desktop* shortcut list had
+dropped Local AI. It had not - the desktop list is four items by design and AI is a taskbar pin.
+A one-time backfill of desktop shortcuts was written on that wrong premise and then reverted.
