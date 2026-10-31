@@ -16,7 +16,13 @@ data class LinuxDistro(
     val packageManager: String,
     val downloadUrl: String,
     val isBundled: Boolean = false,
-    val bundledPackages: List<String>
+    val bundledPackages: List<String>,
+    /**
+     * Linux Containers image directory for this distro. Required for anything not bundled:
+     * the installer reads the newest dated build from here and verifies it against the
+     * `SHA256SUMS` manifest published beside `rootfs.tar.xz`.
+     */
+    val imageIndexUrl: String = ""
 ) {
     val downloadSizeEstimate: String get() = "${downloadSizeMb} MB"
     val installedDiskFootprint: String get() = "${installedSizeMb} MB"
@@ -52,14 +58,15 @@ object DistroCatalog {
         version = "12.7",
         base = "Debian GNU/Linux aarch64 · glibc · APT",
         desktopEnvironment = "Openbox / XFCE4 minimal on Xvfb",
-        description = "The universal operating system with full Debian APT repositories, GCC, Python 3, and unmatched binary package compatibility.",
+        description = "The universal operating system with full Debian APT repositories, GCC, Python 3, and unmatched binary package compatibility. Download size is an estimate; the exact size is read from the image server before downloading.",
         targetUse = "Full software development, APT repository packages, stable servers",
-        downloadSizeMb = 52,
-        installedSizeMb = 180,
+        downloadSizeMb = 95,
+        installedSizeMb = 350,
         packageManager = "apt",
-        downloadUrl = "https://images.linuxcontainers.org/images/debian/bookworm/arm64/default/rootfs.tar.xz",
+        downloadUrl = "https://images.linuxcontainers.org/images/debian/bookworm/arm64/default/",
         isBundled = false,
-        bundledPackages = listOf("bash", "apt", "coreutils", "curl", "dpkg")
+        bundledPackages = listOf("bash", "apt", "coreutils", "curl", "dpkg"),
+        imageIndexUrl = "https://images.linuxcontainers.org/images/debian/bookworm/arm64/default/"
     )
 
     /**
@@ -73,12 +80,13 @@ object DistroCatalog {
         desktopEnvironment = "Openbox / X11 desktop on Xvfb",
         description = "Modern Canonical Ubuntu userspace with up-to-date developer toolchains, Node.js, Python, and cloud tooling.",
         targetUse = "Modern developer toolchain, cloud CLI tools, Node.js, Docker client",
-        downloadSizeMb = 68,
-        installedSizeMb = 220,
+        downloadSizeMb = 128,
+        installedSizeMb = 480,
         packageManager = "apt",
-        downloadUrl = "https://images.linuxcontainers.org/images/ubuntu/noble/arm64/default/rootfs.tar.xz",
+        downloadUrl = "https://images.linuxcontainers.org/images/ubuntu/noble/arm64/default/",
         isBundled = false,
-        bundledPackages = listOf("bash", "apt", "git", "curl", "tar")
+        bundledPackages = listOf("bash", "apt", "git", "curl", "tar"),
+        imageIndexUrl = "https://images.linuxcontainers.org/images/ubuntu/noble/arm64/default/"
     )
 
     /**
@@ -92,12 +100,13 @@ object DistroCatalog {
         desktopEnvironment = "i3wm / Openbox on Xvfb",
         description = "Rolling-release minimalist Linux userspace with the bleeding-edge Pacman package ecosystem and latest compilers.",
         targetUse = "Bleeding-edge Linux kernels/packages, custom builds, Pacman repository",
-        downloadSizeMb = 82,
-        installedSizeMb = 270,
+        downloadSizeMb = 178,
+        installedSizeMb = 620,
         packageManager = "pacman",
-        downloadUrl = "https://images.linuxcontainers.org/images/archlinux/current/arm64/default/rootfs.tar.xz",
+        downloadUrl = "https://images.linuxcontainers.org/images/archlinux/current/arm64/default/",
         isBundled = false,
-        bundledPackages = listOf("bash", "pacman", "coreutils", "which", "grep")
+        bundledPackages = listOf("bash", "pacman", "coreutils", "which", "grep"),
+        imageIndexUrl = "https://images.linuxcontainers.org/images/archlinux/current/arm64/default/"
     )
 
     /**
@@ -111,12 +120,13 @@ object DistroCatalog {
         desktopEnvironment = "CLI / X11 security shell",
         description = "Security auditing and network diagnostics distribution equipped with standard network telemetry and diagnostic suites.",
         targetUse = "Network diagnostics, wireless audits, forensic packet inspection",
-        downloadSizeMb = 88,
-        installedSizeMb = 295,
+        downloadSizeMb = 78,
+        installedSizeMb = 300,
         packageManager = "apt",
-        downloadUrl = "https://images.linuxcontainers.org/images/kali/current/arm64/default/rootfs.tar.xz",
+        downloadUrl = "https://images.linuxcontainers.org/images/kali/current/arm64/default/",
         isBundled = false,
-        bundledPackages = listOf("bash", "apt", "nmap", "tcpdump", "net-tools")
+        bundledPackages = listOf("bash", "apt", "nmap", "tcpdump", "net-tools"),
+        imageIndexUrl = "https://images.linuxcontainers.org/images/kali/current/arm64/default/"
     )
 
     /** Every distribution supported for on-demand streaming and switching. */

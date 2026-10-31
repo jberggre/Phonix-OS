@@ -932,7 +932,12 @@ fun Step4DebloatOptimization(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(tier.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     Spacer(Modifier.width(6.dp))
-                                    Text(tier.approxSize, color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        "${com.example.model.KnowledgeLibrary.countFor(tier)} docs",
+                                        color = PhonixCyan,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
                                 }
                                 Text(tier.subtitle, color = Slate400, fontSize = 9.sp)
                             }

@@ -763,3 +763,83 @@ adb shell input tap <x> <y>            # “Start now” in the consent dialog
 A pre-downloaded GGUF can be pushed into the debug install with `run-as`; the app’s own download is
 faster on the bench network and verifies the hash itself. ADB cannot remove the MediaProjection
 consent requirement, and it cannot make the appliance self-provisioning.
+
+---
+
+## 12. Multi-distro made honest — 2026-10-31 (source verification)
+
+This is the **source** record for the 1.3 candidate. It was produced in a cloud Linux VM
+(JDK 21, Gradle 9.3.1, Android SDK 36, 2 vCPU) with **no adb and no USB path to the bench unit**,
+so nothing here is a device measurement. The 1.1/1.2 sections above remain the last measured
+hardware record.
+
+### What was wrong in `9df837b`
+
+- `LinuxContainer.switchDistro` fabricated a distribution. For any non-bundled entry it created
+  `bin/`, `etc/`, `usr/bin/`… and copied **Alpine's** `bin/` into it, then wrote an `etc/os-release`
+  reading `NAME="Debian 12 (Bookworm)"`. The marker file claimed the distro was installed. The
+  guest would have run Alpine busybox under a Debian label.
+- It deleted the previous rootfs **before** installing, and set `active_distro_id` **before** the
+  install succeeded. A cancel, a full disk or a bad download left the user with a broken guest.
+- `DistroCatalog` pointed at `…/default/rootfs.tar.xz`, which does not exist. Measured from the VM:
+
+  | URL | Result |
+  |---|---|
+  | `…/debian/bookworm/arm64/default/rootfs.tar.xz` | **404** |
+  | `…/debian/bookworm/arm64/default/` | 200 (listing of dated builds) |
+  | `…/<dated>/rootfs.tar.xz` + `SHA256SUMS` | 200 |
+
+  The real images are date-stamped directories with a published `SHA256SUMS` beside
+  `rootfs.tar.xz`, which is exactly what the new installer reads.
+- Knowledge-tier copy promised 24/65/130 documents at “~800 KB / 2.8 MB / 7.5 MB”. `KnowledgeLibrary`
+  contains **25** documents; no library byte size is measured anywhere.
+
+### Measured image facts (from the VM, 2026-10-31)
+
+| Distro | Newest arm64 build | `rootfs.tar.xz` | SHA-256 (first 12) |
+|---|---|---|---|
+| Debian 12 bookworm | `20261029_05:24` | 94,998,816 B (95 MB) | `18f38dd5bab2` |
+| Ubuntu 24.04 noble | `20261018_13:35` | 127,665,700 B (128 MB) | `e87ce7681d6a` |
+| Arch Linux current | `20261028_04:18` | 178,268,808 B (178 MB) | `b1cbf58d2636` |
+| Kali current | `20261029_17:14` | 77,652,060 B (78 MB) | `f3bdbcfdd336` |
+
+The catalogue now uses these measured download sizes; installed sizes stay marked `≈`.
+
+### What the code does now
+
+- `engine/DistroInstaller.kt`: resolve newest dated build → check free space → stream download with
+  byte progress → require the published SHA-256 → extract `rootfs.tar.xz` into `<id>.partial` →
+  write `resolv.conf`/`hosts` → rename into place. Any failure aborts and deletes only the staging
+  tree. No checksum entry means **no install**, not an unverified install.
+- `LinuxContainer.switchDistro` is `suspend`, activates the preference only after a complete rootfs
+  exists, and prunes other trees only after success. Alpine (bundled in the APK) is never pruned.
+- `LinuxRuntime.switchDistro` returns success/failure and restarts the previously active distro when
+  a switch fails.
+- `DistroHubScreen` surfaces the failure verbatim and states that nothing was deleted.
+- `KnowledgeLibrary.countFor(tier)` replaces the invented sizes; both the OOBE and the assistant
+  window print real per-tier counts.
+
+### Checks run
+
+- `:app:assembleDebug` — **BUILD SUCCESSFUL** (JDK 21 / Gradle 9.3.1 / SDK 36, cloud VM).
+- `:app:testDebugUnitTest` — **46 tests, 0 failures**, including the new `DistroInstallerTest`
+  (newest-build selection ignores listing order, colon encoding, checksum parsing and rejection,
+  every streamable distro has an https index, Alpine stays the fallback, tier counts are monotonic
+  and cover the whole library).
+- APK produced at `app/build/outputs/apk/debug/app-debug.apk` from a **throwaway** debug keystore
+  generated in the VM. It is a build artefact only: it cannot update the device-owner install.
+
+### Not verified, and why it matters
+
+- **No install and no launch on the S10.** No device is reachable from this VM.
+- **No downloaded distro has ever booted.** The archive is verified and extracted, but proot booting
+  `bash`/`apt` from a Debian/Ubuntu/Arch/Kali tree is untested. Extraction is the documented
+  `TarExtractor` ustar reader plus an XZ stream; both are new to this path.
+- **Disk and time cost on the phone** are unknown. The smallest image is 95 MB and needs roughly
+  twice that free to download and unpack; `requireFreeSpace` enforces a margin but the estimate is
+  unmeasured on the unit.
+- **Debloat walkthrough** is unchanged from the previous round except in wiring; hiding a package
+  as device owner was already verified in the 1.2 round, uninstalling through the native dialog was
+  not.
+- The updater remains **honest but unusable**: no feed → `ERROR` with “no public update feed is
+  configured”. There is still no signed manifest (B8), so a deployed unit cannot be updated.

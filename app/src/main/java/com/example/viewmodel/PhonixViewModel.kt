@@ -2671,11 +2671,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         val packageInfo = runCatching {
             getApplication<Application>().packageManager.getPackageInfo(getApplication<Application>().packageName, 0)
         }.getOrNull()
-        val currentVersionName = packageInfo?.versionName ?: "1.2"
+        val currentVersionName = packageInfo?.versionName ?: "1.3"
         val currentVersionCode = packageInfo?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
             else @Suppress("DEPRECATION") it.versionCode
-        } ?: 3
+        } ?: 4
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val url = java.net.URL("https://api.github.com/repos/jberggre/Phonix-OS/releases/latest")
@@ -2688,7 +2688,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 val responseCode = conn.responseCode
                 if (responseCode == 200) {
                     val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    val tagName = extractJsonString(body, "tag_name") ?: "v1.2"
+                    val tagName = extractJsonString(body, "tag_name") ?: "v1.3"
                     val notes = extractJsonString(body, "body") ?: "Latest bug fixes and performance enhancements."
                     val downloadUrl = extractAssetDownloadUrl(body) ?: "https://github.com/jberggre/Phonix-OS/releases"
 

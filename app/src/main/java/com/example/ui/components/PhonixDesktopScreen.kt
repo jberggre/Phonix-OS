@@ -2588,7 +2588,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
             val pi = context.packageManager.getPackageInfo(context.packageName, 0)
             val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
             "${pi.versionName} (build $code)"
-        }.getOrDefault("1.2 (build 3)")
+        }.getOrDefault("1.3 (build 4)")
     }
     Column(
         modifier = Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState()),
@@ -2670,7 +2670,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                             Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                uiState.updateInfo?.releaseNotes ?: "System is up to date (v1.2).",
+                                uiState.updateInfo?.releaseNotes ?: "No update check has run yet.",
                                 color = Slate200,
                                 fontSize = 10.sp
                             )
@@ -3433,7 +3433,7 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    "${tier.title} (${tier.approxSize})",
+                                    "${tier.title} · ${com.example.model.KnowledgeLibrary.countFor(tier)} docs",
                                     color = if (isSel) PhonixCyan else Slate400,
                                     fontSize = 9.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal

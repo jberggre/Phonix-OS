@@ -5,6 +5,59 @@ Phone Screen as a real view. This page is the **work queue**. Read
 [VERIFICATION.md](VERIFICATION.md) for the evidence behind every claim, [ROADMAP.md](ROADMAP.md)
 for the research and sources, and [PROVISIONING.md](PROVISIONING.md) before touching the unit.
 
+## Shipping round (2026-10-31, cloud worktree — no phone attached)
+
+This round started from a failed session. Its commit (`9df837b`, “support multi-distro
+environments”) was in the tree but undocumented, unbuilt and never installed. The audit found the
+feature was a facade:
+
+- `LinuxContainer.switchDistro` **never downloaded anything**. For every non-bundled distro it
+  copied Alpine's `bin/` into a new directory, wrote an `/etc/os-release` saying
+  `NAME="Debian 12 (Bookworm)"`, and marked the tree installed. The terminal would have run
+  Alpine busybox while every surface claimed Debian, Ubuntu, Arch or Kali.
+- It **deleted the previous rootfs before installing**, then flipped `active_distro_id` before the
+  install had succeeded — so a failed or cancelled switch cost the user their working guest.
+- The catalogue URLs (`.../default/rootfs.tar.xz`) return **404**; the real images live in dated
+  subdirectories. Measured from this worktree: the bare archive path 404s, the dated directory and
+  its `SHA256SUMS` answer 200.
+- The knowledge-tier UI promised 24/65/130 documents and “~800 KB / 2.8 MB / 7.5 MB”. The library
+  holds **25** documents total, and nothing in the app measures library bytes.
+
+What changed this round:
+
+1. **`engine/DistroInstaller.kt` (new).** Resolves the newest dated arm64 build from the Linux
+   Containers index, downloads it with byte progress, requires the published `SHA256SUMS` entry to
+   match, extracts the `rootfs.tar.xz` (new `org.tukaani:xz` dependency — the only format the image
+   server publishes), writes the guest's `resolv.conf`/`hosts`, and only then renames the staged
+   tree into place. A checksum mismatch, an empty archive, a short disk or a network failure aborts
+   with a message and leaves nothing changed. `DistroIndex` holds the parsing as pure functions.
+2. **`LinuxContainer.switchDistro`** is now `suspend`, installs first, activates the pref last, and
+   prunes other rootfs trees only after success. **Alpine is never pruned**: it ships in the APK,
+   so it is the offline rescue image if a downloaded distro ever fails to boot.
+3. **`LinuxRuntime.switchDistro`** returns `Boolean`, and on failure logs the reason and restarts
+   the distro that was already active.
+4. **`DistroHubScreen`** shows a real error card (“The switch did not happen … Nothing was
+deleted”), byte-level progress, and copy that no longer claims the previous image is purged before
+   the download. Download sizes are the **measured** image sizes (Debian 95 MB, Ubuntu 128 MB,
+   Arch 178 MB, Kali 78 MB) and disk figures are marked `≈`.
+5. **Knowledge tiers** lost their invented sizes; the UI prints the real per-tier document count.
+6. **Version:** `1.3 (versionCode 4)`, with the About fallback, updater defaults and model-setup
+   user agent updated to match.
+
+Verification on this tree (cloud VM, JDK 21 + Gradle 9.3.1 + SDK 36): `assembleDebug` and
+`testDebugUnitTest` both pass, **46 tests, 0 failures**. `DistroInstallerTest` covers newest-build
+selection, colon encoding, checksum parsing and rejection, the “every streamable distro has an
+https index” contract, the Alpine fallback, and the tier counts. APK signing used a throwaway
+debug keystore generated in the VM because `debug.keystore` is gitignored — **that APK cannot
+update the device-owner install**; rebuild with the real key before installing.
+
+**Owed on hardware, in this order:** install 1.3 over the bench install with the real keystore;
+run one real distro install on Wi-Fi (Debian is the smallest at 95 MB) and confirm the guest boots
+`bash`/`apt` under proot, that the SHA-256 gate rejects a corrupted archive, and that a cancelled
+download leaves Alpine active; then walk the debloat dialog as device owner and confirm a hidden
+package is actually gone from the launcher. None of that has been done — this VM has no adb and no
+USB path to the unit.
+
 ## B4 glass round (2026-10-30, S10)
 
 - **B5 and B6 are done in the committed tree.** B6 restores the open-window layout per 8 dp
@@ -39,10 +92,11 @@ for the research and sources, and [PROVISIONING.md](PROVISIONING.md) before touc
 
 ## Where the tree stands
 
-- **Current worktree:** code head `ce94f4b` (`versionCode 3`, `versionName 1.2`); this handoff
-  commit follows it. It builds and tests green: `assembleDebug` plus `testDebugUnitTest` pass with
-  **38 tests**, and it was installed in place over the device-owner build on the S10 under the
-  shared debug keystore.
+- **Current worktree:** `versionCode 4`, `versionName 1.3` (see the shipping-round section above;
+  it supersedes the `ce94f4b`/1.2 description kept in the rest of this page). It builds and tests
+  green: `assembleDebug` plus `testDebugUnitTest` pass with **46 tests**. The 1.2 build described
+  below was installed in place over the device-owner build on the S10 under the shared debug
+  keystore; **1.3 never has been**.
 - Changes add fold posture and connected-display reporting, adaptive shortcut/window geometry,
   saved opt-in device behavior, an OOBE compatibility/setup step, and focused classifier/geometry/
   preference/version tests. `git diff --check` passes; this is only a whitespace check.

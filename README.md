@@ -1,8 +1,10 @@
 # Phonix OS
 
-> **Worktree note (2026-10-30):** an uncommitted 1.2 compatibility candidate is being prepared.
-> It has not been built or verified on a device; do not treat it as the current installed APK.
-> The existing bench record below remains the measured 1.1 state.
+> **Shipping candidate, 2026-10-31:** `1.3 (versionCode 4)`. It builds and its unit tests pass in
+> the cloud worktree, but **it has not been installed or exercised on a phone**. Every device
+> measurement below is still the 1.1/1.2 bench record and is labelled as such. Read
+> [HANDOFF.md](docs/HANDOFF.md) for what this round changed and what is
+> still owed on hardware.
 
 Phonix is an Android app that turns a phone into a desktop mini-PC. It is a Kotlin/Jetpack
 Compose shell with its own window manager, a proot Alpine guest, and Samsung DeX / connected-display
@@ -12,8 +14,15 @@ support. The target is recycled or screenless phones in a cyberdeck-style enclos
 The handoff is the work queue for a new session; verification is the evidence for every claim.
 This README is only the entry point.
 
-**Status (2026-10-29, 16:58:38 build):** the P0 honesty fixes remain, and two features that were
-only placeholders now do real work:
+**Status (2026-10-31, source only):** the 1.3 candidate adds on-demand distribution installs that
+are verified rather than simulated, a debloat walkthrough, mode switch in the Start menu, and a
+three-tier offline library that reports its real document count. The previous session's first
+attempt at multi-distro fabricated a rootfs — it copied Alpine's `/bin` and wrote a fake
+`os-release` claiming Debian — and that code is gone; see
+[VERIFICATION §12](docs/VERIFICATION.md#12-multi-distro-made-honest--2026-10-31-source-verification).
+
+**Measured 1.1 record (2026-10-29, 16:58:38 build):** the P0 honesty fixes remain, and two
+features that were only placeholders now do real work:
 
 - **Local AI** — a real Qwen2.5 1.5B Instruct Q4_K_M model runs through `llama-server` inside the
   Alpine guest. The model is downloaded outside the APK, SHA-256 verified, and only marked READY
@@ -21,10 +30,11 @@ only placeholders now do real work:
 - **Phone Screen** — restored as a real, read-only `MediaProjection` view. It shows the actual
   default display (verified first frame 540×1140) and does not pretend to inject touches.
 
-The source is committed and pushed on `main`. The APK still reports `1.1 (versionCode 2)`;
-identify this build by its **2026-10-29 16:58:38** install time or SHA-256
-`a7516b6cef12cbbd80378d510ff031c2a04c9a3b8248c0f5e3bddba5c74a7674`. See
-[VERIFICATION.md](docs/VERIFICATION.md) §11 for the measured record and
+The **installed** APK on the bench unit still reports `1.1 (versionCode 2)`; identify it by its
+**2026-10-29 16:58:38** install time or SHA-256
+`a7516b6cef12cbbd80378d510ff031c2a04c9a3b8248c0f5e3bddba5c74a7674`. The 1.3 candidate in this
+tree is `versionCode 4` and has never been on a device. See
+[VERIFICATION.md](docs/VERIFICATION.md) §11 for the measured 1.1 record, §12 for this round, and
 [HANDOFF.md](docs/HANDOFF.md) for what comes next.
 
 ## Start here
@@ -108,8 +118,17 @@ The harness restores the exact recorded metrics, including the S10's 420 dpi bas
 
 ## Current boundary
 
-The P0 truthfulness fixes and the two real features above are done. The next app-side blockers are
-window geometry/normalisation (B4), the landscape shortcut grid (B5), and the updater’s URL/version
-compare/install path (B8). The 1.5B model is usable but small: its first water answer was fluent and
-grounded yet conflated boiling time with SODIS, so safety-critical answers still need the curated
-notes. No external monitor was attached, so real DeX capture/positioning remains unverified.
+Window geometry (B4), layout persistence (B6), the landscape grid (B5) and the high-density host
+chrome are implemented and were measured on the S10 before this round. What is **not** ready:
+
+- **Nothing from 1.3 has been on hardware.** The distro installer, the debloat walkthrough and the
+  Start-menu modes are compiled and unit-tested only.
+- **No update channel.** The updater now reports `ERROR` with “no public update feed is configured”
+instead of claiming the unit is current, but there is still no signed manifest to check against, so
+  a deployed unit cannot be updated remotely.
+- **A downloaded distro has never been booted.** The archive is verified and extracted, but only
+  Alpine has ever run under proot on this unit.
+- **No external monitor**, so real DeX capture, positioning and dock/undock remain unverified.
+
+The 1.5B model is usable but small: its first water answer was fluent and grounded yet conflated
+boiling time with SODIS, so safety-critical answers still need the curated notes.

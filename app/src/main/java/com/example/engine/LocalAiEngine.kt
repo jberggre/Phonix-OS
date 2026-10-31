@@ -191,7 +191,7 @@ class LocalAiEngine(private val context: Context) {
             onLog("Downloading $MODEL_DISPLAY_NAME (${formatMb(MODEL_BYTES)} MB)...")
             val request = Request.Builder()
                 .url(MODEL_URL)
-                .header("User-Agent", "Phonix-OS/1.2 (offline model setup)")
+                .header("User-Agent", "Phonix-OS/1.3 (offline model setup)")
                 .build()
             downloadClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

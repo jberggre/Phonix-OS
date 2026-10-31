@@ -13,8 +13,8 @@ android {
     applicationId = "com.aistudio.phonix.vpxmkr"
     minSdk = 24
     targetSdk = 36
-    versionCode = 3
-    versionName = "1.2"
+    versionCode = 4
+    versionName = "1.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -116,6 +116,8 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
+  // XZ decoding for streamed distro rootfs archives (images.linuxcontainers.org ships .tar.xz).
+  implementation(libs.xz)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

@@ -99,6 +99,7 @@ fun DistroHubScreen(
     var pendingSwitchDistro by remember { mutableStateOf<LinuxDistro?>(null) }
     var isSwitching by remember { mutableStateOf(false) }
     var switchProgressMessage by remember { mutableStateOf("") }
+    var switchError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { viewModel.refreshStorage() }
 
@@ -194,9 +195,29 @@ fun DistroHubScreen(
                     .border(1.dp, PhonixCyan, RoundedCornerShape(10.dp))
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Distro Migration in Progress...", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("Installing distribution…", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Text(switchProgressMessage, color = PhonixCyan, fontSize = 11.sp)
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp), color = PhonixCyan, trackColor = Slate800)
+                }
+            }
+        }
+
+        switchError?.let { message ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, PhonixRed, RoundedCornerShape(10.dp))
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("The switch did not happen", color = PhonixRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(message, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
+                    Text(
+                        "The ${activeDistro.name} environment is unchanged. Nothing was deleted.",
+                        color = PhonixGreen,
+                        fontSize = 10.sp
+                    )
                 }
             }
         }
@@ -209,7 +230,9 @@ fun DistroHubScreen(
                 Text("Available Linux Images (On-Demand Streaming)", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
             Text(
-                "Select a distribution below. Phonix will debloat the current image to reclaim storage and RAM, then stream and extract the new rootfs over Wi-Fi.",
+                "Images come from images.linuxcontainers.org, are checked against the published " +
+                    "SHA-256 manifest, and only become active once extraction succeeds. Alpine stays " +
+                    "on the phone as the offline rescue image; a failed download changes nothing.",
                 color = Slate400,
                 fontSize = 11.sp,
                 lineHeight = 15.sp
@@ -281,13 +304,13 @@ fun DistroHubScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Download: ${targetDistro.downloadSizeEstimate}",
+                            "Download ≈${targetDistro.downloadSizeEstimate}",
                             color = PhonixAmber,
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace
                         )
                         Text(
-                            "Disk: ${targetDistro.installedDiskFootprint}",
+                            "Disk: ≈${targetDistro.installedDiskFootprint}",
                             color = Slate400,
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace
@@ -326,19 +349,20 @@ fun DistroHubScreen(
         AlertDialog(
             onDismissRequest = { if (!isSwitching) pendingSwitchDistro = null },
             title = {
-                Text("Debloat ${activeDistro.name} & Install ${target.name}?")
+                Text("Install ${target.name}?")
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "Switching will debloat and purge the current ${activeDistro.name} rootfs to reclaim storage space (${activeDistro.installedDiskFootprint}), " +
-                        "then stream and install ${target.name} (${target.downloadSizeEstimate}).",
+                        "Phonix downloads the newest ${target.name} arm64 image (about ${target.downloadSizeEstimate}), " +
+                            "verifies its published SHA-256, and extracts it. Only after that succeeds does " +
+                            "the ${activeDistro.name} rootfs get removed to reclaim space.",
                         color = Slate300,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
                     Text(
-                        "All personal files saved in /sdcard/Phonix remain safe and untouched.",
+                        "Needs Wi-Fi. If anything fails, ${activeDistro.name} keeps running untouched.",
                         color = PhonixGreen,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold
@@ -351,16 +375,23 @@ fun DistroHubScreen(
                         val toInstall = target
                         pendingSwitchDistro = null
                         isSwitching = true
-                        switchProgressMessage = "Stopping active Linux services..."
+                        switchError = null
+                        switchProgressMessage = "Stopping the active Linux services…"
                         scope.launch {
                             viewModel.stopContainer()
-                            container.switchDistro(
-                                distro = toInstall,
-                                debloatPrevious = true,
-                                onProgress = { progress -> switchProgressMessage = progress }
-                            )
-                            viewModel.restartContainer()
-                            viewModel.refreshStorage()
+                            val result = runCatching {
+                                container.switchDistro(
+                                    distro = toInstall,
+                                    onProgress = { progress -> switchProgressMessage = progress }
+                                )
+                            }
+                            if (result.isFailure) {
+                                switchError = result.exceptionOrNull()?.message
+                                    ?: "The install failed without a message."
+                            } else {
+                                viewModel.restartContainer()
+                                viewModel.refreshStorage()
+                            }
                             isSwitching = false
                         }
                     },

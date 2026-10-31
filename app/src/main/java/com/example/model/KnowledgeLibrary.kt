@@ -19,10 +19,10 @@ enum class KnowledgeCategory(val title: String, val glyph: String) {
     HARDWARE("Hardware & Linux", "⚙️")
 }
 
-enum class KnowledgeTier(val title: String, val subtitle: String, val approxSize: String) {
-    LIGHTWEIGHT("Lightweight (Essential)", "Core survival, emergency triage, water & shell", "~800 KB"),
-    MEDIUM("Standard (Civilization Starter)", "Adds crop cycles, animal husbandry, forge, offline Python/C & 12V solar", "~2.8 MB"),
-    LARGE("Comprehensive (Rebuild Vault)", "Full encyclopedia: seed vaults, micro-hydro, packet radio, kernel internals & offline algorithms", "~7.5 MB")
+enum class KnowledgeTier(val title: String, val subtitle: String) {
+    LIGHTWEIGHT("Lightweight (Essential)", "Core survival, emergency triage, water & shell"),
+    MEDIUM("Standard (Civilization Starter)", "Adds crop cycles, animal husbandry, forge, offline Python/C & 12V solar"),
+    LARGE("Comprehensive (Rebuild Vault)", "Full encyclopedia: seed vaults, micro-hydro, packet radio, kernel internals & offline algorithms")
 }
 
 data class KnowledgeDoc(
@@ -798,6 +798,12 @@ object KnowledgeLibrary {
         KnowledgeTier.MEDIUM -> doc.tier in setOf(KnowledgeTier.LIGHTWEIGHT, KnowledgeTier.MEDIUM)
         KnowledgeTier.LARGE -> true
     }
+
+    /**
+     * How many documents a tier really contains. The UI prints this instead of an invented
+     * megabyte figure: the library is a starter corpus, and the count is the honest measure of it.
+     */
+    fun countFor(tier: KnowledgeTier): Int = docs.count { isDocInTier(it, tier) }
 
     fun docsFor(category: KnowledgeCategory?, tier: KnowledgeTier = activeTier): List<KnowledgeDoc> =
         docs.filter { doc ->

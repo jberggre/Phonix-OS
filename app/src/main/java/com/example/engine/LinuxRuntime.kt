@@ -4,10 +4,9 @@ import android.content.Context
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlin.coroutines.resume
-
-/**
- * Process-wide owner of the Alpine container.
+import kotlin.coroutines.resume    /**
+     * Process-wide owner of the Linux container (Alpine by default, or whichever distribution
+     * the user has installed and activated).
  *
  * The desktop is just one window onto this: [com.example.service.LinuxServerService] starts the
  * runtime at boot and keeps the process alive with a foreground notification, so closing the
@@ -91,22 +90,36 @@ object LinuxRuntime {
         emit("${guest.activeDistro().name} ${guest.version()} (aarch64) — real shell, proot, no root needed", true)
     }
 
-    @Synchronized
-    fun switchDistro(
+    /**
+     * Installs and activates [distro]. Returns false when the switch failed; in that case the
+     * previous guest is restarted unchanged, because a failed download must never cost the user
+     * the environment they already had.
+     */
+    suspend fun switchDistro(
         context: Context,
         distro: com.example.model.LinuxDistro,
-        debloatPrevious: Boolean = true,
         onProgress: (String) -> Unit = {}
-    ) {
+    ): Boolean {
         stop()
         state = State.INSTALLING
         val guest = container(context)
-        guest.switchDistro(distro, debloatPrevious) { msg ->
-            emit(msg, true)
-            onProgress(msg)
+        return try {
+            guest.switchDistro(distro) { msg ->
+                emit(msg, true)
+                onProgress(msg)
+            }
+            state = State.STOPPED
+            start(context)
+            true
+        } catch (e: Throwable) {
+            emit(
+                "[distro] ${e.message ?: "switch failed"} — ${guest.activeDistro().name} is still active",
+                true
+            )
+            state = State.STOPPED
+            start(context)
+            false
         }
-        state = State.STOPPED
-        start(context)
     }
 
     /**
