@@ -201,8 +201,10 @@ When a build is available, use this non-destructive phone checklist:
    `wm size`, `wm density`, factory reset, device-owner commands or destructive provisioning on
    the personal Pixel during this test.
 
-**The candidate now builds: versionCode 3 / versionName 1.2, and it was installed in place on the
-S10 bench unit (Android 12, API 31) with the unit tests green (21 tests).** That does not advance
+**The candidate builds: versionCode 6 / versionName 1.5, installed in place on the S10 bench unit
+(Android 12, API 31) on 2026-10-31, with `testDebugUnitTest` green at 47 tests.** This line read
+"versionCode 3 / versionName 1.2" when the matrix was written; that build was the one installed
+on 2026-10-29. The current build does not advance
 the Pixel rows below. An emulator can exercise WindowManager fold features, but it cannot establish the
 Pixel's actual USB-C route or desktop-vs-mirror behavior, so the physical Pixel matrix stays
 pending.
