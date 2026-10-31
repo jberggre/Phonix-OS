@@ -7,15 +7,18 @@ Current measured results and the work queue are in [VERIFICATION.md](VERIFICATIO
 
 ## Current build, signing and install (2026-10-29)
 
-**On the unit now:** Phonix **1.1**, `versionCode 2`. The original 1.1 was installed with
-`adb install -r` over the 1.0 build; the current build was installed at **16:58:38 on 2026-10-29**,
-also as `versionCode 2`. Identify it by that install time, not the version string. Device owner is
-still `com.example.receiver.PhonixDeviceAdminReceiver`. The installs overwrote the app but kept
-its data and device owner; the Alpine guest lives in that data. The current build also has the
-real 1.5B model installed in the guest and the real read-only Phone Screen. The model server and
-mirror were both stopped at the end of the session.
+**On the unit now:** Phonix **1.5**, `versionCode 6`, installed on 2026-10-31 with
+`tools/verify-shipping.sh --apk app/build/outputs/apk/debug/app-debug.apk` (`adb install -r`
+reported `Success`) over the device-owner build. Device owner is still
+`com.example.receiver.PhonixDeviceAdminReceiver`, the crash buffer had no entry for the package,
+and the APK was signed with the shared `debug.keystore` (file SHA-256 `7670a511…`), so the update
+went in place and kept app data. The unit then held two rootfs trees, `alpine` (bundled rescue
+image) and `debian` (the real Debian 12 guest from the earlier round). 1.2 was installed in place
+on 2026-10-29; **1.3 and 1.4 never were**.
 
-**Toolchain on this bench machine** (it survives in `%LOCALAPPDATA%/Temp/phonix-toolchain`):
+**Toolchain on this bench machine.** The 2026-10-31 builds used the stable copy at
+`~/android-toolchain` (`jdk`, `gradle-9.3.1`, `sdk`); `%LOCALAPPDATA%/Temp/phonix-toolchain` is the
+older location and can be cleaned up:
 
 | Piece | Path |
 |---|---|
@@ -95,7 +98,8 @@ Store it as CSV keyed by serial. A simple sheet is enough until volume justifies
 
 ### Baseline measured on the S10 (SM-G973U, Android 12, 2026-10-29)
 
-Current bench unit: serial **R38M200YNRA**, app **1.1 (versionCode 2)**, device owner, phone
+Current bench unit: serial **R38M200YNRA**, app **1.5 (versionCode 6)** as of 2026-10-31, device
+owner, phone
 panel `1080x2280` at 420 dpi (physical `1440x3040`), rotation locked portrait. The readings
 below are from this unit; the 1.1 bench session did not re-measure disk/RAM or attach a monitor.
 These are real readings, not estimates:

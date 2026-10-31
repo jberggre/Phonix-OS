@@ -33,11 +33,12 @@ Read [HANDOFF.md](HANDOFF.md) first for the queue; this page holds the evidence 
 [ROADMAP.md](ROADMAP.md) holds the research behind the open decisions,
 [PROVISIONING.md](PROVISIONING.md) the build/signing record, and [LINUX.md](LINUX.md) the guest.
 
-- **Unit:** serial `R38M200YNRA`, SM-G973U, Android 12 / One UI 4.1, **Phonix 1.1
-  (`versionCode 2`) installed as device owner**, 1080x2280 at 420 dpi, rotation 0. The current APK
-  is the local-AI/mirror build installed at **16:58:38** on 2026-10-29; the version string alone
-  cannot distinguish it from the earlier 1.1 builds. It is left on the desktop; the model server
-  and mirror are stopped; no monitor attached.
+- **Unit:** serial `R38M200YNRA`, SM-G973U, Android 12 / One UI 4.1, **Phonix 1.5
+  (`versionCode 6`) installed as device owner on 2026-10-31**, 1080x2280 at 420 dpi, rotation 0.
+  The install was `adb install -r` over the device-owner build; it reported `Success` and left the
+  device owner intact with a clean crash buffer (`tools/verify-shipping.sh`, exit 0). The 1.1
+  records below describe the 2026-10-29 session and are dated history, not current state. That
+  session left the model server and mirror stopped.
 - **adb:** `.tools/platform-tools/adb.exe` in this worktree (`tools/deck-check.sh` finds it).
   USB tethering enumerated without pairing; wireless debugging resets on reboot.
 - **Build:** JDK 21 + Gradle 9.3.1 + SDK 36.1.0 are under
