@@ -108,8 +108,12 @@ say "  open Linux System in the app and confirm the hub names the distro you ins
 say "  a downloaded distro is only real if its tree contains .phonix-installed."
 
 head1 "device owner and debloat"
-q dpm list-owners 2>/dev/null | grep -qi "device owner" && ok "device owner intact" \
-  || warn "not device owner: hide-based debloat is unavailable, native uninstall only"
+# API 31 prints "admin=com.…,DeviceOwner,Affiliated"; older wording was "Device Owner".
+if q dpm list-owners 2>/dev/null | grep -qiE "device[ _]?owner"; then
+  ok "device owner intact"
+else
+  warn "not device owner: hide-based debloat is unavailable, native uninstall only"
+fi
 DISABLED="$(q pm list packages -d 2>/dev/null | wc -l | tr -d ' ')"
 say "  disabled packages on the unit: ${DISABLED:-0}"
 say "  hiding is not uninstalling: confirm the package you chose is gone from the launcher."

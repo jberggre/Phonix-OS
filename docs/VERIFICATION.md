@@ -843,3 +843,45 @@ The catalogue now uses these measured download sizes; installed sizes stay marke
   not.
 - The updater remains **honest but unusable**: no feed → `ERROR` with “no public update feed is
   configured”. There is still no signed manifest (B8), so a deployed unit cannot be updated.
+
+
+### Device pass — 2026-10-31, S10 with a real HDMI monitor
+
+The cloud VM could not reach the unit, but the session later ran on the owner's laptop on the same
+LAN, over wireless debugging (paired with a code, then connected by mDNS as
+`adb-R38M200YNRA-CQKrqB._adb-tls-connect._tcp`). That changed "unverified" into measured:
+
+- **1.3 is installed on the unit.** `adb install -r` reported **Success** over the device-owner
+  install; `dumpsys package` reads `versionCode=4 versionName=1.3`. The APK was signed with the
+  recovered `debug.keystore`, whose certificate SHA-256 is
+  `7D:2B:6C:3D:85:F5:51:9E:56:28:A9:22:BB:EB:F1:BB:39:81:DD:24:00:A7:03:7F:E8:39:38:B1:CE:C0:B5:DA`
+  — the documented device-owner identity. (The hash in PROVISIONING/HANDOFF is the **certificate**
+  fingerprint, not the keystore file hash; every local copy of the file hashes to `7670a511…` and
+  is nevertheless the right key.)
+- **Device owner survived:** `dpm list-owners` → `User 0: admin=…PhonixDeviceAdminReceiver,
+  DeviceOwner,Affiliated`.
+- **Crash buffer clean:** no `com.aistudio.phonix.vpxmkr` entry in `logcat -b crash` after launch.
+- **Real DeX, finally measured.** The unit has an **ES-G34C5 HDMI monitor at 1920x1080** attached
+  (`type EXTERNAL, FLAG_PRESENTATION`, display id 7) plus Samsung's virtual `Desktop` display
+  (id 2, 160 dpi). Phonix is resumed on display 2 and its desktop renders there: wallpaper, top bar
+  (`Phonix Mini PC`, `AC`), `+ OS Card` / `+ Vitals`, taskbar with File Explorer, Terminal, Phonix
+  Browser and Settings, and the `Phonix OS` badge. Captures are in `artifacts/deck/` (gitignored).
+- **A real Debian userspace boots under proot on the S10.** The running process's command line is
+  `/data/app/…/lib/arm64/libproot.so --link2symlink -0 -r /data/user/0/com.aistudio.phonix.vpxmkr/files/linux/debian … /bin/sh`,
+  and that tree carries a genuine `PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"`, `apt`, and a
+  `var/lib/dpkg/status` database. So the deck is running a Debian guest, not Alpine under a Debian
+  label — the failure mode the 9df837b code would have produced.
+- **Correction to this section's earlier claim:** the `debian` tree on the unit is genuine. Its
+  `.phonix-installed` marker uses the old `debian-12.7-aarch64` format, but the content is a real
+  Debian rootfs, so the tree predates (or bypassed) the fabricated code path. It was **not**
+  produced by this round's installer.
+- **The Alpine rescue image is currently absent from the unit**, because the earlier switch pruned
+  it. The first Alpine launch will re-extract it from the APK. The new `pruneOtherDistros` never
+  deletes `alpine`.
+- `tools/verify-shipping.sh` was corrected during this pass: API 31 prints `DeviceOwner` with no
+  space, so the original owner check reported a false negative. It also now prints each rootfs
+  tree's `PRETTY_NAME`.
+
+Still owed: an install **initiated by 1.3's own downloader** (the SHA-256 gate, progress UI and
+failure path have not run end to end on the phone), the debloat hide walkthrough, and the
+Start-menu view modes.

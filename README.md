@@ -1,10 +1,11 @@
 # Phonix OS
 
-> **Shipping candidate, 2026-10-31:** `1.3 (versionCode 4)`. It builds and its unit tests pass in
-> the cloud worktree, but **it has not been installed or exercised on a phone**. Every device
-> measurement below is still the 1.1/1.2 bench record and is labelled as such. Read
-> [HANDOFF.md](docs/HANDOFF.md) for what this round changed and what is
-> still owed on hardware.
+> **Shipping candidate, 2026-10-31:** `1.3 (versionCode 4)`. It builds, its 46 unit tests pass, and
+> it is **installed on the bench S10 over the device-owner build**. On that unit it renders on a
+> real 1920x1080 HDMI monitor through DeX and runs a genuine Debian 12 guest under proot. Still
+> unexercised on hardware: the new on-demand distro downloader, the debloat walkthrough and the
+> Start-menu modes. Read [HANDOFF.md](docs/HANDOFF.md) and
+> [VERIFICATION.md §12](docs/VERIFICATION.md).
 
 Phonix is an Android app that turns a phone into a desktop mini-PC. It is a Kotlin/Jetpack
 Compose shell with its own window manager, a proot Alpine guest, and Samsung DeX / connected-display

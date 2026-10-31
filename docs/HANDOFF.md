@@ -51,12 +51,17 @@ https index” contract, the Alpine fallback, and the tier counts. APK signing u
 debug keystore generated in the VM because `debug.keystore` is gitignored — **that APK cannot
 update the device-owner install**; rebuild with the real key before installing.
 
-**Owed on hardware, in this order:** install 1.3 over the bench install with the real keystore;
-run one real distro install on Wi-Fi (Debian is the smallest at 95 MB) and confirm the guest boots
-`bash`/`apt` under proot, that the SHA-256 gate rejects a corrupted archive, and that a cancelled
-download leaves Alpine active; then walk the debloat dialog as device owner and confirm a hidden
-package is actually gone from the launcher. None of that has been done — this VM has no adb and no
-USB path to the unit.
+**Done on hardware, 2026-10-31 (owner's laptop + wireless adb):** 1.3 was installed with
+`adb install -r` over the device-owner build (Success, `versionCode=4`), the device owner is intact,
+the crash buffer is clean, and the unit turns out to have a **real ES-G34C5 HDMI monitor attached**
+— so DeX is verified for the first time: Phonix renders on Samsung's `Desktop` display (1920x1080)
+with its top bar, widgets and taskbar. The running guest is a **real Debian 12 rootfs under proot**
+(`-r …/files/linux/debian`, genuine `os-release`, `apt`, dpkg database), not Alpine wearing a
+Debian label.
+
+**Still owed:** an install started by 1.3's own downloader (checksum gate, progress UI, failure
+path have not run end to end on the phone), the debloat hide walkthrough, and the Start-menu view
+modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
 
 ## B4 glass round (2026-10-30, S10)
 
