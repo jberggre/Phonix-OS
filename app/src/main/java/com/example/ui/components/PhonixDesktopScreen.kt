@@ -131,6 +131,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -737,7 +739,7 @@ fun DesktopWallpaperBackground(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "uname -a  ·  apk add  ·  python3",
+                            "uname -a  ·  cat /etc/os-release  ·  python3",
                             color = TerminalGreen.copy(alpha = 0.38f),
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp
@@ -1732,7 +1734,7 @@ fun LinuxSystemWindowContent(
                     fontSize = 10.sp,
                     lineHeight = 15.sp
                 )
-                Text("apk add <package>   |   apk search <name>", color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text("apk add <pkg>  ·  apt-get install <pkg>  ·  pacman -S <pkg>", color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
 
@@ -2349,7 +2351,7 @@ fun TerminalWindowContent(
             .background(TerminalBlack)
             .padding(8.dp)
     ) {
-        val quickCmds = listOf("uname -a", "apk info", "df -h", "free -m", "ls /", "uptime", "clear")
+        val quickCmds = listOf("uname -a", "cat /etc/os-release", "df -h", "free -m", "ls /", "uptime", "clear")
         val scrollState = rememberScrollState()
         Row(
             modifier = Modifier
@@ -2580,8 +2582,8 @@ fun FileExplorerWindowContent() {
     Column(modifier = Modifier.fillMaxSize().padding(10.dp)) {
         Text("Guest filesystem", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         Text(
-            "These paths exist inside the Alpine container. Browsing happens in the Terminal (busybox ls), " +
-                "or install a file manager with apk add.",
+            "These paths exist inside the active Linux guest. Browsing happens in the Terminal, " +
+                "or install a file manager with the guest's own package manager.",
             color = Slate400,
             fontSize = 10.sp,
             lineHeight = 14.sp
@@ -2943,6 +2945,9 @@ fun OfflineKnowledgeWindowContent(
     val lastMessageLength = uiState.aiChatMessages.lastOrNull()?.text?.length ?: 0
     val ready = uiState.aiEngineState == AiEngineState.READY
     var agentMode by remember { mutableStateOf(false) }
+    // The notes and replies render at 8-13sp, which is unreadable on a 1080p monitor from couch
+    // distance. Zoom is a real scale of the content, not just the font, so taps stay proportional.
+    var zoom by remember { mutableStateOf(1f) }
 
     // Same reason as the terminal: the reply streams a token at a time, so an animated scroll
     // would restart dozens of times a second. A jump per update is cheaper and steadier.
@@ -2953,9 +2958,21 @@ fun OfflineKnowledgeWindowContent(
     }
     LaunchedEffect(Unit) { viewModel.refreshLocalAi() }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(Slate950)
+            .clipToBounds()
+    ) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth(1f / zoom)
+            .fillMaxHeight(1f / zoom)
+            .graphicsLayer {
+                scaleX = zoom
+                scaleY = zoom
+                transformOrigin = TransformOrigin(0f, 0f)
+            }
             .background(Slate950)
             .padding(10.dp)
     ) {
@@ -2982,6 +2999,36 @@ fun OfflineKnowledgeWindowContent(
                         fontSize = 8.sp
                     )
                 }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "A-",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { zoom = (zoom - 0.15f).coerceAtLeast(0.75f) }
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                )
+                Text(
+                    "${(zoom * 100).toInt()}%",
+                    color = Slate400,
+                    fontSize = 9.sp,
+                    modifier = Modifier
+                        .clickable { zoom = 1f }
+                        .padding(horizontal = 2.dp, vertical = 3.dp)
+                )
+                Text(
+                    "A+",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { zoom = (zoom + 0.15f).coerceAtMost(2f) }
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                )
             }
             AiStatePill(uiState.aiEngineState)
         }
@@ -3231,6 +3278,7 @@ fun OfflineKnowledgeWindowContent(
         if (uiState.showKnowledgeLibrary) {
             KnowledgeLibraryDialog(uiState, viewModel)
         }
+    }
     }
 }
 

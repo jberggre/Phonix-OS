@@ -64,7 +64,7 @@ import com.example.viewmodel.PhonixViewModel
  * from Alpine's repositories, installed into the proot guest and run on the X11 desktop. No, for
  * x86-64 Windows installers — the guest is aarch64 and has no emulation layer installed.
  *
- * The install button runs `apk add` in the live guest and prints its output. "Installed" is only
+ * The install button runs the live guest's own package manager and prints its output. "Installed" is only
  * shown after the package manager confirms it, and the download size is the real compressed size
  * from the Alpine 3.24 index.
  */
@@ -193,7 +193,7 @@ fun PcAppsScreen(
                     .border(1.dp, Slate800, RoundedCornerShape(10.dp))
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("apk output", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("package manager output", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     uiState.linuxAppLog.forEach { line ->
                         Text(
                             text = line,

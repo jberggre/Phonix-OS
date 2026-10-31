@@ -238,10 +238,11 @@ object LinuxTheme {
     """.trimMargin()
 
     private val MOTD = """
-        |Phonix OS  -  Alpine Linux inside Android
+        |Phonix OS  -  Linux inside Android
         |
-        |You are root in a real Alpine container. Android keeps running behind this window,
-        |so the phone's own apps still work. Install software with "apk add <package>".
+        |You are root in a real Linux userland. Android keeps running behind this window,
+        |so the phone's own apps still work. Install software with this distro's package
+        |manager: "apk add <package>", "apt-get install <package>" or "pacman -S <package>".
         |
     """.trimMargin()
 }

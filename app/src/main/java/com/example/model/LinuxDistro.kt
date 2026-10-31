@@ -23,6 +23,25 @@ data class LinuxDistro(
     val imageRelease: String = "",
     val bundledPackages: List<String>
 ) {
+    /**
+     * Install command that actually exists in this userland.
+     *
+     * The app used to print `apk add` everywhere, which on Debian fails with "apk: not found" -
+     * the same fault that stopped the AI installer after the distro switch.
+     */
+    fun installCommand(packages: String): String = when (packageManager) {
+        "apt" -> "apt-get install -y -q $packages"
+        "pacman" -> "pacman -S --noconfirm --needed $packages"
+        else -> "apk add --no-cache $packages"
+    }
+
+    /** Query that succeeds only when the package is really installed. */
+    fun installedQuery(pkg: String): String = when (packageManager) {
+        "apt" -> "dpkg -s $pkg >/dev/null 2>&1"
+        "pacman" -> "pacman -Q $pkg >/dev/null 2>&1"
+        else -> "apk info -e $pkg >/dev/null 2>&1"
+    }
+
     /** Approximate until the download starts, then replaced by the server's Content-Length. */
     val downloadSizeEstimate: String get() = "~${downloadSizeMb} MB"
     val installedDiskFootprint: String get() = "~${installedSizeMb} MB"

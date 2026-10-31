@@ -86,13 +86,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.horizontalScroll
 import com.example.model.DesktopShortcut
+import com.example.model.PhonixApps
 import com.example.model.InstalledAppInfo
 import com.example.model.WindowType
 import com.example.ui.theme.PhonixAmber
@@ -120,8 +124,9 @@ private data class StartMenuItem(
     val id: String,
     val title: String,
     val subtitle: String,
-    val icon: ImageVector,
-    val iconTint: Color,
+    val windowType: WindowType? = null,
+    val fallbackIcon: ImageVector? = null,
+    val iconTint: Color = PhonixCyan,
     val onClick: () -> Unit
 )
 
@@ -144,114 +149,40 @@ fun Windows11StartMenu(
     var appViewMode by remember { mutableStateOf(AppViewMode.CATEGORIES) }
     var selectedCategoryTab by remember { mutableStateOf("All") }
 
+    // Every Start entry comes from the shared catalog, so removing a desktop icon and dropping the
+    // bar pin cannot make an app disappear: the catalog owns it, the layouts only place it.
     val allMenuItems = remember(uiState.customization.shortcuts) {
-        listOf(
+        val shipped = PhonixApps.all.map { app ->
             StartMenuItem(
-                "app_store", "App Store", "Google Play / F-Droid",
-                Icons.Default.Store, PhonixCyan
+                id = app.id,
+                title = app.title,
+                subtitle = app.subtitle,
+                windowType = app.windowType
             ) {
-                viewModel.openAppStore(context)
-            },
-            StartMenuItem(
-                "app_chrome", "Google Chrome / Web", "Native Web Browser",
-                Icons.Default.Language, PhonixBlueLight
-            ) {
-                val sc = uiState.customization.shortcuts.find { it.id == "sc_browser" }
-                if (sc != null) viewModel.launchShortcutOrHostApp(context, sc)
-                else AppLaunchHelper.launchWebBrowser(context)
-            },
-            StartMenuItem(
-                "app_files", "File Explorer", "Native Files & USB Storage",
-                Icons.Default.Folder, Color(0xFFFBBF24)
-            ) {
-                val sc = uiState.customization.shortcuts.find { it.id == "sc_files" }
-                if (sc != null) viewModel.launchShortcutOrHostApp(context, sc)
-                else AppLaunchHelper.launchFileManager(context)
-            },
-            StartMenuItem(
-                "app_photos", "Photos & Media", "Native Gallery & Player",
-                Icons.Default.Image, Color(0xFFA855F7)
-            ) {
-                AppLaunchHelper.launchPhotos(context)
-            },
-            StartMenuItem(
-                "app_distro", "Linux System", "Multi-distro runtime & packages",
-                Icons.Default.Widgets, PhonixAmber
-            ) {
-                viewModel.toggleWindow(WindowType.DISTRO_STORE)
-            },
-            StartMenuItem(
-                "app_terminal", "Terminal", "Linux shell, proot, no root",
-                Icons.Default.Terminal, PhonixGreen
-            ) {
-                viewModel.toggleWindow(WindowType.TERMINAL)
-            },
-            StartMenuItem(
-                "app_linux_desktop", "Linux Desktop", "Real X11 apps in a window",
-                Icons.Default.Computer, PhonixGreen
-            ) {
-                viewModel.toggleWindow(WindowType.LINUX_DESKTOP)
-            },
-            StartMenuItem(
-                "app_server", "Server Hub", "Nginx, SSH & Samba NAS",
-                Icons.Default.Dns, Color(0xFFA855F7)
-            ) {
-                viewModel.toggleWindow(WindowType.SERVER_MANAGER)
-            },
-            StartMenuItem(
-                "app_privacy", "Privacy Hub", "Ad blocking & Pi-hole guide",
-                Icons.Default.Security, PhonixGreen
-            ) {
-                viewModel.toggleWindow(WindowType.PRIVACY)
-            },
-            StartMenuItem(
-                "app_monitor", "Resource Monitor", "Live battery & CPU readings",
-                Icons.Default.Speed, PhonixCyan
-            ) {
-                viewModel.toggleWindow(WindowType.RESOURCE_MONITOR)
-            },
-            StartMenuItem(
-                "app_settings", "Settings", "Android System Settings",
-                Icons.Default.Settings, Slate300
-            ) {
-                AppLaunchHelper.launchSettings(context)
-            },
-            StartMenuItem(
-                "app_debloat", "System Debloater", "Walkthrough preloads to recover RAM & disk",
-                Icons.Default.Security, PhonixBlueLight
-            ) {
-                viewModel.toggleWindow(WindowType.DEBLOAT_MANAGER)
-            },
-            StartMenuItem(
-                "app_ai", "Local AI", "Offline knowledge & optional local model",
-                Icons.Default.SmartToy, Color(0xFFA855F7)
-            ) {
-                viewModel.toggleWindow(WindowType.AI_ASSISTANT)
-            },
-            StartMenuItem(
-                "app_personalize", "Personalize", "Wallpapers, Icons & Shapes",
-                Icons.Default.Palette, Color(0xFFEC4899)
-            ) {
-                viewModel.toggleWindow(WindowType.PERSONALIZE)
-            },
-            StartMenuItem(
-                "app_notepad", "Notepad Editor", "Quick Notes & Scripts",
-                Icons.Default.Code, Slate300
-            ) {
-                viewModel.toggleWindow(WindowType.NOTEPAD)
-            },
-            StartMenuItem(
-                "app_device_setup", "Device & Display Setup", "Daily driver, mini-PC choices and compatibility check",
-                Icons.Default.Settings, PhonixCyan
-            ) {
-                viewModel.openInstallationWizard()
-            },
-            StartMenuItem(
-                "app_about", "About Phonix OS", "Version, updates & device info",
-                Icons.Default.Info, PhonixCyan
-            ) {
-                viewModel.openWindow(WindowType.ABOUT)
+                when (app.windowType) {
+                    WindowType.APP_STORE -> viewModel.openAppStore(context)
+                    WindowType.SETTINGS -> AppLaunchHelper.launchSettings(context)
+                    null -> viewModel.openInstallationWizard()
+                    else -> viewModel.toggleWindow(app.windowType)
+                }
             }
+        }
+        // Phone apps that have no Phonix window of their own still belong in Start.
+        shipped + listOf(
+            StartMenuItem(
+                id = "app_chrome",
+                title = "Google Chrome / Web",
+                subtitle = "The phone's own browser",
+                fallbackIcon = Icons.Default.Language,
+                iconTint = PhonixBlueLight
+            ) { AppLaunchHelper.launchWebBrowser(context) },
+            StartMenuItem(
+                id = "app_photos",
+                title = "Photos & Media",
+                subtitle = "Native gallery and player",
+                fallbackIcon = Icons.Default.Image,
+                iconTint = Color(0xFFA855F7)
+            ) { AppLaunchHelper.launchPhotos(context) }
         )
     }
 
@@ -383,6 +314,61 @@ fun Windows11StartMenu(
 
             // View Mode Selectors (When viewing All Apps)
             if (showAllApps) {
+                Spacer(Modifier.height(6.dp))
+                // Read from the catalog, not the layout: an app stays here after its desktop icon
+                // is removed and its bar pin dropped.
+                Text("Phonix OS apps", color = Slate300, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(5),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 132.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    userScrollEnabled = false
+                ) {
+                    items(allMenuItems) { item ->
+                        val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    item.onClick()
+                                    viewModel.closeStartMenu()
+                                }
+                                .padding(vertical = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (art != null) {
+                                Image(
+                                    painter = painterResource(id = art),
+                                    contentDescription = item.title,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = item.fallbackIcon ?: Icons.Default.Widgets,
+                                    contentDescription = item.title,
+                                    tint = item.iconTint,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = item.title,
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("Android apps", color = Slate300, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier
@@ -719,20 +705,26 @@ fun Windows11StartMenu(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
+                                    val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
                                     Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(item.iconTint.copy(alpha = 0.15f))
-                                            .border(1.dp, item.iconTint.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                                        modifier = Modifier.size(36.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(
-                                            imageVector = item.icon,
-                                            contentDescription = item.title,
-                                            tint = item.iconTint,
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                                        if (art != null) {
+                                            Image(
+                                                painter = painterResource(id = art),
+                                                contentDescription = item.title,
+                                                contentScale = ContentScale.Fit,
+                                                modifier = Modifier.size(30.dp)
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = item.fallbackIcon ?: Icons.Default.Widgets,
+                                                contentDescription = item.title,
+                                                tint = item.iconTint,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                     Spacer(Modifier.height(6.dp))
                                     Text(

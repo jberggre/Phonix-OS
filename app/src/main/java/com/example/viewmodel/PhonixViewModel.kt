@@ -578,20 +578,25 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** Runs the real `apk add` in the guest and reports its own output, including failures. */
+    /** The guest mounted right now; package commands follow its own manager, not a hardcoded apk. */
+    private fun activeGuestDistro(): com.example.model.LinuxDistro =
+        runCatching { LinuxRuntime.container(getApplication()).activeDistro() }
+            .getOrDefault(com.example.model.DistroCatalog.alpine)
+
+    /** Runs the real install in the guest and reports its own output, including failures. */
     fun installLinuxApp(entry: LinuxAppEntry) {
         if (_uiState.value.linuxAppBusyPackage != null) return
         _uiState.update {
             it.copy(
                 linuxAppBusyPackage = entry.packageName,
-                linuxAppLog = listOf("apk add --no-cache ${entry.packageName}")
+                linuxAppLog = listOf(activeGuestDistro().installCommand(entry.packageName))
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (!LinuxRuntime.isRunning) LinuxRuntime.start(getApplication())
                 val output = LinuxRuntime.run(
-                    "apk add --no-cache ${entry.packageName} 2>&1",
+                    "${activeGuestDistro().installCommand(entry.packageName)} 2>&1",
                     timeoutMs = 600_000
                 )
                 val tail = output?.lines()?.filter { it.isNotBlank() }?.takeLast(14).orEmpty()
@@ -617,7 +622,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun linuxProbeCommand(): String =
         LinuxAppCatalog.apps.joinToString("; ") { entry ->
-            "apk info -e ${entry.packageName} >/dev/null 2>&1 && echo $HAVE_PREFIX${entry.packageName}"
+            "${activeGuestDistro().installedQuery(entry.packageName)} && echo $HAVE_PREFIX${entry.packageName}"
         }
 
     private fun bootstrapLinux() {
@@ -1032,9 +1037,9 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
             if (!service.isInstalled) {
-                appendTerminalLine(TerminalLine("apk add --no-cache ${service.apkPackage}", TerminalLine.LineType.INPUT))
+                appendTerminalLine(TerminalLine(activeGuestDistro().installCommand(service.apkPackage), TerminalLine.LineType.INPUT))
                 _uiState.update { it.copy(notificationMessage = "Installing ${service.apkPackage} in the guest - watch the terminal") }
-                LinuxRuntime.send("apk add --no-cache ${service.apkPackage}")
+                LinuxRuntime.send(activeGuestDistro().installCommand(service.apkPackage))
             } else if (!service.isRunning) {
                 appendTerminalLine(TerminalLine("# ${service.name} is installed. Start it from the terminal:", TerminalLine.LineType.SYSTEM))
                 appendTerminalLine(TerminalLine(service.startHint, TerminalLine.LineType.SYSTEM))
@@ -1052,7 +1057,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val services = _uiState.value.serverServices
             if (!LinuxRuntime.isRunning || services.isEmpty()) return@launch
             val script = services.joinToString("; ") { s ->
-                "apk info -e ${s.apkPackage} >/dev/null 2>&1 && echo pkg:${s.id}=1 || echo pkg:${s.id}=0; " +
+                "${activeGuestDistro().installedQuery(s.apkPackage)} && echo pkg:${s.id}=1 || echo pkg:${s.id}=0; " +
                     "pidof ${s.processName} >/dev/null 2>&1 && echo run:${s.id}=1 || echo run:${s.id}=0"
             }
             val out = LinuxRuntime.run(script, 20_000) ?: return@launch

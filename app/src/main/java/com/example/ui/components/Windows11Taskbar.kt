@@ -139,42 +139,9 @@ fun Windows11Taskbar(
             val isRunning = matchingWindow != null
             val isFocused = matchingWindow != null && !matchingWindow.isMinimized && matchingWindow.id == uiState.activeWindowId
 
-            val icon = when (type) {
-                WindowType.BROWSER -> Icons.Default.Language
-                WindowType.DISTRO_STORE -> Icons.Default.Widgets
-                WindowType.TERMINAL -> Icons.Default.Terminal
-                WindowType.FILE_EXPLORER -> Icons.Default.Folder
-                WindowType.SERVER_MANAGER -> Icons.Default.Dns
-                WindowType.RESOURCE_MONITOR -> Icons.Default.Speed
-                WindowType.BENCHMARK -> Icons.Default.Speed
-                WindowType.NOTEPAD -> Icons.Default.Code
-                WindowType.PERSONALIZE -> Icons.Default.Palette
-                WindowType.PRIVACY -> Icons.Default.Security
-                WindowType.ABOUT -> Icons.Default.Info
-                WindowType.VS_CODE -> Icons.Default.Code
-                WindowType.PHONE_MIRROR -> Icons.Default.PhoneAndroid
-                WindowType.AI_ASSISTANT -> Icons.Default.SmartToy
-                // A pinned App Store used to fall through to the generic computer glyph.
-                WindowType.APP_STORE -> Icons.Default.Storefront
-                WindowType.SETTINGS -> Icons.Default.Settings
-                else -> Icons.Default.Computer
-            }
-
-            val defaultColor = when (type) {
-                WindowType.BROWSER -> PhonixCyan
-                WindowType.DISTRO_STORE -> PhonixAmber
-                WindowType.TERMINAL -> PhonixGreen
-                WindowType.FILE_EXPLORER -> Color(0xFFFBBF24)
-                WindowType.SERVER_MANAGER -> Color(0xFFA855F7)
-                WindowType.BENCHMARK -> PhonixRed
-                WindowType.PRIVACY -> PhonixGreen
-                WindowType.ABOUT -> PhonixCyan
-                WindowType.VS_CODE -> PhonixBlueLight
-                WindowType.PHONE_MIRROR -> Color(0xFF22D3EE)
-                WindowType.AI_ASSISTANT -> Color(0xFFA855F7)
-                WindowType.APP_STORE -> PhonixCyan
-                else -> PhonixBlueLight
-            }
+            // One icon source for every surface; this used to be a second, drifting table.
+            val icon = AppIconGlyphs.forWindow(type)
+            val defaultColor = AppIconGlyphs.accentForWindow(type)
 
             TaskbarAppEntry(
                 id = type.name,
@@ -324,12 +291,8 @@ fun Windows11Taskbar(
                             .testTag("taskbar_app_${app.id.lowercase()}"),
                         contentAlignment = Alignment.Center
                     ) {
-                        val customArt = app.shortcut?.customArtKey?.let { AppIconGlyphs.artForKey(it) }
-                        val artRes = customArt ?: if (app.shortcut?.id?.startsWith("sc_") == true || app.shortcut?.isNativeApp != true || app.shortcut?.windowType != WindowType.BROWSER) {
-                            AppIconGlyphs.artFor(app.windowType)
-                        } else {
-                            null
-                        }
+                        val artRes = app.shortcut?.customArtKey?.let { AppIconGlyphs.artForKey(it) }
+                            ?: AppIconGlyphs.artFor(app.windowType)
 
                         if (artRes != null) {
                             Image(

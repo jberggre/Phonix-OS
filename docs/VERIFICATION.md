@@ -1032,3 +1032,26 @@ by code and build, not by an automated tap.
 Correction: an earlier draft of this section claimed the saved four-item *desktop* shortcut list had
 dropped Local AI. It had not - the desktop list is four items by design and AI is a taskbar pin.
 A one-time backfill of desktop shortcuts was written on that wrong premise and then reverted.
+
+## App identity, AI zoom and distro-aware commands (1.5)
+
+- **[static]** `model/PhonixApps.kt` is the shipped-app list. `Windows11StartMenu` builds its Start
+  entries and the new "Phonix OS apps" row in All apps from it, so removing a desktop icon
+  (`removeShortcut`) and dropping a bar pin (`unpinFromTaskbar`) cannot remove an app from the
+  product: both still only filter their own layout list. `AppCatalogTest` asserts unique ids and
+  that Local AI is always present.
+- **[static]** Icons now resolve through `AppIconGlyphs` on all three surfaces. The taskbar kept a
+  second `when (type)` table of Material vectors that disagreed with the desktop artwork; that table
+  is gone, and Start tiles render the same drawable art as the desktop instead of a tinted glyph.
+- **[static]** The AI window has zoom: `A-` / percentage / `A+` in its header, 75-200%, the
+  percentage resets to 100%. It scales the content (`graphicsLayer` on a `1/zoom`-sized layout), so
+  text, controls and chat bubbles grow together and the message list still scrolls.
+- **[static]** `LinuxDistro.installCommand()` / `installedQuery()` pick `apk`, `apt-get` or `pacman`;
+  the Linux-app install, its probe, the Server Hub install/probe and the guest MOTD use them. This
+  is the same class of fault that left `apk add llama-server` failing on Debian.
+- **[measured]** `assembleDebug testDebugUnitTest` BUILD SUCCESSFUL, installed on SM-G973U, process
+  starts with no `AndroidRuntime` error.
+- **Not run:** tapping through Start/All apps and the zoom control on the DeX display. `uiautomator`
+  only sees the phone display, and taps on the bar's start button did not open the menu, so the
+  layout is `[static]` verified, not photographed.
+
