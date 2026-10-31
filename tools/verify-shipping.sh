@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# verify-shipping.sh - acceptance pass for the 1.3 shipping candidate.
+# verify-shipping.sh - acceptance pass for the 1.5 shipping candidate.
 #
 # Answers, from a machine that actually has the phone attached:
 #   * did the APK install over the device-owner build, and what version is on the unit
@@ -17,7 +17,7 @@
 #   tools/verify-shipping.sh --apk app/build/outputs/apk/debug/app-debug.apk
 #   tools/verify-shipping.sh --serial 192.168.0.3:5555
 #
-#   --expect 1.3        versionName to require (default 1.3)
+#   --expect 1.5        versionName to require (default 1.5)
 #   --apk <path>        install -r this APK first, with the real device-owner keystore
 #
 # Exit status is 0 only when every required check passes.
@@ -28,7 +28,7 @@ export MSYS_NO_PATHCONV=1
 PKG="com.aistudio.phonix.vpxmkr"
 SERIAL=""
 APK=""
-EXPECT="1.3"
+EXPECT="1.5"
 ADB="${ADB:-adb}"
 FAILED=0
 
@@ -108,7 +108,7 @@ say "  open Linux System in the app and confirm the hub names the distro you ins
 say "  a downloaded distro is only real if its tree contains .phonix-installed."
 
 head1 "device owner and debloat"
-# API 31 prints "admin=com.…,DeviceOwner,Affiliated"; older wording was "Device Owner".
+# API 31 prints "admin=com.ï¿½,DeviceOwner,Affiliated"; older wording was "Device Owner".
 if q dpm list-owners 2>/dev/null | grep -qiE "device[ _]?owner"; then
   ok "device owner intact"
 else

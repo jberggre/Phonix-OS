@@ -103,11 +103,14 @@ view modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
 
 ## Where the tree stands
 
-- **Current worktree:** `versionCode 4`, `versionName 1.3` (see the shipping-round section above;
-  it supersedes the `ce94f4b`/1.2 description kept in the rest of this page). It builds and tests
-  green: `assembleDebug` plus `testDebugUnitTest` pass with **46 tests**. The 1.2 build described
-  below was installed in place over the device-owner build on the S10 under the shared debug
-  keystore; **1.3 never has been**.
+- **Current worktree:** `versionCode 6`, `versionName 1.5`. The shipping-round section above
+  describes the 1.3 candidate (`versionCode 4`); later rounds bumped the version to 1.4 and then
+  1.5, and [VERIFICATION.md](VERIFICATION.md) records them. This supersedes the
+  `ce94f4b`/1.2 description kept in the rest of this page. It builds and tests green:
+  `assembleDebug` plus `testDebugUnitTest` pass, re-run from scratch with `--rerun-tasks` on
+  2026-10-31, **47 tests, 0 failures**. Only 1.2 was ever installed in place over the
+  device-owner build on the S10 under the shared debug keystore; **1.3, 1.4 and 1.5 have not
+  been installed**.
 - Changes add fold posture and connected-display reporting, adaptive shortcut/window geometry,
   saved opt-in device behavior, an OOBE compatibility/setup step, and focused classifier/geometry/
   preference/version tests. `git diff --check` passes; this is only a whitespace check.
@@ -356,7 +359,7 @@ tools/deck-check.sh baseline
 tools/deck-check.sh crashes
 tools/deck-check.sh matrix     # restores the recorded 1080x2280 / 420 dpi
 tools/verify-shipping.sh --apk app/build/outputs/apk/debug/app-debug.apk
-                               # 1.3 acceptance: version, crash buffer, guest trees,
+                               # 1.5 acceptance: version, crash buffer, guest trees,
                                # device owner; non-destructive, never uninstalls
 ```
 
