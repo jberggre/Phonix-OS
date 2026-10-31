@@ -26,11 +26,16 @@ import java.util.zip.GZIPInputStream
  *  - `proot` is dynamically linked against Termux's `libtalloc`/`libandroid-shmem`, so those
  *    ship beside it and are found through LD_LIBRARY_PATH.
  */
-class LinuxContainer(private val context: Context) {
+class LinuxContainer(
+    private val context: Context,
+    /** When set, this container always targets that guest instead of the desktop's choice. */
+    private val distroOverride: String? = null
+) {
 
     private val prefs = context.getSharedPreferences("phonix_linux_prefs", Context.MODE_PRIVATE)
 
-    fun activeDistroId(): String = prefs.getString("active_distro_id", "alpine") ?: "alpine"
+    fun activeDistroId(): String =
+        distroOverride ?: (prefs.getString("active_distro_id", "alpine") ?: "alpine")
 
     fun activeDistro(): com.example.model.LinuxDistro =
         com.example.model.DistroCatalog.getDistro(activeDistroId())

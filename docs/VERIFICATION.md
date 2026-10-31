@@ -994,3 +994,35 @@ Measured after the fix, on the S10 with the 1920x1080 HDMI monitor:
 
 Not claimed: the in-app terminal's `root@debian` prompt was not separately photographed, and the
 desktop has not been exercised beyond opening a shell.
+
+
+### Local AI after the switch to Debian — 2026-10-31 [measured]
+
+Local AI was not deleted. `LocalAiEngine.kt` (524 lines, committed in `726ff84`), the
+`WindowType.AI_ASSISTANT` window and the `sc_ai` desktop shortcut are all still in the tree, and
+the phone's saved prefs still carried a `win_ai_assistant_97e3` layout from an earlier session.
+Two things made it look absent:
+
+1. **No start-menu entry.** `Windows11StartMenu` listed ten apps and never included the assistant,
+   so the only way in was the desktop shortcut, which the Linux window covering the desktop hides.
+2. **The installer ran Alpine's `apk add llama-server` unconditionally**, in whatever guest was
+   active. Debian has been the active guest since the switch, so setup died on its first step with
+   `apk: not found` and never reached the model download.
+
+Package availability, read from the guests themselves rather than assumed:
+
+- Debian 12 bookworm: `grep -ah "Package: .*llama" var/lib/apt/lists/*_Packages` returns **nothing**.
+  There is no llama.cpp or llama-server for that release, so `apt-get` cannot fix it.
+- Alpine 3.24, fetched from `dl-cdn.alpinelinux.org/alpine/v3.24/*/aarch64/APKINDEX.tar.gz`:
+  `community` lists `llama-server`, `llama-server-openrc`, `llama.cpp`, `llama.cpp-cpu`.
+
+Fix: the model runtime now owns a **private bundled Alpine guest** (`LinuxContainer(context,
+distroOverride = "alpine")`), so the desktop's distro switch neither deletes the server nor prunes
+the 1 GB model. The installer discovers the manager (`apk`/`apt-get`/`pacman`), tries
+`llama-server` then `llama.cpp`, and accepts the result only when `command -v llama-server` finds a
+binary. The missing menu entry is restored, and the build is `1.5 (build 6)`.
+
+Not claimed: the 1 GB model download and an in-app "Set up local AI" tap were **not** exercised in
+this round — the guest package lists and the Alpine index were measured instead. `uiautomator`
+dumps only the phone display, not the 1920x1080 DeX display, so the menu entry itself is verified
+by code and build, not by an automated tap.

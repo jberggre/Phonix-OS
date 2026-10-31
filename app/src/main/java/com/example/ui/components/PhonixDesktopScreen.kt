@@ -2635,7 +2635,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
             val pi = context.packageManager.getPackageInfo(context.packageName, 0)
             val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
             "${pi.versionName} (build $code)"
-        }.getOrDefault("1.4 (build 5)")
+        }.getOrDefault("1.5 (build 6)")
     }
     Column(
         modifier = Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState()),

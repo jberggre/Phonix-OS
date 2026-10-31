@@ -72,16 +72,16 @@ class LocalAiEngine(private val context: Context) {
     private var activeChat: Call? = null
 
     val modelFile: File
-        get() = File(LinuxRuntime.container(context).rootfs, "$MODEL_DIR_IN_GUEST/$MODEL_FILE_NAME")
+        get() = File(aiRootfs, "$MODEL_DIR_IN_GUEST/$MODEL_FILE_NAME")
 
     private val partialFile: File
         get() = File(modelFile.parentFile, "$MODEL_FILE_NAME.part")
 
     private val pidFile: File
-        get() = File(LinuxRuntime.container(context).rootfs, "root/models/llama-server.pid")
+        get() = File(aiRootfs, "root/models/llama-server.pid")
 
     private val serverLog: File
-        get() = File(LinuxRuntime.container(context).rootfs, "root/models/llama-server.log")
+        get() = File(aiRootfs, "root/models/llama-server.log")
 
     fun hasModel(): Boolean = modelFile.isFile && modelFile.length() == MODEL_BYTES
 
@@ -98,15 +98,17 @@ class LocalAiEngine(private val context: Context) {
     }
 
     /** Starts the guest if it is not already alive. Blocking shell boot stays off the main thread. */
-    suspend fun ensureContainer(): Boolean = withContext(Dispatchers.IO) {
-        if (LinuxRuntime.isRunning) return@withContext true
-        runCatching { LinuxRuntime.start(context) }.isSuccess && LinuxRuntime.isRunning
-    }
+    /**
+     * Makes sure the AI's own Alpine tree is unpacked.
+     *
+     * The model runtime does not share the desktop's guest: llama-server is an Alpine package,
+     * Debian bookworm's repositories do not carry it at all, and switching the desktop distro
+     * prunes the previous rootfs. A private guest means the model and server survive that.
+     */
+    suspend fun ensureContainer(): Boolean = withContext(Dispatchers.IO) { ensureGuestInstalled() }
 
     suspend fun isServerPackageInstalled(): Boolean = withContext(Dispatchers.IO) {
-        if (!LinuxRuntime.isRunning) return@withContext false
-        val output = LinuxRuntime.run("command -v llama-server 2>/dev/null", 10_000)
-        output?.lineSequence()?.any { it.contains("llama-server") } == true
+        exec("command -v llama-server 2>/dev/null", 45)?.contains("llama-server") == true
     }
 
     suspend fun isServerHealthy(): Boolean = withContext(Dispatchers.IO) {
@@ -120,34 +122,72 @@ class LocalAiEngine(private val context: Context) {
     }
 
     /**
-     * Installs Alpine's llama-server package, enabling the community repository if the image
-     * only has main. The package is what the current ROADMAP notes had wrong: `llama.cpp`
-     * provides the CLI, while `llama-server` is the package with the HTTP endpoint.
+     * Installs a llama.cpp server through the *active* distro's package manager.
+     *
+     * This used to run Alpine's `apk add` unconditionally. Once Debian was the installed guest
+     * that failed with "apk: not found" in the first step of setup, so local AI could never
+     * reach the download and looked like a feature that did not exist. The manager is now
+     * discovered from the guest, both candidate package names are tried, and success is decided
+     * by `command -v llama-server` rather than by the installer's exit noise.
      */
     suspend fun ensureServerPackage(onLog: (String) -> Unit): Result<Unit> = withContext(Dispatchers.IO) {
         if (isServerPackageInstalled()) return@withContext Result.success(Unit)
         if (!ensureContainer()) {
             return@withContext Result.failure(
-                IllegalStateException("The Alpine guest did not start, so llama-server cannot be installed.")
+                IllegalStateException("The Linux guest did not start, so llama-server cannot be installed.")
             )
         }
-        onLog("Installing llama-server in Alpine (community repository)...")
-        val addRepo = "if ! grep -q '/community' /etc/apk/repositories 2>/dev/null; then " +
-            "echo \"https://dl-cdn.alpinelinux.org/alpine/v\$(cut -d. -f1,2 /etc/alpine-release)/community\" " +
-            ">> /etc/apk/repositories; fi"
-        val command = "$addRepo; apk add --no-cache llama-server 2>&1"
-        val output = LinuxRuntime.run(command, timeoutMs = 600_000)
-        if (output == null) {
+
+        val managers = exec("command -v apk apt-get pacman 2>/dev/null", 30).orEmpty()
+        val kind = when {
+            managers.contains("/apk") -> "apk"
+            managers.contains("/apt-get") -> "apt-get"
+            managers.contains("/pacman") -> "pacman"
+            else -> null
+        }
+        if (kind == null) {
             return@withContext Result.failure(
-                IllegalStateException("The guest did not finish installing llama-server within 10 minutes.")
+                IllegalStateException(
+                    "No package manager (apk, apt-get or pacman) answered in the guest, so the " +
+                        "model runtime cannot be installed."
+                )
             )
         }
-        output.lineSequence().filter { it.isNotBlank() }.toList().takeLast(8).forEach(onLog)
+
+        val d = "$"
+        val install = when (kind) {
+            "apk" -> "apk add --no-cache"
+            "apt-get" -> "apt-get install -y --no-install-recommends"
+            else -> "pacman -S --noconfirm"
+        }
+        onLog("Preparing $kind package lists...")
+        val prepare = when (kind) {
+            "apk" -> "if ! grep -q /community /etc/apk/repositories 2>/dev/null; then " +
+                "echo https://dl-cdn.alpinelinux.org/alpine/v${d}(cut -d. -f1,2 /etc/alpine-release)/community " +
+                ">> /etc/apk/repositories; fi; apk update 2>&1 | tail -2"
+            "apt-get" -> "apt-get update -qq 2>&1 | tail -3"
+            else -> "pacman -Sy --noconfirm 2>&1 | tail -3"
+        }
+        exec(prepare, 300)
+            ?.lineSequence()?.map { it.trim() }?.filter { it.isNotEmpty() }?.toList()
+            ?.takeLast(3)?.forEach(onLog)
+
+        val attempted = mutableListOf<String>()
+        for (pkg in listOf("llama-server", "llama.cpp")) {
+            if (isServerPackageInstalled()) break
+            attempted += pkg
+            onLog("$kind install $pkg ...")
+            exec("$install $pkg 2>&1 | tail -8", 900)
+                ?.lineSequence()?.map { it.trim() }?.filter { it.isNotEmpty() }?.toList()
+                ?.takeLast(5)?.forEach(onLog)
+        }
+
         if (!isServerPackageInstalled()) {
             return@withContext Result.failure(
                 IllegalStateException(
-                    "llama-server is still missing after apk add. Last output: " +
-                        output.lineSequence().filter { it.isNotBlank() }.toList().takeLast(3).joinToString(" | ")
+                    "$kind did not provide llama-server (tried ${attempted.joinToString(", ")}). " +
+                        "The active guest's repositories do not ship it, so local AI cannot run there yet. " +
+                        "Switch to Alpine for local AI, or install llama-server in the guest and retry."
                 )
             )
         }
@@ -275,7 +315,7 @@ class LocalAiEngine(private val context: Context) {
     suspend fun startServer(onLog: (String) -> Unit): Result<Unit> = withContext(Dispatchers.IO) {
         if (!ensureContainer()) {
             return@withContext Result.failure(
-                IllegalStateException("The Alpine guest is not running, so the model cannot start.")
+                IllegalStateException("The Alpine AI guest could not be unpacked, so the model cannot start.")
             )
         }
         if (!hasModel()) {
@@ -287,14 +327,14 @@ class LocalAiEngine(private val context: Context) {
             onLog("llama-server is already answering on 127.0.0.1:$PORT.")
             return@withContext Result.success(Unit)
         }
-        stopServerNow()
+        stopServerNow(wait = true)
         serverLog.parentFile?.mkdirs()
         serverLog.delete()
         onLog("Starting llama-server on 127.0.0.1:$PORT (CPU, 4 threads)...")
         val command = "cd /root/models && nohup llama-server -m $MODEL_FILE_NAME " +
             "--host 127.0.0.1 --port $PORT -c 4096 -t 4 > $SERVER_LOG_IN_GUEST 2>&1 & " +
-            "echo \$! > $PID_FILE_IN_GUEST; sleep 1; cat $PID_FILE_IN_GUEST"
-        val pid = LinuxRuntime.run(command, timeoutMs = 20_000)
+            "echo \$! > $PID_FILE_IN_GUEST; sleep 2; cat $PID_FILE_IN_GUEST"
+        val pid = exec(command, 90)
         if (pid.isNullOrBlank()) {
             return@withContext Result.failure(
                 IllegalStateException("The guest did not launch llama-server. ${serverLogTail()}")
@@ -305,9 +345,10 @@ class LocalAiEngine(private val context: Context) {
         val deadline = System.currentTimeMillis() + 120_000L
         while (System.currentTimeMillis() < deadline) {
             currentCoroutineContext().ensureActive()
-            if (!LinuxRuntime.isRunning) {
+            // The guest is only alive if it still answers after the server was launched.
+            if (exec("true", 20) == null) {
                 return@withContext Result.failure(
-                    IllegalStateException("The Alpine guest stopped while loading the model.")
+                    IllegalStateException("The Alpine AI guest stopped while loading the model.")
                 )
             }
             if (isServerHealthy()) {
@@ -327,17 +368,58 @@ class LocalAiEngine(private val context: Context) {
         stopServerNow()
     }
 
-    /** Synchronous variant for onCleared(), where suspending is not possible. */
-    fun stopServerNow() {
+    /**
+     * Synchronous variant for onCleared(), where suspending is not possible. `wait = false`
+     * does the proot round trip on a background thread so a closing screen never blocks on it.
+     */
+    fun stopServerNow(wait: Boolean = true) {
         cancelChat()
-        if (!LinuxRuntime.isRunning) {
-            pidFile.delete()
+        pidFile.delete()
+        val command = "if [ -f $PID_FILE_IN_GUEST ]; then kill \$(cat $PID_FILE_IN_GUEST) 2>/dev/null || true; " +
+            "rm -f $PID_FILE_IN_GUEST; fi; " +
+            "command -v pkill >/dev/null 2>&1 && pkill -f llama-server 2>/dev/null; true"
+        if (!wait) {
+            Thread({ runCatching { exec(command, 20) } }).apply { isDaemon = true }.start()
             return
         }
-        LinuxRuntime.send(
-            "if [ -f $PID_FILE_IN_GUEST ]; then kill \$(cat $PID_FILE_IN_GUEST) 2>/dev/null || true; " +
-                "rm -f $PID_FILE_IN_GUEST; fi"
-        )
+        runCatching { exec(command, 20) }
+    }
+
+    /**
+     * The AI's own Alpine tree and the helper that talks to it. It is deliberately independent
+     * of [LinuxRuntime], which owns the desktop's guest and is replaced on a distro switch.
+     */
+    private val aiRootfs: File
+        get() = aiGuest().rootfs
+
+    private fun aiGuest(): LinuxContainer = LinuxContainer(context, AI_DISTRO_ID)
+
+    @Volatile
+    private var aiGuestReady = false
+
+    private fun ensureGuestInstalled(): Boolean {
+        if (aiGuestReady) return true
+        aiGuestReady = runCatching {
+            val guest = aiGuest()
+            guest.install()
+            guest.isInstalled
+        }.getOrDefault(false)
+        return aiGuestReady
+    }
+
+    /** Runs one command in the AI guest and returns merged output, or null when it failed. */
+    private fun exec(command: String, timeoutSeconds: Long, onLine: (String) -> Unit = {}): String? {
+        if (!ensureGuestInstalled()) return null
+        val buffer = StringBuilder()
+        return try {
+            aiGuest().execOnce(command, timeoutSeconds) { line ->
+                buffer.appendLine(line)
+                onLine(line)
+            }
+            buffer.toString()
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     fun serverLogTail(maxLines: Int = 6): String {
@@ -513,6 +595,8 @@ class LocalAiEngine(private val context: Context) {
                 "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf?download=true"
         const val MODEL_BYTES = 986_048_768L
         const val MODEL_SHA256 = "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370"
+        /** The guest that owns the model runtime, independent of the desktop distro. */
+        const val AI_DISTRO_ID = "alpine"
         const val PORT = 8081
         const val BASE_URL = "http://127.0.0.1:$PORT"
 

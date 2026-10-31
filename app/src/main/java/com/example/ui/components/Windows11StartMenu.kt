@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Store
@@ -220,6 +221,12 @@ fun Windows11StartMenu(
                 Icons.Default.Security, PhonixBlueLight
             ) {
                 viewModel.toggleWindow(WindowType.DEBLOAT_MANAGER)
+            },
+            StartMenuItem(
+                "app_ai", "Local AI", "Offline knowledge & optional local model",
+                Icons.Default.SmartToy, Color(0xFFA855F7)
+            ) {
+                viewModel.toggleWindow(WindowType.AI_ASSISTANT)
             },
             StartMenuItem(
                 "app_personalize", "Personalize", "Wallpapers, Icons & Shapes",

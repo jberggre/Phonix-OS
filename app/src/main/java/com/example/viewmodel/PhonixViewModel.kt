@@ -2901,7 +2901,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Opt-in setup: boot the guest, install Alpine's llama-server if missing, download and
+     * Opt-in setup: boot the guest, install a llama.cpp server for the active distro if missing,
+     * download and
      * verify the GGUF, launch the server, and only then report READY from /health.
      */
     fun setupLocalAi() {
@@ -2918,7 +2919,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
             try {
                 if (!localAi.ensureContainer()) {
-                    failAiSetup("The Alpine container did not start. Open Terminal and check its output.")
+                    failAiSetup("The Linux container did not start. Open Terminal and check its output.")
                     return@launch
                 }
 
@@ -2926,7 +2927,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update {
                         it.copy(
                             aiEngineState = AiEngineState.INSTALLING,
-                            aiEngineMessage = "Installing llama-server inside Alpine..."
+                            aiEngineMessage = "Installing the llama.cpp server in the active guest..."
                         )
                     }
                     val install = localAi.ensureServerPackage(::appendAiSetupLog)
