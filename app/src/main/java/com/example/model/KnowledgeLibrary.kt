@@ -19,6 +19,11 @@ enum class KnowledgeCategory(val title: String, val glyph: String) {
     HARDWARE("Hardware & Linux", "⚙️")
 }
 
+/**
+ * Library sizes are measured from the documents themselves ([KnowledgeLibrary.sizeLabel]), never
+ * written by hand: the old `approxSize` strings claimed 800 KB / 2.8 MB / 7.5 MB for a corpus that
+ * is a few hundred kilobytes in total.
+ */
 enum class KnowledgeTier(val title: String, val subtitle: String) {
     LIGHTWEIGHT("Lightweight (Essential)", "Core survival, emergency triage, water & shell"),
     MEDIUM("Standard (Civilization Starter)", "Adds crop cycles, animal husbandry, forge, offline Python/C & 12V solar"),
@@ -799,18 +804,31 @@ object KnowledgeLibrary {
         KnowledgeTier.LARGE -> true
     }
 
-    /**
-     * How many documents a tier really contains. The UI prints this instead of an invented
-     * megabyte figure: the library is a starter corpus, and the count is the honest measure of it.
-     */
-    fun countFor(tier: KnowledgeTier): Int = docs.count { isDocInTier(it, tier) }
-
     fun docsFor(category: KnowledgeCategory?, tier: KnowledgeTier = activeTier): List<KnowledgeDoc> =
         docs.filter { doc ->
             isDocInTier(doc, tier) && (category == null || doc.category == category)
         }
 
     fun document(id: String): KnowledgeDoc? = docs.firstOrNull { it.id == id }
+
+    /** How many documents a tier actually carries, counting the lower tiers it includes. */
+    fun docCount(tier: KnowledgeTier): Int = docsFor(null, tier).size
+
+    /** Real UTF-8 size of the text a tier carries, summed from the documents themselves. */
+    fun approxBytes(tier: KnowledgeTier): Long = docsFor(null, tier).sumOf { doc ->
+        (doc.title.length + doc.summary.length + doc.body.length + doc.keywords.sumOf { it.length })
+            .toLong()
+    }
+
+    /** Honest label for the UI: doc count plus the measured size of that text. */
+    fun sizeLabel(tier: KnowledgeTier): String =
+        "${docCount(tier)} docs · ${bytesLabel(approxBytes(tier))}"
+
+    private fun bytesLabel(bytes: Long): String = when {
+        bytes >= 1024L * 1024L -> String.format(java.util.Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0))
+        bytes >= 1024L -> String.format(java.util.Locale.ROOT, "%.0f KB", bytes / 1024.0)
+        else -> "$bytes B"
+    }
 
     private val stopWords = setOf(
         "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "is", "it", "how", "what",

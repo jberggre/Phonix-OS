@@ -885,3 +885,34 @@ LAN, over wireless debugging (paired with a code, then connected by mDNS as
 Still owed: an install **initiated by 1.3's own downloader** (the SHA-256 gate, progress UI and
 failure path have not run end to end on the phone), the debloat hide walkthrough, and the
 Start-menu view modes.
+
+
+### Merge with the faulted session — 2026-10-31
+
+A second session (`worktrees/926fecd3`) had solved this same problem **better and on hardware**, but
+its work was uncommitted and died with the session. It was recovered and adopted:
+
+- **Resolution** uses the mirror's authoritative `meta/1.0/index-system` (`model/DistroIndex.kt`)
+  instead of scraping the HTML directory listing. One request, and it picks
+  `arm64/default/<newest date>` without hardcoding an archive URL that rots.
+- **Unpacking happens inside the running guest** with busybox `unxz | tar`, so no XZ dependency is
+  needed in the APK. A rootfs is promoted to `files/linux/<id>` only if it contains a shell and its
+  own `/etc/os-release`.
+- **It had already run on the S10**: Debian 12 downloaded at exactly **94,998,816 bytes**, unpacked,
+  promoted, marked installed, and `apt --version` answered from Debian's own binary. That is the
+  source of the genuine `debian` tree measured in the device pass above.
+- **Three faults it found on hardware are in the tree:** the blocking installer ran on the main
+  thread (`NetworkOnMainThreadException`) and now runs on `Dispatchers.IO`; Debian ships
+  `/etc/resolv.conf` as a symlink into `/run`, so the file is unlinked before being written; and
+  `refreshStorage` measured a hardcoded `linux/alpine`, so it now measures whichever distro is
+  active without following symlinks.
+
+Added on top of the recovered work: a **SHA-256 gate**. The downloader now reads the `SHA256SUMS`
+published beside each `rootfs.tar.xz` and refuses to install on a missing entry or a mismatch, with
+`DistroIndex.checksumFor` / `sha256Hex` covered by a unit test. The earlier `org.tukaani:xz`
+dependency and my HTML index scraper were removed, since the adopted path needs neither.
+
+Verification of the merged tree: `assembleDebug` + `testDebugUnitTest` **green, 45 tests, 0
+failures**; APK 28,918,475 bytes. Still owed on hardware: a run of the **checksum-gated** path
+(a real install prunes the working Debian tree, so it needs the owner's go-ahead), the debloat
+hide walkthrough, and the Start-menu view modes.

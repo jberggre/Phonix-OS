@@ -59,9 +59,15 @@ with its top bar, widgets and taskbar. The running guest is a **real Debian 12 r
 (`-r …/files/linux/debian`, genuine `os-release`, `apt`, dpkg database), not Alpine wearing a
 Debian label.
 
-**Still owed:** an install started by 1.3's own downloader (checksum gate, progress UI, failure
-path have not run end to end on the phone), the debloat hide walkthrough, and the Start-menu view
-modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
+**Merged from the faulted session.** That session's uncommitted installer (mirror `index-system`
+resolution, in-guest `unxz | tar` unpack, promotion only after a shell/`os-release` check) was
+recovered from `worktrees/926fecd3` and is now the shipped path; it had already downloaded Debian on
+this unit. This round added a **SHA-256 `SHA256SUMS` gate** the recovered code lacked, and adopted
+its three device-found fixes (IO dispatcher, `resolv.conf` symlink, `refreshStorage`).
+
+**Still owed:** a run of the checksum-gated path end to end (a real install prunes the working
+Debian tree, so it needs the owner's go-ahead), the debloat hide walkthrough, and the Start-menu
+view modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
 
 ## B4 glass round (2026-10-30, S10)
 

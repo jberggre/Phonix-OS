@@ -374,6 +374,13 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         persistDesktopLayout()
         persistWindowLayout()
 
+        // The persisted guest is the truth: currentDistro defaulted to the first catalog entry
+        // (Alpine), so the terminal prompt and boot splash named Alpine after switching to Debian.
+        viewModelScope.launch(Dispatchers.IO) {
+            val active = runCatching { LinuxRuntime.container(application).activeDistro() }.getOrNull()
+            if (active != null) _uiState.update { it.copy(currentDistro = active) }
+        }
+
         detectLocalIp()
         initTerminalWelcome()
         startTelemetryLoop()
@@ -1141,9 +1148,32 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val stats = android.os.StatFs(app.filesDir.absolutePath)
             val total = stats.totalBytes
             val free = stats.availableBytes
-            val usedByGuest = withContext(Dispatchers.IO) {
-                runCatching { app.filesDir.resolve("linux/alpine").walkTopDown().filter { it.isFile }.sumOf { it.length() } }
-                    .getOrDefault(0L)
+            // Measure whichever distro is active: this used to hardcode linux/alpine, so after a
+            // switch the hub reported "On disk: -" and a path to a directory that no longer exists.
+            val (usedByGuest, guestDir) = withContext(Dispatchers.IO) {
+                val activeId = runCatching { LinuxRuntime.container(app).activeDistroId() }
+                    .getOrDefault("alpine")
+                val dir = app.filesDir.resolve("linux/$activeId")
+                // walkFileTree does not follow links. A rootfs is full of them (/bin -> usr/bin,
+                // /lib -> usr/lib), and walking through them counted whole subtrees twice: Debian
+                // reported 815 MB for a 525 MB tree.
+                val bytes = runCatching {
+                    var total = 0L
+                    java.nio.file.Files.walkFileTree(
+                        dir.toPath(),
+                        object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                            override fun visitFile(
+                                file: java.nio.file.Path,
+                                attrs: java.nio.file.attribute.BasicFileAttributes
+                            ): java.nio.file.FileVisitResult {
+                                total += attrs.size()
+                                return java.nio.file.FileVisitResult.CONTINUE
+                            }
+                        }
+                    )
+                    total
+                }.getOrDefault(0L)
+                bytes to dir
             }
             _uiState.update {
                 it.copy(
@@ -1151,7 +1181,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         totalBytes = total,
                         freeBytes = free,
                         guestBytes = usedByGuest,
-                        guestPath = app.filesDir.resolve("linux/alpine").absolutePath
+                        guestPath = guestDir.absolutePath
                     )
                 )
             }

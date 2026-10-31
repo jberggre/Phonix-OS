@@ -69,7 +69,9 @@ import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import com.example.viewmodel.PhonixUiState
 import com.example.viewmodel.PhonixViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
@@ -100,6 +102,8 @@ fun DistroHubScreen(
     var isSwitching by remember { mutableStateOf(false) }
     var switchProgressMessage by remember { mutableStateOf("") }
     var switchError by remember { mutableStateOf<String?>(null) }
+    var downloadWritten by remember { mutableStateOf(0L) }
+    var downloadTotal by remember { mutableStateOf(0L) }
 
     LaunchedEffect(Unit) { viewModel.refreshStorage() }
 
@@ -195,29 +199,52 @@ fun DistroHubScreen(
                     .border(1.dp, PhonixCyan, RoundedCornerShape(10.dp))
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Installing distribution…", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("Distro Migration in Progress...", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Text(switchProgressMessage, color = PhonixCyan, fontSize = 11.sp)
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp), color = PhonixCyan, trackColor = Slate800)
+                    if (downloadTotal > 0L) {
+                        LinearProgressIndicator(
+                            progress = (downloadWritten.toFloat() / downloadTotal.toFloat()).coerceIn(0f, 1f),
+                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                            color = PhonixCyan,
+                            trackColor = Slate800
+                        )
+                        Text(
+                            "${formatMb(downloadWritten)} of ${formatMb(downloadTotal)} downloaded",
+                            color = Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                            color = PhonixCyan,
+                            trackColor = Slate800
+                        )
+                    }
                 }
             }
         }
 
         switchError?.let { message ->
             Card(
-                colors = CardDefaults.cardColors(containerColor = Slate900),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1215)),
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(1.dp, PhonixRed, RoundedCornerShape(10.dp))
             ) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("The switch did not happen", color = PhonixRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(message, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
-                    Text(
-                        "The ${activeDistro.name} environment is unchanged. Nothing was deleted.",
-                        color = PhonixGreen,
-                        fontSize = 10.sp
-                    )
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = PhonixRed, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "Install failed — the current guest was left unchanged",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(message, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
+                    }
                 }
             }
         }
@@ -230,9 +257,7 @@ fun DistroHubScreen(
                 Text("Available Linux Images (On-Demand Streaming)", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
             Text(
-                "Images come from images.linuxcontainers.org, are checked against the published " +
-                    "SHA-256 manifest, and only become active once extraction succeeds. Alpine stays " +
-                    "on the phone as the offline rescue image; a failed download changes nothing.",
+                "Select a distribution below. Phonix downloads the image from the LXC mirror over Wi-Fi, unpacks it inside the guest, and only then purges the previous rootfs to reclaim storage and RAM.",
                 color = Slate400,
                 fontSize = 11.sp,
                 lineHeight = 15.sp
@@ -304,13 +329,13 @@ fun DistroHubScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Download ≈${targetDistro.downloadSizeEstimate}",
+                            "Download: ${targetDistro.downloadSizeEstimate}",
                             color = PhonixAmber,
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace
                         )
                         Text(
-                            "Disk: ≈${targetDistro.installedDiskFootprint}",
+                            "Disk: ${targetDistro.installedDiskFootprint}",
                             color = Slate400,
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace
@@ -349,20 +374,20 @@ fun DistroHubScreen(
         AlertDialog(
             onDismissRequest = { if (!isSwitching) pendingSwitchDistro = null },
             title = {
-                Text("Install ${target.name}?")
+                Text("Debloat ${activeDistro.name} & Install ${target.name}?")
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "Phonix downloads the newest ${target.name} arm64 image (about ${target.downloadSizeEstimate}), " +
-                            "verifies its published SHA-256, and extracts it. Only after that succeeds does " +
-                            "the ${activeDistro.name} rootfs get removed to reclaim space.",
+                        "${target.name} (${target.downloadSizeEstimate} download, ${target.installedDiskFootprint} unpacked) is fetched from the LXC image mirror " +
+                        "and unpacked inside the guest. The current ${activeDistro.name} rootfs stays installed until the new one passes its check, then it is " +
+                        "purged to reclaim space (${activeDistro.installedDiskFootprint}).",
                         color = Slate300,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
                     Text(
-                        "Needs Wi-Fi. If anything fails, ${activeDistro.name} keeps running untouched.",
+                        "All personal files saved in /sdcard/Phonix remain safe and untouched.",
                         color = PhonixGreen,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold
@@ -375,24 +400,40 @@ fun DistroHubScreen(
                         val toInstall = target
                         pendingSwitchDistro = null
                         isSwitching = true
-                        switchError = null
-                        switchProgressMessage = "Stopping the active Linux services…"
+                        switchProgressMessage = "Stopping active Linux services..."
                         scope.launch {
+                            switchError = null
+                            downloadWritten = 0L
+                            downloadTotal = 0L
                             viewModel.stopContainer()
-                            val result = runCatching {
-                                container.switchDistro(
-                                    distro = toInstall,
-                                    onProgress = { progress -> switchProgressMessage = progress }
-                                )
-                            }
-                            if (result.isFailure) {
-                                switchError = result.exceptionOrNull()?.message
-                                    ?: "The install failed without a message."
-                            } else {
+                            try {
+                                // switchDistro downloads over HTTP and then blocks on proot for the
+                                // in-guest unpack. This composable's scope is the main dispatcher,
+                                // so running it directly threw NetworkOnMainThreadException and
+                                // left a half-built install.
+                                withContext(Dispatchers.IO) {
+                                    container.switchDistro(
+                                        distro = toInstall,
+                                        debloatPrevious = true,
+                                        onProgress = { progress -> switchProgressMessage = progress },
+                                        onBytes = { written, total ->
+                                            downloadWritten = written
+                                            downloadTotal = total
+                                        }
+                                    )
+                                }
+                                // The switch happened outside the view model, so tell it which guest
+                                // is now active (the prompt and boot splash read this).
+                                viewModel.selectDistro(toInstall)
+                            } catch (e: Throwable) {
+                                // Say what failed; the previous rootfs is still on disk.
+                                switchError = "${toInstall.name} was not installed: " +
+                                    (e.message ?: e.javaClass.simpleName)
+                            } finally {
                                 viewModel.restartContainer()
                                 viewModel.refreshStorage()
+                                isSwitching = false
                             }
-                            isSwitching = false
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = PhonixBlue)

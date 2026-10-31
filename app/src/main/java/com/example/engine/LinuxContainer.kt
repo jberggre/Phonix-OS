@@ -48,7 +48,7 @@ class LinuxContainer(private val context: Context) {
     private val prootLoader = File(nativeLibs, "libproot_loader.so")
 
     val isInstalled: Boolean
-        get() = File(rootfs, ".phonix-installed").isFile ||
+        get() = File(rootfs, MARKER).isFile ||
                 File(rootfs, "etc/alpine-release").isFile ||
                 File(rootfs, "etc/os-release").isFile
 
@@ -56,11 +56,17 @@ class LinuxContainer(private val context: Context) {
     fun version(): String = try {
         when {
             File(rootfs, "etc/alpine-release").isFile -> File(rootfs, "etc/alpine-release").readText().trim()
-            File(rootfs, "etc/debian_version").isFile -> "Debian " + File(rootfs, "etc/debian_version").readText().trim()
+            // Bare versions only: the hub prints "<distro name> <version>", and the distro name
+            // already carries its release ("Debian 12 (Bookworm)"), so a PRETTY_NAME-style
+            // string here rendered as "Debian 12 (Bookworm) Debian 12.15".
+            File(rootfs, "etc/debian_version").isFile -> File(rootfs, "etc/debian_version").readText().trim()
             File(rootfs, "etc/os-release").isFile -> {
                 val lines = File(rootfs, "etc/os-release").readLines()
-                lines.firstOrNull { it.startsWith("PRETTY_NAME=") }
-                    ?.substringAfter("=")?.trim('"', '\'') ?: activeDistro().version
+                val versionId = lines.firstOrNull { it.startsWith("VERSION_ID=") }
+                    ?.substringAfter("=")?.trim('"', '\'')
+                versionId?.takeIf { it.isNotBlank() }
+                    ?: lines.firstOrNull { it.startsWith("PRETTY_NAME=") }
+                        ?.substringAfter("=")?.trim('"', '\'') ?: activeDistro().version
             }
             else -> activeDistro().version
         }
@@ -83,85 +89,186 @@ class LinuxContainer(private val context: Context) {
         workDir.mkdirs()
 
         onProgress("Unpacking Alpine Linux root filesystem (first run, ~4 MB)...")
-        val extracted = TarExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
+        val extracted = TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
         onProgress("Unpacked $extracted files.")
         writeGuestConfig(target)
         marker.writeText("alpine-minirootfs-3.24.3-aarch64\n")
     }
 
     /**
-     * Installs (if needed) and activates a distribution.
+     * Installs [distro] and makes it the active guest.
      *
-     * A distribution is only activated after its rootfs is complete on disk: the previous guest
-     * stays exactly as it was if the download fails, the checksum does not match or the disk is
-     * full. Bundled Alpine is always kept as the offline rescue image and is never pruned.
-     *
-     * Throws [DistroInstallException] with a user-readable message on failure.
+     * The previous rootfs is deleted only after the new one has been downloaded, unpacked and
+     * checked, so a failed switch (no network, mirror moved, disk full) leaves the working guest
+     * exactly as it was. The earlier ordering purged first, so one failed switch could leave the
+     * app with no usable userspace at all.
      */
-    suspend fun switchDistro(
+    fun switchDistro(
         distro: com.example.model.LinuxDistro,
-        onProgress: (String) -> Unit = {}
-    ): File {
-        val base = File(context.filesDir, "linux")
-        val target = File(base, distro.id)
-        val marker = File(target, ".phonix-installed")
+        debloatPrevious: Boolean = true,
+        onProgress: (String) -> Unit = {},
+        onBytes: (Long, Long) -> Unit = { _, _ -> }
+    ) {
+        val previousId = activeDistroId()
+        val target = File(context.filesDir, "linux/${distro.id}")
+        val marker = File(target, MARKER)
 
-        if (marker.isFile) {
-            prefs.edit().putString("active_distro_id", distro.id).apply()
-            onProgress("${distro.name} is already installed; switching to it.")
-            return target
+        if (marker.isFile && previousId == distro.id && isInstalled) {
+            onProgress("${distro.name} is already installed and ready.")
+            return
         }
 
-        if (distro.isBundled) {
-            onProgress("Extracting bundled ${distro.name} rootfs…")
-            target.deleteRecursively()
-            target.mkdirs()
-            workDir.mkdirs()
-            val extracted = TarExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
-            if (extracted < 100) throw DistroInstallException("The bundled rootfs unpacked only $extracted files.")
+        val wasInstalled = marker.isFile
+        try {
+            if (wasInstalled) {
+                onProgress("${distro.name} is already on disk; switching to it.")
+            } else if (distro.isBundled) {
+                installBundled(distro, target, onProgress)
+            } else {
+                installStreamed(distro, target, onProgress, onBytes)
+            }
+
             writeGuestConfig(target)
             marker.writeText("${distro.id}-${distro.version}-aarch64\n")
-            onProgress("Extracted $extracted files for ${distro.name}.")
-        } else {
-            target.deleteRecursively()
-            workDir.mkdirs()
-            DistroInstaller(context).install(distro) { progress ->
-                val percent = if (progress.total > 0L) " ${(progress.fraction * 100).toInt()}%" else ""
-                onProgress(progress.message + percent)
-            }
-            if (!marker.isFile) {
-                throw DistroInstallException("${distro.name} did not finish installing; nothing was changed.")
-            }
+        } catch (e: Throwable) {
+            // A rootfs promoted but never marked would sit on disk unaccounted for (Debian's tree
+            // is ~525 MB) and the next attempt would download the archive again anyway. Remove it
+            // so a failed switch costs only the download.
+            if (!wasInstalled) target.deleteRecursively()
+            throw e
         }
 
-        // Activation happens last, so a failure above leaves the previous distro running.
         prefs.edit().putString("active_distro_id", distro.id).apply()
-        pruneOtherDistros(keep = distro.id, onProgress = onProgress)
-        onProgress("${distro.name} is active.")
-        return target
+        if (debloatPrevious && previousId != distro.id) {
+            onProgress("Debloating $previousId to recover storage...")
+            File(context.filesDir, "linux/$previousId").deleteRecursively()
+        }
+        onProgress("${distro.name} is ready.")
+    }
+
+    private fun installBundled(
+        distro: com.example.model.LinuxDistro,
+        target: File,
+        onProgress: (String) -> Unit
+    ) {
+        target.deleteRecursively()
+        target.mkdirs()
+        workDir.mkdirs()
+        onProgress("Extracting bundled ${distro.name} rootfs...")
+        val extracted = TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
+        onProgress("Extracted $extracted files for ${distro.name}.")
     }
 
     /**
-     * Removes rootfs trees for distros that are neither active nor the bundled rescue image.
-     * Called only after a successful switch; never deletes the image the user is running.
+     * Downloads the official rootfs and unpacks it inside the running guest.
+     *
+     * The download runs in-process for real progress and redirect handling; the unpacking runs in
+     * the guest because busybox already provides `unxz` and `tar`, whereas Android has no xz
+     * decoder and this build takes no extra dependency for one. Staging lives under the current
+     * rootfs's `/root` (the only place proot and the app both see) and is moved out to
+     * `files/linux/<id>` once it validates.
      */
-    fun pruneOtherDistros(keep: String, onProgress: (String) -> Unit = {}) {
-        val base = File(context.filesDir, "linux")
-        val keepIds = setOf(keep, "alpine")
-        // Only real distro trees are candidates. `linux/` also holds the proot work directory and
-        // any staging tree, and those must never be swept up by a "free some storage" pass.
-        val known = com.example.model.DistroCatalog.distros.map { it.id }.toSet()
-        base.listFiles()?.forEach { dir ->
-            if (dir.isDirectory && dir.name in known && dir.name !in keepIds) {
-                onProgress("Removing the previous ${dir.name} rootfs to free storage…")
-                dir.deleteRecursively()
-            }
+    private fun installStreamed(
+        distro: com.example.model.LinuxDistro,
+        target: File,
+        onProgress: (String) -> Unit,
+        onBytes: (Long, Long) -> Unit
+    ) {
+        check(isInstalled) { "Install the bundled guest first: it provides unxz and tar" }
+        workDir.mkdirs()
+
+        val installer = DistroInstaller()
+        val ref = installer.resolve(distro)
+        onProgress("Resolved ${distro.name} build ${ref.buildDate}.")
+
+        val cache = File(rootfs, "root/.phonix-cache").apply { mkdirs() }
+        val staging = File(rootfs, "root/.phonix-stage").apply {
+            deleteRecursively()
+            mkdirs()
         }
-        File(base, "$keep.partial").deleteRecursively()
+        val archive = File(cache, "rootfs.tar.xz")
+
+        try {
+            installer.download(ref, archive, onProgress, onBytes)
+            onProgress("Unpacking ${distro.name} in the guest (this takes a few minutes)...")
+
+            val status = execOnce(
+                "unxz -c /root/.phonix-cache/rootfs.tar.xz | tar -xf - -C /root/.phonix-stage",
+                timeoutSeconds = 1_800
+            ) { line -> if (line.isNotBlank()) onProgress(line) }
+            if (status != 0) {
+                throw IllegalStateException("tar exited with status $status while unpacking ${distro.name}")
+            }
+
+            verifyRootfs(distro, staging)
+            onProgress("Verified ${distro.name} rootfs.")
+
+            target.deleteRecursively()
+            target.parentFile?.mkdirs()
+            if (!staging.renameTo(target)) {
+                staging.copyRecursively(target, overwrite = true)
+                staging.deleteRecursively()
+            }
+        } finally {
+            // Releases up to a few hundred MB whether the install worked or not.
+            staging.deleteRecursively()
+            cache.deleteRecursively()
+        }
+    }
+
+    /** A rootfs is promoted only if it really contains a shell and its own release file. */
+    private fun verifyRootfs(distro: com.example.model.LinuxDistro, root: File) {
+        val shell = File(root, "bin/sh").exists() || File(root, "usr/bin/env").exists()
+        val release = File(root, "etc/os-release").exists() ||
+            File(root, "etc/debian_version").exists() ||
+            File(root, "etc/alpine-release").exists()
+        if (!shell || !release) {
+            throw IllegalStateException(
+                "${distro.name} unpacked without a shell or /etc/os-release, so it was not promoted"
+            )
+        }
     }
 
     /** resolv.conf and hosts are host files in Android, so the guest gets its own copies. */
-    private fun writeGuestConfig(target: File = rootfs) = writeGuestNetworkConfig(context, target)
+    private fun writeGuestConfig(target: File = rootfs) {
+        val dns = try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val props = cm.getLinkProperties(cm.activeNetwork)
+            props?.dnsServers?.mapNotNull { it.hostAddress }?.take(4).orEmpty()
+        } catch (_: Throwable) {
+            emptyList()
+        }.ifEmpty { listOf("1.1.1.1", "8.8.8.8") }
+
+        writeHostFile(
+            target,
+            "etc/resolv.conf",
+            dns.joinToString("\n") { "nameserver $it" } + "\n"
+        )
+        writeHostFile(
+            target,
+            "etc/hosts",
+            """
+            |127.0.0.1   localhost localhost.localdomain
+            |::1         localhost ip6-localhost ip6-loopback
+            |""".trimMargin()
+        )
+    }
+
+    /**
+     * Writes one of the files Android normally owns, replacing any image-provided link.
+     *
+     * Debian and Ubuntu ship `/etc/resolv.conf` as a symlink to
+     * `/run/systemd/resolve/stub-resolv.conf`. Outside the image's own systemd boot that target
+     * does not exist, so writing through it fails with ENOENT — which used to abort the switch
+     * after the rootfs had already been promoted. Unlink first, then write a real file.
+     */
+    private fun writeHostFile(target: File, relative: String, content: String) {
+        val file = File(target, relative)
+        file.parentFile?.mkdirs()
+        // A dangling symlink reports isFile() == false, so this removes the link itself.
+        if (!file.isFile) file.delete()
+        file.writeText(content)
+    }
 
     /**
      * Boots the container and returns a live shell. Output arrives on a background thread;
@@ -171,13 +278,67 @@ class LinuxContainer(private val context: Context) {
         check(isInstalled) { "Linux rootfs not installed" }
         workDir.mkdirs()
 
-        val argv = mutableListOf(
+        val process = prootBuilder(guestCommand(listOf("/bin/sh"))).start()
+        val session = LinuxShellSession(process, onLine, onExit)
+        session.pump()
+        return session
+    }
+
+    /**
+     * Runs one command in the active guest and waits for it to finish.
+     *
+     * Unlike [startShell] this is for work that must complete before the next step (unpacking a
+     * downloaded rootfs), so it blocks until the guest's `sh` exits and hands back its status.
+     * It polls `exitValue()` rather than `waitFor(timeout)`, which only exists from API 26 while
+     * this app supports 24.
+     */
+    fun execOnce(
+        command: String,
+        timeoutSeconds: Long = 900,
+        onLine: (String) -> Unit = {}
+    ): Int {
+        check(isInstalled) { "No guest rootfs is installed to run a command in" }
+        workDir.mkdirs()
+
+        val process = prootBuilder(guestCommand(listOf("/bin/sh", "-c", command))).start()
+        val reader = Thread {
+            try {
+                process.inputStream.bufferedReader().forEachLine { line -> onLine(line) }
+            } catch (_: Throwable) {
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+
+        val deadline = System.currentTimeMillis() + timeoutSeconds * 1000
+        while (true) {
+            val status = try {
+                process.exitValue()
+            } catch (_: IllegalThreadStateException) {
+                null
+            }
+            if (status != null) {
+                reader.join(2_000)
+                return status
+            }
+            if (System.currentTimeMillis() > deadline) {
+                process.destroyForcibly()
+                throw IllegalStateException("Guest command timed out after ${timeoutSeconds}s")
+            }
+            Thread.sleep(150)
+        }
+    }
+
+    /** argv that runs [command] inside [guestRoot] under proot, with the guest's own PATH. */
+    private fun guestCommand(command: List<String>, guestRoot: File = rootfs): List<String> =
+        mutableListOf(
             proot.absolutePath,
             // Termux's proot uses a loader injected into the traced process; without it,
             // exec of guest binaries fails on Android.
             "--link2symlink",
-            "-0",                       // pretend to be root inside the guest
-            "-r", rootfs.absolutePath,  // the guest's /
+            "-0",                         // pretend to be root inside the guest
+            "-r", guestRoot.absolutePath, // the guest's /
             // Android has no /dev nodes the guest may use, so borrow the host's.
             "-b", "/dev",
             "-b", "/proc",
@@ -190,56 +351,31 @@ class LinuxContainer(private val context: Context) {
             "TERM=xterm-256color",
             "LANG=C.UTF-8",
             "SHELL=/bin/sh",
-            "PHONIX=1",
-            "/bin/sh"
-        )
+            "PHONIX=1"
+        ).apply { addAll(command) }
 
-        val builder = ProcessBuilder(argv)
+    /** ProcessBuilder wired with the env proot needs to find its loader and libraries. */
+    private fun prootBuilder(argv: List<String>): ProcessBuilder =
+        ProcessBuilder(argv)
             .directory(rootfs)
             .redirectErrorStream(true)
-        builder.environment().apply {
-            put("PROOT_TMP_DIR", workDir.absolutePath)
-            put("PROOT_LOADER", prootLoader.absolutePath)
-            // Lets the dynamic linker find libtalloc.so.2 / libandroid-shmem.so next to proot.
-            put("LD_LIBRARY_PATH", nativeLibs.absolutePath)
-        }
-
-        val process = builder.start()
-        val session = LinuxShellSession(process, onLine, onExit)
-        session.pump()
-        return session
-    }
+            .apply {
+                environment().apply {
+                    put("PROOT_TMP_DIR", workDir.absolutePath)
+                    put("PROOT_LOADER", prootLoader.absolutePath)
+                    // Lets the dynamic linker find libtalloc.so.2 / libandroid-shmem.so next to proot.
+                    put("LD_LIBRARY_PATH", nativeLibs.absolutePath)
+                }
+            }
 
     companion object {
+        /** Marks a rootfs that finished installing, so a half-unpacked tree is never treated as ready. */
+        const val MARKER = ".phonix-installed"
+
         // .tgz, not .tar.gz: AAPT2 treats a ".gz" asset as compressed content and strips
         // the suffix on packaging, which would leave a name we never look for.
         const val ASSET_ROOTFS = "alpine-rootfs.tgz"
     }
-}
-
-/**
- * Writes the guest's own `resolv.conf` and `hosts`, seeded from the phone's current network.
- * Shared by the bundled installer and the streaming installer in [DistroInstaller].
- */
-internal fun writeGuestNetworkConfig(context: Context, target: File) {
-    val dns = try {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        val props = cm.getLinkProperties(cm.activeNetwork)
-        props?.dnsServers?.mapNotNull { it.hostAddress }?.take(4).orEmpty()
-    } catch (_: Throwable) {
-        emptyList()
-    }.ifEmpty { listOf("1.1.1.1", "8.8.8.8") }
-
-    File(target, "etc").mkdirs()
-    File(target, "etc/resolv.conf").writeText(
-        dns.joinToString("\n") { "nameserver $it" } + "\n"
-    )
-    File(target, "etc/hosts").writeText(
-        """
-        |127.0.0.1   localhost localhost.localdomain
-        |::1         localhost ip6-localhost ip6-loopback
-        |""".trimMargin()
-    )
 }
 
 /** A running guest shell: line-oriented stdin/stdout over the proot process. */
@@ -356,12 +492,11 @@ class LinuxShellSession(
  * Minimal ustar reader. Android has no `tar`, and shelling out to one would defeat the point
  * of a self-contained installer, so the rootfs is unpacked here.
  */
-class TarExtractor(private val stream: InputStream, private val gzip: Boolean = true) {
+class TarGzExtractor(private val stream: InputStream) {
 
     fun extractTo(destination: File): Int {
         var files = 0
-        val raw: InputStream = if (gzip) GZIPInputStream(stream, 1 shl 16) else stream
-        raw.buffered(1 shl 16).use { gz ->
+        GZIPInputStream(stream, 1 shl 16).buffered(1 shl 16).use { gz ->
             val header = ByteArray(512)
             var pendingLongName: String? = null
             var pendingLongLink: String? = null

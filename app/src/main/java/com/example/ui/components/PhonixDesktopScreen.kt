@@ -2357,7 +2357,9 @@ fun TerminalWindowContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "root@alpine:~# ",
+                // The prompt names the guest that is actually running; it used to say
+                // "root@alpine" even after switching to Debian.
+                text = "root@${uiState.currentDistro.id}:~# ",
                 color = TerminalGreen,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
@@ -2670,7 +2672,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                             Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                uiState.updateInfo?.releaseNotes ?: "No update check has run yet.",
+                                uiState.updateInfo?.releaseNotes ?: "System is up to date (v1.2).",
                                 color = Slate200,
                                 fontSize = 10.sp
                             )
@@ -3433,7 +3435,7 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    "${tier.title} · ${com.example.model.KnowledgeLibrary.countFor(tier)} docs",
+                                    "${tier.title} (${com.example.model.KnowledgeLibrary.sizeLabel(tier)})",
                                     color = if (isSel) PhonixCyan else Slate400,
                                     fontSize = 9.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal

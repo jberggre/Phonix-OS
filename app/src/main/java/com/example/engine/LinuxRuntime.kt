@@ -4,9 +4,10 @@ import android.content.Context
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlin.coroutines.resume    /**
-     * Process-wide owner of the Linux container (Alpine by default, or whichever distribution
-     * the user has installed and activated).
+import kotlin.coroutines.resume
+
+/**
+ * Process-wide owner of the Alpine container.
  *
  * The desktop is just one window onto this: [com.example.service.LinuxServerService] starts the
  * runtime at boot and keeps the process alive with a foreground notification, so closing the
@@ -90,35 +91,32 @@ object LinuxRuntime {
         emit("${guest.activeDistro().name} ${guest.version()} (aarch64) — real shell, proot, no root needed", true)
     }
 
-    /**
-     * Installs and activates [distro]. Returns false when the switch failed; in that case the
-     * previous guest is restarted unchanged, because a failed download must never cost the user
-     * the environment they already had.
-     */
-    suspend fun switchDistro(
+    @Synchronized
+    fun switchDistro(
         context: Context,
         distro: com.example.model.LinuxDistro,
+        debloatPrevious: Boolean = true,
+        onBytes: (Long, Long) -> Unit = { _, _ -> },
         onProgress: (String) -> Unit = {}
-    ): Boolean {
+    ) {
         stop()
         state = State.INSTALLING
         val guest = container(context)
-        return try {
-            guest.switchDistro(distro) { msg ->
-                emit(msg, true)
-                onProgress(msg)
-            }
-            state = State.STOPPED
-            start(context)
-            true
-        } catch (e: Throwable) {
-            emit(
-                "[distro] ${e.message ?: "switch failed"} — ${guest.activeDistro().name} is still active",
-                true
+        try {
+            guest.switchDistro(
+                distro = distro,
+                debloatPrevious = debloatPrevious,
+                onProgress = { msg ->
+                    emit(msg, true)
+                    onProgress(msg)
+                },
+                onBytes = onBytes
             )
+        } finally {
+            // A failed switch must not leave the runtime in INSTALLING: the previous rootfs is
+            // still on disk, so boot it again and let the caller report what went wrong.
             state = State.STOPPED
             start(context)
-            false
         }
     }
 

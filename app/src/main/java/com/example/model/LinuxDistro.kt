@@ -2,6 +2,10 @@ package com.example.model
 
 /**
  * A Linux distribution supported by Phonix on ARM64 Android kernels through PRoot.
+ *
+ * `image*` name a build on `images.linuxcontainers.org`; the exact archive URL is resolved at
+ * install time from that mirror's index (see [DistroIndex]) because every build lives under a dated
+ * directory. The bundled Alpine image has no mirror identity.
  */
 data class LinuxDistro(
     val id: String,
@@ -14,18 +18,14 @@ data class LinuxDistro(
     val downloadSizeMb: Int,
     val installedSizeMb: Int,
     val packageManager: String,
-    val downloadUrl: String,
     val isBundled: Boolean = false,
-    val bundledPackages: List<String>,
-    /**
-     * Linux Containers image directory for this distro. Required for anything not bundled:
-     * the installer reads the newest dated build from here and verifies it against the
-     * `SHA256SUMS` manifest published beside `rootfs.tar.xz`.
-     */
-    val imageIndexUrl: String = ""
+    val imageName: String = "",
+    val imageRelease: String = "",
+    val bundledPackages: List<String>
 ) {
-    val downloadSizeEstimate: String get() = "${downloadSizeMb} MB"
-    val installedDiskFootprint: String get() = "${installedSizeMb} MB"
+    /** Approximate until the download starts, then replaced by the server's Content-Length. */
+    val downloadSizeEstimate: String get() = "~${downloadSizeMb} MB"
+    val installedDiskFootprint: String get() = "~${installedSizeMb} MB"
 }
 
 object DistroCatalog {
@@ -44,7 +44,6 @@ object DistroCatalog {
         downloadSizeMb = 4,
         installedSizeMb = 9,
         packageManager = "apk",
-        downloadUrl = "",
         isBundled = true,
         bundledPackages = listOf("busybox", "icewm", "xterm", "apk-tools")
     )
@@ -58,15 +57,14 @@ object DistroCatalog {
         version = "12.7",
         base = "Debian GNU/Linux aarch64 · glibc · APT",
         desktopEnvironment = "Openbox / XFCE4 minimal on Xvfb",
-        description = "The universal operating system with full Debian APT repositories, GCC, Python 3, and unmatched binary package compatibility. Download size is an estimate; the exact size is read from the image server before downloading.",
+        description = "The universal operating system with full Debian APT repositories, GCC, Python 3, and unmatched binary package compatibility.",
         targetUse = "Full software development, APT repository packages, stable servers",
         downloadSizeMb = 95,
-        installedSizeMb = 350,
+        installedSizeMb = 300,
         packageManager = "apt",
-        downloadUrl = "https://images.linuxcontainers.org/images/debian/bookworm/arm64/default/",
-        isBundled = false,
-        bundledPackages = listOf("bash", "apt", "coreutils", "curl", "dpkg"),
-        imageIndexUrl = "https://images.linuxcontainers.org/images/debian/bookworm/arm64/default/"
+        imageName = "debian",
+        imageRelease = "bookworm",
+        bundledPackages = listOf("bash", "apt", "coreutils", "curl", "dpkg")
     )
 
     /**
@@ -80,13 +78,12 @@ object DistroCatalog {
         desktopEnvironment = "Openbox / X11 desktop on Xvfb",
         description = "Modern Canonical Ubuntu userspace with up-to-date developer toolchains, Node.js, Python, and cloud tooling.",
         targetUse = "Modern developer toolchain, cloud CLI tools, Node.js, Docker client",
-        downloadSizeMb = 128,
-        installedSizeMb = 480,
+        downloadSizeMb = 127,
+        installedSizeMb = 420,
         packageManager = "apt",
-        downloadUrl = "https://images.linuxcontainers.org/images/ubuntu/noble/arm64/default/",
-        isBundled = false,
-        bundledPackages = listOf("bash", "apt", "git", "curl", "tar"),
-        imageIndexUrl = "https://images.linuxcontainers.org/images/ubuntu/noble/arm64/default/"
+        imageName = "ubuntu",
+        imageRelease = "noble",
+        bundledPackages = listOf("bash", "apt", "git", "curl", "tar")
     )
 
     /**
@@ -99,14 +96,13 @@ object DistroCatalog {
         base = "Arch Linux aarch64 · glibc · Pacman",
         desktopEnvironment = "i3wm / Openbox on Xvfb",
         description = "Rolling-release minimalist Linux userspace with the bleeding-edge Pacman package ecosystem and latest compilers.",
-        targetUse = "Bleeding-edge Linux kernels/packages, custom builds, Pacman repository",
+        targetUse = "Bleeding-edge Linux packages, custom builds, Pacman repository",
         downloadSizeMb = 178,
-        installedSizeMb = 620,
+        installedSizeMb = 560,
         packageManager = "pacman",
-        downloadUrl = "https://images.linuxcontainers.org/images/archlinux/current/arm64/default/",
-        isBundled = false,
-        bundledPackages = listOf("bash", "pacman", "coreutils", "which", "grep"),
-        imageIndexUrl = "https://images.linuxcontainers.org/images/archlinux/current/arm64/default/"
+        imageName = "archlinux",
+        imageRelease = "current",
+        bundledPackages = listOf("bash", "pacman", "coreutils", "which", "grep")
     )
 
     /**
@@ -115,18 +111,17 @@ object DistroCatalog {
     val kali = LinuxDistro(
         id = "kali",
         name = "Kali Linux Minimal",
-        version = "2024.3",
+        version = "Rolling",
         base = "Kali Linux aarch64 · Debian rolling · Security",
         desktopEnvironment = "CLI / X11 security shell",
         description = "Security auditing and network diagnostics distribution equipped with standard network telemetry and diagnostic suites.",
         targetUse = "Network diagnostics, wireless audits, forensic packet inspection",
         downloadSizeMb = 78,
-        installedSizeMb = 300,
+        installedSizeMb = 250,
         packageManager = "apt",
-        downloadUrl = "https://images.linuxcontainers.org/images/kali/current/arm64/default/",
-        isBundled = false,
-        bundledPackages = listOf("bash", "apt", "nmap", "tcpdump", "net-tools"),
-        imageIndexUrl = "https://images.linuxcontainers.org/images/kali/current/arm64/default/"
+        imageName = "kali",
+        imageRelease = "current",
+        bundledPackages = listOf("bash", "apt", "nmap", "tcpdump", "net-tools")
     )
 
     /** Every distribution supported for on-demand streaming and switching. */
