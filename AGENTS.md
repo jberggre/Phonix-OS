@@ -66,3 +66,6 @@ Only then read this repo's [docs/HANDOFF.md](docs/HANDOFF.md) and
 
 Match the existing prose: measured claims, `[measured]`/`[static]` labels, and no marketing. Commit
 messages explain *why* the change was needed, in the imperative.
+
+- **Never add attribution.** Commit messages end at their own last line: no
+  `Co-Authored-By`, no "Generated with" trailer.
