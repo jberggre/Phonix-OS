@@ -5,7 +5,10 @@ import android.graphics.Color as AndroidColor
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -86,6 +89,18 @@ fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
             settings.displayZoomControls = false
             // The page logs its connection state and window size; this is the only way to see
             // inside a WebView from adb (logcat tag: PhonixVnc).
+            // A load issued before websockify is listening fails with connection refused, and a
+            // page that never loaded can never report itself connected, so the splash used to stay
+            // up forever on a first run. Log the failure instead of hiding it.
+            webViewClient = object : WebViewClient() {
+                override fun onReceivedError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    error: WebResourceError
+                ) {
+                    Log.d("PhonixVnc", "load error ${error.errorCode} ${error.description} ${request.url}")
+                }
+            }
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                     Log.d("PhonixVnc", message.message())
@@ -111,10 +126,17 @@ fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
         webView.loadUrl(LinuxDesktop.VNC_URL)
 
         var lastRepair = android.os.SystemClock.elapsedRealtime()
+        var lastLoad = lastRepair
         while (true) {
             delay(2_000)
             connected = evaluate(webView, VNC_STATE_JS)?.contains("connected") == true
             val now = android.os.SystemClock.elapsedRealtime()
+            // Until the page is actually showing a framebuffer, keep asking for it: the first
+            // run spends minutes installing X11, and the single load below happens before that.
+            if (!connected && now - lastLoad > 8_000) {
+                webView.loadUrl(LinuxDesktop.VNC_URL)
+                lastLoad = now
+            }
             val sinceRepair = now - lastRepair
             val repairDue = if (connected) sinceRepair > 120_000 else sinceRepair > 10_000
             if (repairDue) {

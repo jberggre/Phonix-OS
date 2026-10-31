@@ -1,10 +1,11 @@
 package com.example.engine
 
 import android.content.Context
+import com.example.model.LinuxDistro
 import java.io.File
 
 /**
- * Starts the Linux GUI stack inside the Alpine container and exposes it as a local web page.
+ * Starts the Linux GUI stack inside the active container and exposes it as a local web page.
  *
  * Xvfb draws a virtual X11 screen, x11vnc exports it over VNC, and websockify + noVNC turn
  * that into a page the desktop window can show in a WebView. Everything binds to 127.0.0.1:
@@ -24,64 +25,82 @@ object LinuxDesktop {
     private const val PAGE_ASSET = "novnc/phonix.html"
     private const val PAGE_IN_GUEST = "usr/share/novnc/phonix.html"
 
+    /** A literal dollar sign, so the guest script can use shell variables inside a raw string. */
+    private const val D = "\$"
+
+    /**
+     * Package names and the tool that queries them differ per distribution. This bootstrap used
+     * to hardcode `apk add ...`, which on Debian fails with "apk: not found", so Xvfb never
+     * started and the window sat at "Starting X11" forever.
+     */
+    private fun packageProbe(distro: LinuxDistro): String = when (distro.id) {
+        "alpine" -> "apk info -e icewm"
+        "arch" -> "pacman -Q icewm"
+        else -> "dpkg -s icewm"
+    }
+
+    private fun packageInstall(distro: LinuxDistro): String = when (distro.id) {
+        "alpine" -> "apk add --no-cache xvfb x11vnc novnc icewm xterm font-misc-misc xsetroot font-dejavu fontconfig"
+        "arch" -> "pacman -Sy --noconfirm xorg-server-xvfb x11vnc novnc icewm xterm xorg-xsetroot ttf-dejavu fontconfig procps-ng"
+        else -> "DEBIAN_FRONTEND=noninteractive apt-get update && " +
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
+            "xvfb x11vnc novnc icewm xterm x11-xserver-utils fonts-dejavu-core fontconfig procps"
+    }
+
     /**
      * Idempotent: every block inspects the guest first and only acts when something is missing,
      * so this is cheap to re-send while the window is open. It is also the recovery path — a
      * crashed daemon or a restarted container is repaired by the next call.
      */
-    private val START_SCRIPT = """
+    private fun startScript(distro: LinuxDistro): String = """
         |started=
-        |if ! apk info -e icewm >/dev/null 2>&1; then
-        |  echo '[x11] installing X11, VNC and noVNC inside the container (first run, ~450 MB)...'
-        |  apk add --no-cache xvfb x11vnc novnc icewm xterm font-misc-misc xsetroot
-        |  started="${'$'}started x11-packages"
-        |fi
-        |# DejaVu is what gives the desktop readable text at this size; IceWM and xterm both draw
-        |# through Xft, and without a real font they fall back to bitmap glyphs that look broken.
-        |if ! apk info -e font-dejavu >/dev/null 2>&1; then
-        |  apk add --no-cache font-dejavu fontconfig
-        |  started="${'$'}started fonts"
+        |# Reads /proc directly: pidof and pgrep are not present in every minimal rootfs, and a
+        |# missing pidof made every "is it already running" check answer no.
+        |running() { for p in /proc/[0-9]*; do grep -qx "${D}1" "${D}p/comm" 2>/dev/null && return 0; done; return 1; }
+        |if ! ${packageProbe(distro)} >/dev/null 2>&1; then
+        |  echo '[x11] installing X11, VNC and noVNC inside the container (first run, this can take minutes)...'
+        |  ${packageInstall(distro)}
+        |  started="${D}started x11-packages"
         |fi
         |mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
-        |if ! pidof Xvfb >/dev/null; then
+        |if ! running Xvfb; then
         |  nohup Xvfb :1 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
         |  sleep 2
-        |  started="${'$'}started Xvfb"
+        |  started="${D}started Xvfb"
         |fi
-        |if ! pidof x11vnc >/dev/null; then
+        |if ! running x11vnc; then
         |  nohup env DISPLAY=:1 HOME=/root x11vnc -display :1 -noshm -forever -shared -localhost -rfbport 5901 -nopw >/tmp/x11vnc.log 2>&1 &
-        |  started="${'$'}started x11vnc"
+        |  started="${D}started x11vnc"
         |fi
-        |if ! pidof websockify >/dev/null; then
+        |if ! running websockify; then
         |  nohup websockify --web=/usr/share/novnc 127.0.0.1:$PORT 127.0.0.1:5901 >/tmp/ws.log 2>&1 &
-        |  started="${'$'}started websockify"
+        |  started="${D}started websockify"
         |fi
-        |if ! pidof icewm >/dev/null; then
+        |if ! running icewm; then
         |  nohup env DISPLAY=:1 HOME=/root icewm >/tmp/icewm.log 2>&1 &
         |  sleep 1
-        |  started="${'$'}started icewm"
+        |  started="${D}started icewm"
         |fi
         |# The Phonix wallpaper lives on the X root. icewmbg reads DesktopBackgroundImage from
         |# ~/.icewm/preferences, and the solid colour is the fallback if the image cannot load.
         |xsetroot -solid '#0B1220' 2>/dev/null
-        |if ! pidof icewmbg >/dev/null; then
+        |if ! running icewmbg; then
         |  nohup env DISPLAY=:1 HOME=/root icewmbg >/tmp/icewmbg.log 2>&1 &
-        |  started="${'$'}started icewmbg"
+        |  started="${D}started icewmbg"
         |else
         |  # Reload the image: an app update can replace the wallpaper while the desktop runs.
         |  icewmbg -r >/tmp/icewmbg.log 2>&1
         |fi
-        |# Alpine's xterm has no Xft, and without font-misc-misc it cannot open a window at all, so
-        |# a core font keeps the terminal usable. It is started whenever none is running, which
-        |# also heals a terminal that died with the container.
-        |if ! pidof xterm >/dev/null; then
+        |# A core font keeps the terminal usable even where Xft is missing, and starting it
+        |# whenever none is running also heals a terminal that died with the container.
+        |if ! running xterm; then
         |  nohup env DISPLAY=:1 HOME=/root xterm -fa 'DejaVu Sans Mono' -fs 10 -bg '#0B1220' -fg '#DBEAFE' -cr '#F59E0B' -geometry 100x28+24+16 -e /bin/sh >/tmp/xterm.log 2>&1 &
-        |  # Give the process time to appear in pidof, so a second ensureStarted() a few seconds
+        |  # Give the process time to appear in /proc, so a second ensureStarted() a few seconds
         |  # later does not open a duplicate terminal.
         |  sleep 2
-        |  started="${'$'}started xterm"
+        |  started="${D}started xterm"
         |fi
-        |[ -z "${'$'}started" ] || echo "[x11] started:${'$'}started"
+        |[ -z "${D}started" ] || echo "[x11] started:${D}started"
         |echo '[x11] display :1 ready on http://127.0.0.1:$PORT'
     """.trimMargin()
 
@@ -106,7 +125,8 @@ object LinuxDesktop {
             if (LinuxRuntime.isRunning) LinuxRuntime.send(RESTART_WM_SCRIPT)
         }
         if (startRequested && startedGeneration == LinuxRuntime.generation) return true
-        val sent = LinuxRuntime.send(START_SCRIPT)
+        val distro = LinuxRuntime.container(context).activeDistro()
+        val sent = LinuxRuntime.send(startScript(distro))
         startRequested = sent
         if (sent) startedGeneration = LinuxRuntime.generation
         return sent
@@ -114,10 +134,10 @@ object LinuxDesktop {
 
     /** Replaces a running window manager with the current theme; open windows survive. */
     private const val RESTART_WM_SCRIPT =
-        "if pidof Xvfb >/dev/null; then " +
-            "pkill icewm >/dev/null 2>&1; sleep 1; " +
+        "if [ -e /tmp/.X11-unix/X1 ]; then " +
+            "command -v pkill >/dev/null 2>&1 && pkill icewm; sleep 1; " +
             "nohup env DISPLAY=:1 HOME=/root icewm >/tmp/icewm.log 2>&1 & " +
-            "sleep 1; pidof icewmbg >/dev/null || nohup env DISPLAY=:1 HOME=/root icewmbg " +
+            "sleep 1; nohup env DISPLAY=:1 HOME=/root icewmbg " +
             ">/tmp/icewmbg.log 2>&1 & fi"
 
     /** Explicit user-facing recovery: forget the "already started" state and start again. */
@@ -129,7 +149,10 @@ object LinuxDesktop {
 
     /** Kills the display stack inside the guest; the container itself keeps running. */
     fun stop(): Boolean = LinuxRuntime.send(
-        "pkill -f websockify; pkill x11vnc; pkill Xvfb; echo '[x11] display stopped'"
+        "command -v pkill >/dev/null 2>&1 && pkill -f websockify; " +
+            "command -v pkill >/dev/null 2>&1 && pkill x11vnc; " +
+            "command -v pkill >/dev/null 2>&1 && pkill Xvfb; " +
+            "echo '[x11] display stopped'"
     )
 
     /**

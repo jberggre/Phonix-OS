@@ -964,3 +964,33 @@ captured display 2 at 1920x1080 with `screencap`. Measured on screen:
 
 Remaining, honestly: the terminal banner and agent prompt fixes are compiled but **not yet exercised**
 against a running guest, and the tiles have not been checked on a light wallpaper.
+
+
+### Debian desktop on the monitor — 2026-10-31 [measured]
+
+The first attempt to boot the guest in a window never left "Starting X11 on :1…". Two separate
+causes, both real:
+
+1. **`LinuxDesktop.kt` ran Alpine's installer inside Debian.** The bootstrap ended its package
+   step with `apk add --no-cache xvfb x11vnc novnc icewm xterm ...`, which fails with
+   "apk: not found" in a Debian rootfs, so Xvfb never started. Its "already running" checks also
+   used `pidof`, which a minimal rootfs need not provide.
+2. **The window loaded the viewer page once and never again.** `webView.loadUrl` ran 300 ms after
+   the window opened, while a first run is still installing packages, so the load failed with
+   `net::ERR_CONNECTION_REFUSED`; a page that never loaded cannot report itself connected, and the
+   splash stayed up forever. The periodic "repair" re-sent the start script but never the page.
+
+Fixes: package probe and install now follow the active distro (`apk` / `dpkg` / `pacman`), process
+detection reads `/proc/*/comm` instead of `pidof`, and the window reloads the page every 8 s until a
+framebuffer is connected, logging WebView failures to the `PhonixVnc` tag.
+
+Measured after the fix, on the S10 with the 1920x1080 HDMI monitor:
+
+- `apt-get` observed running inside the Debian guest (the distro-aware path is exercised, not just
+  compiled), then 6080 and 5901 listening, then established connections on both.
+- logcat: `PhonixVnc: [phonix] connected 1920x922`.
+- The capture shows the IceWM desktop inside the "Linux Desktop (X11)" window: wallpaper, the
+  taskbar with four workspace buttons, and an xterm running `sh` at a `#` prompt.
+
+Not claimed: the in-app terminal's `root@debian` prompt was not separately photographed, and the
+desktop has not been exercised beyond opening a shell.
