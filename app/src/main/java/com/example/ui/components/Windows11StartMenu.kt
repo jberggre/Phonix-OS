@@ -265,17 +265,26 @@ fun Windows11StartMenu(
     }
 
     // App categories
-    val categoryTabs = listOf("All", "Tools & System", "Browsers & Web", "Media", "Debloat Candidates")
+    // The seven functional domains from the spec; Android exposes no reliable category for
+    // preinstalled apps, so matching is on package and label keywords.
+    val categoryTabs = listOf(
+        "All", "Internet", "Media & Graphics", "System & Tools",
+        "Development & Terminal", "Games", "Communication", "Office"
+    )
 
     fun matchesCategory(app: InstalledAppInfo, tab: String): Boolean {
         if (tab == "All") return true
         val pkg = app.packageName.lowercase()
         val lbl = app.label.lowercase()
+        fun has(vararg words: String) = words.any { pkg.contains(it) || lbl.contains(it) }
         return when (tab) {
-            "Tools & System" -> pkg.contains("settings") || pkg.contains("file") || pkg.contains("tool") || pkg.contains("android") || lbl.contains("files") || lbl.contains("settings")
-            "Browsers & Web" -> pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("firefox") || pkg.contains("web") || lbl.contains("chrome") || lbl.contains("browser")
-            "Media" -> pkg.contains("camera") || pkg.contains("gallery") || pkg.contains("photo") || pkg.contains("media") || pkg.contains("music") || pkg.contains("player")
-            "Debloat Candidates" -> pkg.contains("samsung") || pkg.contains("facebook") || pkg.contains("bixby") || pkg.contains("carrier") || pkg.contains("telemetry") || pkg.contains("diag")
+            "Internet" -> has("chrome", "browser", "firefox", "web", "duckduckgo", "opera", "brave")
+            "Media & Graphics" -> has("camera", "gallery", "photo", "media", "music", "player", "video", "youtube", "spotify", "netflix", "film")
+            "System & Tools" -> has("settings", "files", "file", "tool", "android", "system", "storage", "clock", "calculator", "weather", "calendar")
+            "Development & Terminal" -> has("termux", "terminal", "code", "dev", "git", "adb", "shell", "linux")
+            "Games" -> has("game", "play", "xbox", "steam", "arcade", "puzzle", "minecraft")
+            "Communication" -> has("message", "sms", "phone", "dialer", "mail", "gmail", "chat", "whatsapp", "telegram", "signal", "contacts", "meet", "duo")
+            "Office" -> has("office", "docs", "sheets", "slides", "note", "drive", "pdf", "word", "excel", "onenote", "keep")
             else -> true
         }
     }
@@ -539,6 +548,22 @@ fun Windows11StartMenu(
                                         }
 
                                         Spacer(Modifier.width(6.dp))
+
+                                        // Manage: the storage view is where bloat is identified, so it
+                                        // opens the debloat walkthrough rather than only App Info.
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(PhonixCyan.copy(alpha = 0.18f))
+                                                .clickable {
+                                                    viewModel.closeStartMenu()
+                                                    viewModel.toggleWindow(WindowType.DEBLOAT_MANAGER)
+                                                }
+                                                .padding(horizontal = 5.dp, vertical = 3.dp)
+                                        ) {
+                                            Text("Debloat", color = PhonixCyan, fontSize = 8.sp)
+                                        }
+                                        Spacer(Modifier.width(4.dp))
 
                                         // App Settings / Disable
                                         Box(

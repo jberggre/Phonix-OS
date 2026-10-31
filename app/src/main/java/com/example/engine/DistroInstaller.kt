@@ -64,25 +64,33 @@ class DistroInstaller(private val userAgent: String = "PhonixOS/1.2 (Android; pr
         onBytes: (Long, Long) -> Unit = { _, _ -> }
     ): File {
         destination.parentFile?.mkdirs()
+        // The partial file survives a failed attempt so the next run resumes instead of
+        // restarting a 95 MB download from zero on a phone connection.
         val part = File(destination.parentFile, destination.name + ".part")
-        part.delete()
+        val already = if (part.exists()) part.length() else 0L
 
         val conn = open(ref.url, timeoutMs = 60_000)
+        if (already > 0) conn.setRequestProperty("Range", "bytes=$already-")
         try {
             val code = conn.responseCode
             if (code !in 200..299) throw IllegalStateException("HTTP $code while fetching ${ref.url}")
 
-            val total = conn.contentLengthLong.takeIf { it > 0 } ?: 0L
+            // Only 206 means the server honoured the range. On a plain 200 it is resending the
+            // whole archive, so the partial bytes are dropped rather than appended twice.
+            val resuming = code == 206 && already > 0
+            if (!resuming && part.exists()) part.delete()
+            val sent = conn.contentLengthLong.takeIf { it > 0 } ?: 0L
+            val total = if (resuming && sent > 0) already + sent else sent
             val label = ref.url.substringAfterLast('/')
             onProgress(
                 if (total > 0) "Downloading $label (${megabytes(total)})..."
                 else "Downloading $label..."
             )
 
-            var written = 0L
-            var reportedAt = 0L
+            var written = if (resuming) already else 0L
+            var reportedAt = written
             conn.inputStream.use { input ->
-                FileOutputStream(part).use { out ->
+                FileOutputStream(part, resuming).use { out ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         val read = input.read(buffer)

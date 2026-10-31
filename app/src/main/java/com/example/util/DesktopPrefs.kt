@@ -51,7 +51,7 @@ object DesktopPrefs {
                 put("showSystemMonitorWidget", customization.showSystemMonitorWidget)
                 put("showDesktopGrid", customization.showDesktopGrid)
                 put("showDesktopLabels", customization.showDesktopLabels)
-                put("showIconFrames", customization.showIconFrames)
+                put("showIconFramesV2", customization.showIconFrames)
                 put("showClockInTaskbar", customization.showClockInTaskbar)
                 put("showBatteryInTaskbar", customization.showBatteryInTaskbar)
                 put("lockIconsToGrid", customization.lockIconsToGrid)
@@ -82,7 +82,7 @@ object DesktopPrefs {
                 showSystemMonitorWidget = json.optBoolean("showSystemMonitorWidget", defaults.showSystemMonitorWidget),
                 showDesktopGrid = json.optBoolean("showDesktopGrid", defaults.showDesktopGrid),
                 showDesktopLabels = json.optBoolean("showDesktopLabels", defaults.showDesktopLabels),
-                showIconFrames = json.optBoolean("showIconFrames", defaults.showIconFrames),
+                showIconFrames = json.optBoolean("showIconFramesV2", defaults.showIconFrames),
                 showClockInTaskbar = json.optBoolean("showClockInTaskbar", defaults.showClockInTaskbar),
                 showBatteryInTaskbar = json.optBoolean("showBatteryInTaskbar", defaults.showBatteryInTaskbar),
                 lockIconsToGrid = json.optBoolean("lockIconsToGrid", defaults.lockIconsToGrid),

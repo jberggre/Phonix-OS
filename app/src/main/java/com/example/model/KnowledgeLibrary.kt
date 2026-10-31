@@ -45,7 +45,7 @@ data class KnowledgeDoc(
 
 object KnowledgeLibrary {
 
-    val docs: List<KnowledgeDoc> = listOf(
+    val docs: List<KnowledgeDoc> = EXTRA_DOCS + listOf(
         // ---------------- WATER ----------------
         KnowledgeDoc(
             id = "water_boil",

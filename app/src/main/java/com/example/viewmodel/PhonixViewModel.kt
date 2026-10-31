@@ -2260,6 +2260,26 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(debloatInstalled = presence) }
     }
 
+    /**
+     * Hides one package for real from the walkthrough. Only a device-owner install can do this,
+     * and [HostDebloat.hidePackage] returns the platform's own refusal rather than a guess.
+     */
+    fun hideHostPackage(packageName: String) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val failure = withContext(Dispatchers.IO) { HostDebloat.hidePackage(app, packageName) }
+            appendTerminalLine(
+                TerminalLine(
+                    if (failure == null) "hid $packageName" else "could not hide $packageName: $failure",
+                    if (failure == null) TerminalLine.LineType.SUCCESS else TerminalLine.LineType.ERROR
+                )
+            )
+            val presence = DebloatCatalog.getDefaultPackages()
+                .associate { it.packageName to PackageFacts.isInstalled(app, it.packageName) }
+            _uiState.update { it.copy(debloatInstalled = presence) }
+        }
+    }
+
     /** Hides the selected packages for real. Only meaningful on a device-owner install. */
     private suspend fun hideSelectedPackages(context: Context, log: (String) -> Unit): Int {
         val selected = _uiState.value.debloatPackages.filter { it.isEnabled }

@@ -916,3 +916,30 @@ Verification of the merged tree: `assembleDebug` + `testDebugUnitTest` **green, 
 failures**; APK 28,918,475 bytes. Still owed on hardware: a run of the **checksum-gated** path
 (a real install prunes the working Debian tree, so it needs the owner's go-ahead), the debloat
 hide walkthrough, and the Start-menu view modes.
+
+
+### Plan audit follow-up — 2026-10-31
+
+The implementation plan was checked line by line against the tree. What was missing, and how it was
+closed:
+
+- **Icon tiles were structurally dead.** `showIconFrames` defaulted to `false`, and
+  `DraggableDesktopShortcut` skipped the tile whenever designed artwork existed, so "Icon Tiles: On"
+  changed nothing on the default desktop. Frames now default on, a glass tile with a 0.30-alpha
+  white border is drawn behind artwork too (artwork inset to 88%), and the preference key moved to
+  `showIconFramesV2` so a `false` saved under the old default does not stick forever.
+- **Alignment grid contrast** now draws a dark halo under each dot (was a single 0.65-alpha dot).
+- **Debloat walkthrough** gained the row app icon, a `StorageStatsManager` data+cache figure (null
+  without Usage Access, and then simply not shown), and a per-row **Hide** button that only appears
+  on a device-owner install. The banner previously promised 1-click hiding the dialog could not do.
+- **Start menu** now has the plan's seven categories instead of five, and the storage view has a
+  **Debloat** action, not only App Info.
+- **Installer** resumes: the `.part` file is kept and fetched with `Range`/`206`, verified by
+  checksum before promotion.
+- **Offline library** grew from 24 to **54 documents** (Medium 32, Large 54, measured by
+  `KnowledgeLibrary.docCount`). This is still below the plan's 65 / 130, and the UI reports the real
+  measured counts rather than the plan's targets.
+
+Verification: `assembleDebug` + `testDebugUnitTest` **green, 45 tests**, APK 29,950,886 bytes. The
+frame default is asserted in `ExampleRobolectricTest`; the visual result is **not** screenshotted on
+the device yet.

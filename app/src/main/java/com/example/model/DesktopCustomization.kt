@@ -229,7 +229,7 @@ data class DesktopCustomization(
      * Draw the tile and outline behind a desktop icon. Off gives the flat "just the glyph and the
      * caption" look some desktops prefer; the icons stay hit-testable either way.
      */
-    val showIconFrames: Boolean = false,
+    val showIconFrames: Boolean = true,
     val showClockInTaskbar: Boolean = true,
     val showBatteryInTaskbar: Boolean = true,
     val lockIconsToGrid: Boolean = false, // Freeform movement enabled by default

@@ -49,6 +49,22 @@ object PackageFacts {
         null
     }
 
+    /**
+     * (app, data, cache) bytes from StorageStatsManager. null when Android refuses the query,
+     * which is the normal answer without Usage Access - the UI must say so rather than invent one.
+     */
+    fun storageBreakdown(context: Context, packageName: String): Triple<Long, Long, Long>? = try {
+        val sm = context.getSystemService(Context.STORAGE_STATS_SERVICE) as? android.app.usage.StorageStatsManager
+        val stats = sm?.queryStatsForPackage(
+            android.os.storage.StorageManager.UUID_DEFAULT,
+            packageName,
+            android.os.Process.myUserHandle()
+        )
+        if (stats == null) null else Triple(stats.appBytes, stats.dataBytes, stats.cacheBytes)
+    } catch (_: Throwable) {
+        null
+    }
+
     /** "91 MB" / "1.2 GB" - a measured size, never a guess. */
     fun formatBytes(bytes: Long): String = when {
         bytes >= 1024L * 1024L * 1024L -> String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))

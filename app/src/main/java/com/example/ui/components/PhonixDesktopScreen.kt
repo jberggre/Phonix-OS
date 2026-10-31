@@ -802,8 +802,15 @@ fun DesktopWallpaperBackground(
                 while (x < size.width) {
                     var y = 10.dp.toPx()
                     while (y < size.height) {
+                        // Dark halo under each dot: the grid must stay visible on both a
+                        // near-black and a near-white wallpaper.
                         drawCircle(
-                            color = accentColor.copy(alpha = 0.65f),
+                            color = Color.Black.copy(alpha = 0.45f),
+                            radius = dotRadius + 1.4.dp.toPx(),
+                            center = Offset(x, y)
+                        )
+                        drawCircle(
+                            color = accentColor.copy(alpha = 0.85f),
                             radius = dotRadius,
                             center = Offset(x, y)
                         )
@@ -1061,11 +1068,11 @@ fun DraggableDesktopShortcut(
                 modifier = Modifier
                     .size(sizeDp)
                     .then(
-                        if (showFrames && phoneIcon != null && artRes == null) {
+                        if (showFrames && (phoneIcon != null || artRes != null)) {
                             Modifier
                                 .clip(RoundedCornerShape(shapeRadius))
-                                .background(iconTint.copy(alpha = 0.16f))
-                                .border(1.dp, iconTint.copy(alpha = 0.55f), RoundedCornerShape(shapeRadius))
+                                .background(Color.White.copy(alpha = 0.07f))
+                                .border(1.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(shapeRadius))
                         } else {
                             Modifier
                         }
@@ -1077,7 +1084,7 @@ fun DraggableDesktopShortcut(
                         painter = painterResource(id = artRes),
                         contentDescription = shortcut.title,
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.size(sizeDp)
+                        modifier = Modifier.size(if (showFrames) sizeDp * 0.88f else sizeDp)
                     )
                 } else if (phoneIcon != null) {
                     Image(

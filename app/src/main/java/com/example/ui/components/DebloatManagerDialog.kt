@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -180,9 +181,9 @@ fun DebloatManagerContent(
 
                 Text(
                     text = if (uiState.canRemoveHostPackages)
-                        "Device Owner Active: 1-click disable directly hides background daemons without PC."
+                        "Device Owner active: 'Hide' removes a package for real and is reversible. 'Uninstall' opens Android's own prompt."
                     else
-                        "Tap 'Uninstall' to launch the Android removal prompt, or 'App Settings' to Disable & Clear Data.",
+                        "Tap 'Uninstall' for Android's removal prompt, or 'App Info' to Disable and clear its data.",
                     color = Slate300,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
@@ -211,6 +212,20 @@ fun DebloatManagerContent(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val appIcon = remember(pkg.packageName, isInstalled) {
+                                        if (!isInstalled) null else runCatching {
+                                            context.packageManager.getApplicationIcon(pkg.packageName)
+                                        }.getOrNull()
+                                    }
+                                    val iconBitmap = remember(appIcon) { drawableToImageBitmap(appIcon) }
+                                    if (iconBitmap != null) {
+                                        Image(
+                                            bitmap = iconBitmap,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(pkg.displayName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         Text(pkg.packageName, color = PhonixBlueLight, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
@@ -238,8 +253,19 @@ fun DebloatManagerContent(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val breakdown = remember(pkg.packageName, isInstalled) {
+                                        if (isInstalled) PackageFacts.storageBreakdown(context, pkg.packageName) else null
+                                    }
                                     Text(
-                                        text = "Disk: ${if (apkBytes > 0) PackageFacts.formatBytes(apkBytes) else "~${pkg.estimatedStorageMb} MB"} • RAM: ~${pkg.estimatedRamMb} MB",
+                                        text = buildString {
+                                            append("APK ")
+                                            append(if (apkBytes > 0) PackageFacts.formatBytes(apkBytes) else "~${pkg.estimatedStorageMb} MB")
+                                            if (breakdown != null) {
+                                                append(" • data ")
+                                                append(PackageFacts.formatBytes(breakdown.second + breakdown.third))
+                                            }
+                                            append(" • RAM ~${pkg.estimatedRamMb} MB")
+                                        },
                                         color = PhonixCyan,
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace
@@ -247,6 +273,21 @@ fun DebloatManagerContent(
 
                                     if (isInstalled) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            if (uiState.canRemoveHostPackages) {
+                                                Button(
+                                                    onClick = {
+                                                        viewModel.hideHostPackage(pkg.packageName)
+                                                        refreshKey++
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = PhonixCyan.copy(alpha = 0.30f)),
+                                                    modifier = Modifier.height(28.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(11.dp))
+                                                    Spacer(Modifier.width(3.dp))
+                                                    Text("Hide", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+
                                             // Direct App Settings button
                                             Button(
                                                 onClick = {

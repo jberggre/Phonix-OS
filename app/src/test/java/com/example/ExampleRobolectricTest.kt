@@ -447,8 +447,9 @@ class ExampleRobolectricTest {
             // The taskbar has its own list and must survive on its own.
             assertEquals(saved.taskbarPins.map { it.id }, loaded.taskbarPins.map { it.id })
 
-            // Verify default desktop configuration starts with showIconFrames = false
-            assertFalse(DesktopCustomization().showIconFrames)
+            // Tiles are the default look now. The `false` default is what made Icon Tiles: On
+            // change nothing on the default desktop, because designed artwork skipped the tile.
+            assertTrue(DesktopCustomization().showIconFrames)
         } finally {
             DesktopPrefs.clear(context)
         }
