@@ -344,6 +344,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 tools/deck-check.sh baseline
 tools/deck-check.sh crashes
 tools/deck-check.sh matrix     # restores the recorded 1080x2280 / 420 dpi
+tools/verify-shipping.sh --apk app/build/outputs/apk/debug/app-debug.apk
+                               # 1.3 acceptance: version, crash buffer, guest trees,
+                               # device owner; non-destructive, never uninstalls
 ```
 
 A clean offline build is about 7 minutes; an incremental Kotlin compile about 3. The test task
