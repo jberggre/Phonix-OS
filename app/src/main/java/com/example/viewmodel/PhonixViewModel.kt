@@ -2727,7 +2727,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         val packageInfo = runCatching {
             getApplication<Application>().packageManager.getPackageInfo(getApplication<Application>().packageName, 0)
         }.getOrNull()
-        val currentVersionName = packageInfo?.versionName ?: "1.3"
+        val currentVersionName = packageInfo?.versionName ?: "1.4"
         val currentVersionCode = packageInfo?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
             else @Suppress("DEPRECATION") it.versionCode

@@ -147,10 +147,6 @@ fun DesktopContextMenu(
                     viewModel.toggleLockIconsToGrid(!current)
                     viewModel.closeContextMenu()
                 },
-                onToggleIconFrames = {
-                    viewModel.toggleIconFrames()
-                    viewModel.closeContextMenu()
-                },
                 onOpenAndroidDeveloperOptions = {
                     viewModel.closeContextMenu()
                     runCatching {
@@ -561,7 +557,6 @@ private fun WallpaperContextMenuView(
     onResetOobe: () -> Unit,
     onPersonalize: () -> Unit,
     onToggleGrid: () -> Unit,
-    onToggleIconFrames: () -> Unit,
     onOpenAndroidDeveloperOptions: () -> Unit,
     onCopyDeviceReport: () -> Unit,
     onToggleDesktopGrid: () -> Unit,
@@ -616,12 +611,6 @@ private fun WallpaperContextMenuView(
                 onClick = onToggleGrid
             )
             ContextMenuItem(
-                icon = Icons.Default.GridView,
-                title = if (uiState.customization.showIconFrames) "Icon Tiles: On (click to flatten)" else "Icon Tiles: Off (click to restore)",
-                tint = PhonixCyan,
-                onClick = onToggleIconFrames
-            )
-            ContextMenuItem(
                 icon = Icons.Default.Palette,
                 title = "Personalize Desktop...",
                 tint = PhonixAmber,
@@ -672,12 +661,6 @@ private fun WallpaperContextMenuView(
                 title = "Copy Device Report to Clipboard",
                 tint = PhonixBlueLight,
                 onClick = onCopyDeviceReport
-            )
-            ContextMenuItem(
-                icon = Icons.Default.GridView,
-                title = if (uiState.customization.showDesktopGrid) "Hide Alignment Grid" else "Show Alignment Grid",
-                tint = PhonixCyan,
-                onClick = onToggleDesktopGrid
             )
             ContextMenuItem(
                 icon = Icons.Default.RestartAlt,

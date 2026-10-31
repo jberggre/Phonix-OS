@@ -51,7 +51,7 @@ object DesktopPrefs {
                 put("showSystemMonitorWidget", customization.showSystemMonitorWidget)
                 put("showDesktopGrid", customization.showDesktopGrid)
                 put("showDesktopLabels", customization.showDesktopLabels)
-                put("showIconFramesV2", customization.showIconFrames)
+                put("showIconFramesV3", customization.showIconFrames)
                 put("showClockInTaskbar", customization.showClockInTaskbar)
                 put("showBatteryInTaskbar", customization.showBatteryInTaskbar)
                 put("lockIconsToGrid", customization.lockIconsToGrid)

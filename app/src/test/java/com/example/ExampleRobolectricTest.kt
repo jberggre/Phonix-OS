@@ -447,9 +447,9 @@ class ExampleRobolectricTest {
             // The taskbar has its own list and must survive on its own.
             assertEquals(saved.taskbarPins.map { it.id }, loaded.taskbarPins.map { it.id })
 
-            // Tiles are the default look now. The `false` default is what made Icon Tiles: On
-            // change nothing on the default desktop, because designed artwork skipped the tile.
-            assertTrue(DesktopCustomization().showIconFrames)
+            // Flat is the default: the artwork reads on its own and the plate is opt-in from
+            // Personalize. An explicit `false` must still round-trip, which the asserts above cover.
+            assertFalse(DesktopCustomization().showIconFrames)
         } finally {
             DesktopPrefs.clear(context)
         }

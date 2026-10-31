@@ -1875,6 +1875,37 @@ fun PersonalizeWindowContent(
             }
         }
 
+        // Shortcut style. This used to be a right-click item, but that menu had grown past the
+        // screen, so the tile is an opt-in setting here and the menu keeps only desktop actions.
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Slate900)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.GridView, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Shortcut Style", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Icon Tiles", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Rounded plate behind each icon. Off (default) is flat artwork only.", color = Slate400, fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = customization.showIconFrames,
+                        onCheckedChange = { viewModel.toggleIconFrames() },
+                        colors = SwitchDefaults.colors(checkedTrackColor = PhonixCyan)
+                    )
+                }
+            }
+        }
+
         // 3. Grid Snapping & App Shortcut Layout
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -2604,7 +2635,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
             val pi = context.packageManager.getPackageInfo(context.packageName, 0)
             val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
             "${pi.versionName} (build $code)"
-        }.getOrDefault("1.3 (build 4)")
+        }.getOrDefault("1.4 (build 5)")
     }
     Column(
         modifier = Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState()),
