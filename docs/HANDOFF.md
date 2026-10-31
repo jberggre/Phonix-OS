@@ -108,9 +108,11 @@ view modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
   1.5, and [VERIFICATION.md](VERIFICATION.md) records them. This supersedes the
   `ce94f4b`/1.2 description kept in the rest of this page. It builds and tests green:
   `assembleDebug` plus `testDebugUnitTest` pass, re-run from scratch with `--rerun-tasks` on
-  2026-10-31, **47 tests, 0 failures**. Only 1.2 was ever installed in place over the
-  device-owner build on the S10 under the shared debug keystore; **1.3, 1.4 and 1.5 have not
-  been installed**.
+  2026-10-31, **47 tests, 0 failures**. `tools/verify-shipping.sh` then installed 1.5 over the
+  device-owner build on the SM-G973U (`adb install -r`, Success, `versionCode 6`): version, crash
+  buffer, bundled Alpine rescue tree and device owner all passed. The active guest is the Debian
+  tree from the earlier round; the distro-install, debloat-hide and Start-menu checks still need
+  a finger.
 - Changes add fold posture and connected-display reporting, adaptive shortcut/window geometry,
   saved opt-in device behavior, an OOBE compatibility/setup step, and focused classifier/geometry/
   preference/version tests. `git diff --check` passes; this is only a whitespace check.
