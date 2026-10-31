@@ -377,7 +377,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         // The persisted guest is the truth: currentDistro defaulted to the first catalog entry
         // (Alpine), so the terminal prompt and boot splash named Alpine after switching to Debian.
         viewModelScope.launch(Dispatchers.IO) {
-            val active = runCatching { LinuxRuntime.container(application).activeDistro() }.getOrNull()
+            val active = runCatching { LinuxRuntime.container(getApplication<Application>()).activeDistro() }.getOrNull()
             if (active != null) _uiState.update { it.copy(currentDistro = active) }
         }
 
@@ -685,6 +685,12 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun initTerminalWelcome() {
+        // The banner has to name the guest that is actually installed; it used to say Alpine
+        // unconditionally, so a Debian install opened to "Alpine Linux terminal" and an `apk add`
+        // hint that the guest cannot run.
+        val guest = runCatching { LinuxRuntime.container(getApplication<Application>()).activeDistro() }
+            .getOrDefault(DistroCatalog.alpine)
+        val sampleInstall = if (guest.isBundled) "apk add nginx" else "${guest.packageManager} install nginx"
         _uiState.update { state ->
             state.copy(
                 terminalLines = listOf(
@@ -693,7 +699,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         TerminalLine.LineType.ACCENT
                     ),
                     TerminalLine(
-                        " Phonix OS Desktop — Alpine Linux terminal (aarch64)",
+                        " Phonix OS Desktop — ${guest.name} terminal (aarch64)",
                         TerminalLine.LineType.ACCENT
                     ),
                     TerminalLine(
@@ -701,7 +707,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         TerminalLine.LineType.SYSTEM
                     ),
                     TerminalLine(
-                        " Once booted, commands run for real: apk add nginx, ps, df -h",
+                        " Once booted, commands run for real: $sampleInstall, ps, df -h",
                         TerminalLine.LineType.OUTPUT
                     ),
                     TerminalLine(
@@ -3249,8 +3255,13 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     // Shell agent: one command per turn, approved by the user
     // -------------------------------------------------------------
 
-    private val agentSystemPrompt = """
-        You are Phonix Shell, a command-line agent working inside an Alpine Linux guest on this phone.
+    private val agentSystemPrompt: String
+        get() {
+        val guest = runCatching { LinuxRuntime.container(getApplication<Application>()).activeDistro() }
+            .getOrDefault(DistroCatalog.alpine)
+        return """
+        You are Phonix Shell, a command-line agent working inside a ${guest.name} guest on this phone.
+        Packages come from ${guest.packageManager}; do not suggest another distro's package manager.
         You guide a user through a task by issuing one shell command at a time and reading its output.
         Reply with exactly ONE line, in one of these two forms:
         RUN <command>
@@ -3259,6 +3270,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         Use relative paths in the guest home. Never run rm -rf /, mkfs, dd to a device, or anything that
         reboots or wipes the device. Check before you create: use ls and cat first.
     """.trimIndent()
+        }
 
     fun setAgentTask(task: String) {
         _uiState.update { it.copy(agentTask = task) }

@@ -1131,9 +1131,12 @@ fun DesktopQuickDistroWidget(
     viewModel: PhonixViewModel
 ) {
     val context = LocalContext.current
-    val version = remember(uiState.containerStatus) {
+    // The guest that is actually installed names itself; hardcoding "Alpine Linux" here is how
+    // this card read "Alpine Linux 12.15" while a Debian tree was the active rootfs.
+    val distro = uiState.currentDistro
+    val version = remember(uiState.containerStatus, distro.id) {
         runCatching { com.example.engine.LinuxRuntime.container(context).version() }
-            .getOrDefault(com.example.model.DistroCatalog.alpine.version)
+            .getOrDefault(distro.version)
     }
     val running = uiState.containerStatus == com.example.viewmodel.ContainerStatus.RUNNING
 
@@ -1173,7 +1176,11 @@ fun DesktopQuickDistroWidget(
             }
 
             Spacer(modifier = Modifier.height(6.dp))
-            Text(text = "Alpine Linux " + version, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = if (version.isBlank() || distro.name.contains(version)) distro.name
+                       else distro.name + " · " + version,
+                color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black
+            )
             Text(
                 text = "proot userspace, no root, no partition",
                 color = Slate400,

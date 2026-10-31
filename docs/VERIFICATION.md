@@ -943,3 +943,24 @@ closed:
 Verification: `assembleDebug` + `testDebugUnitTest` **green, 45 tests**, APK 29,950,886 bytes. The
 frame default is asserted in `ExampleRobolectricTest`; the visual result is **not** screenshotted on
 the device yet.
+
+
+### Device pass on the HDMI monitor — 2026-10-31
+
+Installed over the previous build (`adb install -r`, signature matched, versionCode still 4) and
+captured display 2 at 1920x1080 with `screencap`. Measured on screen:
+
+- **Icon tiles render.** File Explorer, Terminal, Phonix Browser and Settings all draw the rounded
+  tile with its translucent border, with the artwork inset inside it. This is the first build where
+  the default desktop shows frames at all; the border is deliberately subtle, so on the dark
+  wallpaper the tile reads as a faint outline rather than a strong card. **Judgement call, not a
+  defect**: the fill is 0.07 alpha and the border 0.30.
+- **The Linux card named the wrong guest.** It read `Alpine Linux 12.15` while the active rootfs was
+  Debian (`rootfs trees: debian tmp`). `DesktopQuickDistroWidget` hardcoded the name and fell back to
+  the Alpine catalog version; it now reads `uiState.currentDistro` and appends the version measured
+  from the guest, rendering `Debian 12 (Bookworm) · 12.15`. [measured, second capture]
+- The same hardcoding was in the terminal welcome banner and the shell agent's system prompt
+  (`apk add` offered to a Debian guest); both now use the active distro's name and package manager.
+
+Remaining, honestly: the terminal banner and agent prompt fixes are compiled but **not yet exercised**
+against a running guest, and the tiles have not been checked on a light wallpaper.
