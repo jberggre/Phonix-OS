@@ -1,5 +1,9 @@
 package com.example
 
+import com.example.ui.components.TASKBAR_HEIGHT_DP
+
+import com.example.model.TaskbarPosition
+
 import android.os.Build
 import android.os.Bundle
 import android.hardware.display.DisplayManager
@@ -196,7 +200,14 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                                     ?: if (uiState.network.online) "ONLINE" else "OFFLINE",
                                 isOnline = uiState.network.online,
                                 onOpenNetwork = { viewModel.openNetworkSetup() },
-                                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter)
+                                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter),
+                                // A taskbar along the top edge would draw over the pill, so the
+                                // pill hangs off the bar's bottom edge instead.
+                                topInset = if (uiState.customization.taskbarPosition == TaskbarPosition.TOP) {
+                                    TASKBAR_HEIGHT_DP.dp
+                                } else {
+                                    0.dp
+                                }
                             )
 
                             // Toast Notification Host

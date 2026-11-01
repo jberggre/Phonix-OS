@@ -1255,3 +1255,28 @@ floating card, a monitor gets the height it actually has.
 - [measured] Crash buffer empty.
 
 Not run: the phone-panel (portrait, non-DeX) layout at the new cap, and a 320 dp-wide window.
+
+## 18. The top notch clears a top-docked taskbar (2026-11-01, S10 + HDMI monitor)
+
+`AutoHidingTopBar` (the centred "Phonix Mini PC / AC / WIFI ONLINE" pill, and the full telemetry
+panel it expands into) is drawn over the desktop as an overlay at `Alignment.TopCenter`, and the
+taskbar is drawn after it. While the bar could only sit at the bottom this never mattered; once it
+docks to the top edge it covered the pill outright.
+
+`AutoHidingTopBar` now takes a `topInset: Dp`, and `MainActivity` passes the taskbar height when
+`customization.taskbarPosition == TaskbarPosition.TOP` and `0.dp` otherwise. The inset is applied
+after `statusBarsPadding()` in both states, so the collapsed pill hangs off the bar's bottom edge and
+the expanded panel opens underneath it.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, 58 tests, 0 failures.
+- [measured] With the bar docked to the top on the 1920x1080 desktop, the pill sits directly under
+  the bar and is fully readable — emblem, "Phonix Mini PC", AC badge, WIFI ONLINE chip and the
+  chevron all visible (`artifacts/session/topbar-docked-top.png`), where it was previously hidden
+  behind the bar.
+- [measured] Tapping the pill with the bar on top expands the full bar below the taskbar instead of
+  under it (`artifacts/session/topbar-expanded-top.png`).
+- [measured] Crash buffer empty.
+
+Not run: the compact phone-panel form with a top bar (the pill shortens to "Phonix" below 600 dp).

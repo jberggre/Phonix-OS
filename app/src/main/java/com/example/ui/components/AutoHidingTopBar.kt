@@ -59,6 +59,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.PhonixAmber
@@ -90,7 +91,12 @@ fun AutoHidingTopBar(
     onTogglePower: () -> Unit,
     onRestart: () -> Unit,
     onRunDebloat: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /**
+     * Height to keep clear above the notch. The taskbar can be docked to the top, and it is
+     * drawn after this overlay, so without the inset it covers the pill completely.
+     */
+    topInset: Dp = 0.dp
 ) {
     // At high densities the full pill is nearly a third of the desktop wide and covers the
     // title bar of a full-height window. The compact form keeps the notch out of the way while
@@ -102,6 +108,7 @@ fun AutoHidingTopBar(
             modifier = modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
+                .padding(top = topInset)
                 .shadow(16.dp)
                 .pointerInput(Unit) {
                     awaitPointerEventScope {
@@ -301,7 +308,7 @@ fun AutoHidingTopBar(
         Surface(
             modifier = modifier
                 .statusBarsPadding()
-                .padding(top = 2.dp)
+                .padding(top = topInset + 2.dp)
                 .wrapContentSize()
                 .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
                 // Expand on a tap, not on pointer entry. On touch, Enter fires as soon as a

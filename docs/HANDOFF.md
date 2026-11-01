@@ -46,6 +46,10 @@ Follow-up in the same round: the Start panel's 560 dp cap now follows the screen
 (min(720 dp, 82%)), so All apps shows the Android-app list on a monitor instead of one clipped
 row — [VERIFICATION.md](VERIFICATION.md) §17.
 
+Same round: a top-docked bar covered the centred top notch, which is drawn before the bar.
+`AutoHidingTopBar` takes a `topInset` now and hangs off the bar's bottom edge, collapsed and
+expanded — [VERIFICATION.md](VERIFICATION.md) §18.
+
 ## Update-path round (2026-10-31, S10 over USB)
 
 The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`
