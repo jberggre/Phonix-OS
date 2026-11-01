@@ -5,6 +5,48 @@ Phone Screen as a real view. This page is the **work queue**. Read
 [VERIFICATION.md](VERIFICATION.md) for the evidence behind every claim, [ROADMAP.md](ROADMAP.md)
 for the research and sources, and [PROVISIONING.md](PROVISIONING.md) before touching the unit.
 
+## Update-path round (2026-10-31, S10 over USB)
+
+The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`
+requested the GitHub API of a **private** repository, so a unit could only ever see a 404, and it
+compared `tag_name` strings, so "1.9" sorted above "1.10". `downloadAndInstallUpdate()` then opened
+a browser. Nothing verified a download.
+
+What changed:
+
+1. **`model/UpdateFeed.kt` (new).** A feed is one JSON document — `versionCode`, `versionName`, an
+   https `apkUrl`, a 64-hex `sha256`, plus notes and publish date. Parsing is pure JVM (Moshi's
+   streaming reader) and **returns null** for a missing digest, a plain-http URL or a non-positive
+   build number: an unusable feed must never read as "up to date".
+2. **`engine/UpdateInstaller.kt` (new).** Streams the APK into the app cache as `.part`, checks the
+   byte count, requires the published SHA-256 to match, then hands the file to a
+   `PackageInstaller` session. Before that it compares the archive's signing certificate with the
+   installed one, so a mismatched key produces a message instead of a silent installer failure.
+   Nothing installs silently: the session commits with Android's own confirmation dialog.
+3. **`PhonixViewModel`** reads the feed from `BuildConfig.UPDATE_FEED_URL` (a build input:
+   `-PphonixUpdateFeed=…` or `PHONIX_UPDATE_FEED`), compares integer `versionCode`, reports byte
+   progress, and keeps every failure explicit. The old GitHub helper functions are gone.
+4. **About** names the feed host (or "not configured in this build"), renders DOWNLOADING and
+   READY_TO_INSTALL states, and says what the install button will do. Its Linux card now names the
+   **active** distro instead of a hardcoded "Alpine".
+5. `REQUEST_INSTALL_PACKAGES` is declared; without it the install session cannot reach the system
+   installer.
+
+Verification: `assembleDebug` + `testDebugUnitTest` **BUILD SUCCESSFUL, 54 tests, 0 failures**
+(`UpdateFeedTest` is new: complete-feed parse, string versionCode, rejection of a missing or
+non-64-hex digest, rejection of plain-http and empty APK URLs, rejection of zero build numbers,
+1.10 > 1.9 by build number, digest validation).
+
+[measured] on the bench S10 over USB (`R38M200YNRA`): `tools/verify-shipping.sh --apk …` reported
+`adb install -r` **Success**, `1.5 (versionCode 6)`, crash buffer clean, device owner intact,
+`rootfs trees: alpine debian tmp`, bundled Alpine rescue present. Launch afterwards: pid 3387, no
+`FATAL`/`AndroidRuntime` error. **Not run:** an actual feed download and install, because no feed is
+hosted yet — that path is compiled and unit-tested, not measured.
+
+Still owed on the update path: host a feed, then run one check, one download and one install on a
+unit; and decide whether the feed should be GitHub Releases (needs the repository to be public) or
+the owner's own manifest host. See [VERIFICATION.md](VERIFICATION.md) §13.
+
 ## Shipping round (2026-10-31, cloud worktree — no phone attached)
 
 This round started from a failed session. Its commit (`9df837b`, “support multi-distro

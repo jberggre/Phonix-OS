@@ -1056,3 +1056,51 @@ A one-time backfill of desktop shortcuts was written on that wrong premise and t
   only sees the phone display, and taps on the bar's start button did not open the menu, so the
   layout is `[static]` verified, not photographed.
 
+## 13. Verifiable update path — 2026-10-31
+
+### The defect this replaces
+
+- `checkAppUpdates()` requested `api.github.com/repos/jberggre/Phonix-OS/releases/latest`. That
+  repository is private, so the only observable result was a 404 (measured earlier for both the
+  wrong and the real repository). A build that never receives a document must not render "up to
+  date"; with no feed configured it now says so.
+- Ordering ran on `versionName` text, so a future "1.10" would sort below "1.9". [static]
+- `downloadAndInstallUpdate()` opened the release page in a browser: no digest, no signer check, no
+  installer session, so the "update" was whatever the page served.
+
+### What the tree does now [static]
+
+| Gate | Code | Failure behaviour |
+|---|---|---|
+| Feed shape | `model/UpdateFeed.parse` | null on a missing digest, non-https `apkUrl`, zero `versionCode`, non-JSON |
+| Ordering | `UpdateFeed.isNewer(manifest, currentVersionCode)` | offers only a strictly newer `versionCode` |
+| Transfer | `engine/UpdateInstaller.download` | writes `.part`; a truncated download is rejected |
+| Integrity | SHA-256 of the file vs the feed's published digest | aborts, deletes the partial file, names both prefixes |
+| Signer | archive certificate vs installed certificate | refuses before the installer opens |
+| Consent | `PackageInstaller` session, default user action | Android's own dialog; no silent install |
+
+`BuildConfig.UPDATE_FEED_URL` comes from `-PphonixUpdateFeed=…` or `PHONIX_UPDATE_FEED` and defaults
+to empty, which About reports as "not configured in this build". It never prints a claim that the
+unit is current unless the feed actually said so.
+
+### Checks
+
+- `:app:assembleDebug` — **BUILD SUCCESSFUL** (JDK 21 / Gradle 9.3.1 / SDK 36).
+- `:app:testDebugUnitTest` — **54 tests, 0 failures**, including the new `UpdateFeedTest` (7 tests).
+- [measured] `tools/verify-shipping.sh --apk app/build/outputs/apk/debug/app-debug.apk --serial
+  R38M200YNRA`: `Success`, `1.5 (versionCode 6)`, crash buffer 0 entries, `DeviceOwner` intact,
+  `rootfs trees: alpine debian tmp`, Alpine rescue present. Exit 0.
+- [measured] post-install launch: `pidof` 3387, no `FATAL`/`AndroidRuntime` error for the package.
+- **Not run:** a live feed check, download and install. No feed is hosted, so those [static] paths
+  have not been measured on the device. The signer comparison and the installer hand-off are the
+  parts worth exercising first.
+
+### Known limits
+
+- The feed is JSON over HTTPS with a published digest. It is **not** a signed manifest: whoever can
+  serve the feed can offer any APK — but that APK still has to carry this app's signing certificate,
+  which `signersMatch` checks and Android enforces. Signing the feed itself would remove the
+  trust-the-host property and is the next step if the owner wants it.
+- A download needs a connection and about 30 MB free while the old build is still installed. Nothing
+  prunes the cache except a successful install.
+

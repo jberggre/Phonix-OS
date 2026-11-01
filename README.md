@@ -1,11 +1,13 @@
 # Phonix OS
 
-> **Shipping candidate, 2026-10-31:** `1.3 (versionCode 4)`. It builds, its 46 unit tests pass, and
-> it is **installed on the bench S10 over the device-owner build**. On that unit it renders on a
-> real 1920x1080 HDMI monitor through DeX and runs a genuine Debian 12 guest under proot. Still
-> unexercised on hardware: the new on-demand distro downloader, the debloat walkthrough and the
-> Start-menu modes. Read [HANDOFF.md](docs/HANDOFF.md) and
-> [VERIFICATION.md §12](docs/VERIFICATION.md).
+> **Shipping candidate, 2026-10-31:** `1.5 (versionCode 6)`. It builds, its **54** unit tests pass,
+> and it is **installed on the bench S10 over the device-owner build** (`adb install -r` → Success;
+> device owner, the bundled Alpine rescue tree and an empty crash buffer all verified by
+> `tools/verify-shipping.sh`). On that unit it renders on a real 1920x1080 HDMI monitor through DeX
+> and runs a genuine Debian 12 guest under proot. Still unexercised on hardware: an install driven
+> by the checksum-gated distro downloader, the debloat walkthrough and the Start-menu view modes —
+> those need taps. Read [HANDOFF.md](docs/HANDOFF.md) and
+> [VERIFICATION.md §13](docs/VERIFICATION.md).
 
 Phonix is an Android app that turns a phone into a desktop mini-PC. It is a Kotlin/Jetpack
 Compose shell with its own window manager, a proot Alpine guest, and Samsung DeX / connected-display
@@ -15,12 +17,13 @@ support. The target is recycled or screenless phones in a cyberdeck-style enclos
 The handoff is the work queue for a new session; verification is the evidence for every claim.
 This README is only the entry point.
 
-**Status (2026-10-31, source only):** the 1.3 candidate adds on-demand distribution installs that
-are verified rather than simulated, a debloat walkthrough, mode switch in the Start menu, and a
-three-tier offline library that reports its real document count. The previous session's first
-attempt at multi-distro fabricated a rootfs — it copied Alpine's `/bin` and wrote a fake
-`os-release` claiming Debian — and that code is gone; see
+**Status (2026-10-31):** this tree ships on-demand distribution installs that are verified rather
+than simulated, a debloat walkthrough, Start-menu view modes, and a three-tier offline library
+that reports its real document count. The previous session's first attempt at multi-distro
+fabricated a rootfs — it copied Alpine's `/bin` and wrote a fake `os-release` claiming Debian — and
+that code is gone; see
 [VERIFICATION §12](docs/VERIFICATION.md#12-multi-distro-made-honest--2026-10-31-source-verification).
+The update path is now a verifiable feed instead of a browser hand-off; §13 records it.
 
 **Measured 1.1 record (2026-10-29, 16:58:38 build):** the P0 honesty fixes remain, and two
 features that were only placeholders now do real work:
@@ -31,12 +34,10 @@ features that were only placeholders now do real work:
 - **Phone Screen** — restored as a real, read-only `MediaProjection` view. It shows the actual
   default display (verified first frame 540×1140) and does not pretend to inject touches.
 
-The **installed** APK on the bench unit still reports `1.1 (versionCode 2)`; identify it by its
-**2026-10-29 16:58:38** install time or SHA-256
-`a7516b6cef12cbbd80378d510ff031c2a04c9a3b8248c0f5e3bddba5c74a7674`. The 1.3 candidate in this
-tree is `versionCode 4` and has never been on a device. See
-[VERIFICATION.md](docs/VERIFICATION.md) §11 for the measured 1.1 record, §12 for this round, and
-[HANDOFF.md](docs/HANDOFF.md) for what comes next.
+The **installed** APK on the bench unit is `1.5 (versionCode 6)`, installed 2026-10-31 over the
+device-owner build from this tree (APK 30,013,418 bytes). See
+[VERIFICATION.md](docs/VERIFICATION.md) §11 for the measured 1.1 record, §12 for the distro
+round, §13 for the update path, and [HANDOFF.md](docs/HANDOFF.md) for what comes next.
 
 ## Start here
 
@@ -54,9 +55,8 @@ tree is `versionCode 4` and has never been on a device. See
 ## Bench unit
 
 - **SM-G973U Galaxy S10**, Android 12 / One UI 4.1 (API 31), serial `R38M200YNRA`.
-- **Phonix 1.1 (`versionCode 2`)**, device owner
-  `com.example.receiver.PhonixDeviceAdminReceiver`. The current APK was installed **2026-10-29
-  16:58:38**; the version string alone does not distinguish it from earlier 1.1 builds.
+- **Phonix 1.5 (`versionCode 6`)**, device owner
+  `com.example.receiver.PhonixDeviceAdminReceiver`, installed 2026-10-31 over the previous build.
 - **Local model installed on the unit:** Qwen2.5 1.5B Instruct Q4_K_M, 986,048,768 bytes, SHA-256
   `1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370`, under the guest’s
   `/root/models`. `llama-server` is installed from Alpine community. The server is stopped at the
@@ -65,8 +65,8 @@ tree is `versionCode 4` and has never been on a device. See
   `wm density reset` jumps to **560 dpi**, not 420; use the harness restore path.
 - adb is in `.tools/platform-tools/adb.exe`; USB tethering enumerates without pairing. Wireless
   debugging does not survive a reboot.
-- **No external monitor is attached.** Real DeX, dock/undock and caption-bar behaviour still need
-  hardware; `wm size`/`wm density` only simulate the metrics.
+- **A real 1920x1080 HDMI monitor is attached** (DeX display id 2), so desktop rendering on DeX is
+  measured. Dock/undock cycles, the caption bar and a 24 h plugged-in soak are still owed.
 - The package is **device owner**. `adb uninstall` and `am force-stop` are not recovery options;
   see PROVISIONING before removing or replacing it.
 
@@ -120,16 +120,16 @@ The harness restores the exact recorded metrics, including the S10's 420 dpi bas
 ## Current boundary
 
 Window geometry (B4), layout persistence (B6), the landscape grid (B5) and the high-density host
-chrome are implemented and were measured on the S10 before this round. What is **not** ready:
-
-- **Nothing from 1.3 has been on hardware.** The distro installer, the debloat walkthrough and the
-  Start-menu modes are compiled and unit-tested only.
-- **No update channel.** The updater now reports `ERROR` with “no public update feed is configured”
-instead of claiming the unit is current, but there is still no signed manifest to check against, so
-  a deployed unit cannot be updated remotely.
-- **A downloaded distro has never been booted.** The archive is verified and extracted, but only
-  Alpine has ever run under proot on this unit.
-- **No external monitor**, so real DeX capture, positioning and dock/undock remain unverified.
+chrome are implemented and were measured on the S10 before this round. What is **not** ready:- **1.5 is on hardware**, installed over the device-owner build on 2026-10-31 with the acceptance
+  script passing (version, crash buffer, guest trees, device owner).
+- **The update channel is a feed, not a store.** A build points at a feed with
+  `-PphonixUpdateFeed=https://…/update.json`; About offers only a release whose `versionCode` is
+  strictly newer, whose APK matches the published SHA-256, and whose signing certificate matches
+  this install. With no feed configured the build says it has checked nothing. Phonix does not yet
+  publish such a feed, so a deployed unit cannot be updated until one is hosted.
+- **A downloaded distro has not been booted by this round's downloader.** The Debian tree on the
+  unit is real and boots, but it predates the SHA-256 gate; a run of that path is owed.
+- **Real DeX is measured** on the HDMI monitor, but dock/undock cycles and the caption bar are not.
 
 The 1.5B model is usable but small: its first water answer was fluent and grounded yet conflated
 boiling time with SODIS, so safety-critical answers still need the curated notes.
