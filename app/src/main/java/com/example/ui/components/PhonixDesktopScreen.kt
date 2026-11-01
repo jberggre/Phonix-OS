@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.model.ShortcutShape
 import com.example.model.ShortcutBgStyle
 import com.example.model.DesktopContextMenuData
+import com.example.model.DesktopIconGrid
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -244,11 +245,11 @@ fun PhonixDesktopScreen(
         LaunchedEffect(bounds) { viewModel.normalizeWindows(bounds) }
         val unfoldedLayout = uiState.foldPosture == com.example.model.FoldPosture.FLAT || screenWidth >= 600.dp
         val availableGridWidth = if (unfoldedLayout && screenWidth >= 680.dp) screenWidth - 240.dp else screenWidth - 24.dp
-        val iconColumns = (availableGridWidth / 90.dp).toInt().coerceAtLeast(1)
+        val iconColumns = DesktopIconGrid.columns(availableGridWidth.value)
         // Desktop icons are their own list. Pinning an app to the taskbar adds a separate entry
         // there; it never hides the icon or claims its slot.
         val desktopShortcuts = customization.shortcuts
-        val rowStride = 88.dp
+        val rowStride = DesktopIconGrid.ROW_PITCH_DP.dp
         val topPadding = if (barPosition == TaskbarPosition.TOP) 54.dp else 10.dp
         val bottomPadding = if (barPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp
         // Icons keep clear of a vertical bar too, instead of hiding under it.
@@ -257,9 +258,25 @@ fun PhonixDesktopScreen(
         // The default position is the BOTTOM-left quadrant, which is what the align action and
         // the label both promise. This was pinned to 0.dp, so "Align to Bottom-Left" dropped the
         // whole block in the top-left corner.
-        val gridRows = ((desktopShortcuts.size + iconColumns - 1) / iconColumns).coerceAtLeast(1)
         val iconAreaHeight = (screenHeight - topPadding - bottomPadding).coerceAtLeast(rowStride)
-        val gridTop = (iconAreaHeight - (rowStride * gridRows) - 6.dp).coerceAtLeast(0.dp)
+
+        // The view model snaps into this grid, not into a second copy of the numbers. It used to
+        // keep its own 88 x 94 dp pitch measured from the top corner, so "Lock Icons to Grid"
+        // dropped an icon in the middle of the screen and left every other icon untouched.
+        LaunchedEffect(iconColumns, iconAreaHeight) {
+            viewModel.setIconGrid(iconColumns, iconAreaHeight.value)
+        }
+
+        // The icon area grows or shrinks when the bar docks to another edge. Freeform positions are
+        // offsets inside it, so they travel with it instead of being stranded under the bar.
+        var lastIconAreaHeight by remember { mutableStateOf<Float?>(null) }
+        LaunchedEffect(iconAreaHeight) {
+            val previous = lastIconAreaHeight
+            lastIconAreaHeight = iconAreaHeight.value
+            if (previous != null && previous != iconAreaHeight.value) {
+                viewModel.reanchorShortcuts(iconAreaHeight.value - previous, iconAreaHeight.value)
+            }
+        }
 
         Box(
             modifier = Modifier.fillMaxSize()
@@ -317,10 +334,13 @@ fun PhonixDesktopScreen(
                     val maxIconY = (iconAreaHeight - 96.dp).coerceAtLeast(0.dp).value
                     desktopShortcuts.forEachIndexed { index, shortcut ->
                         val effectiveShortcut = if (!shortcut.hasCustomPosition) {
-                            shortcut.copy(
-                                posX = (index % iconColumns) * 90f,
-                                posY = gridTop.value + ((index / iconColumns) * rowStride.value)
+                            val (autoX, autoY) = DesktopIconGrid.autoPosition(
+                                index = index,
+                                count = desktopShortcuts.size,
+                                columns = iconColumns,
+                                areaHeightDp = iconAreaHeight.value
                             )
+                            shortcut.copy(posX = autoX, posY = autoY)
                         } else {
                             shortcut.copy(
                                 posX = shortcut.posX.coerceIn(0f, maxIconX),

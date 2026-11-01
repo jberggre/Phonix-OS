@@ -211,11 +211,19 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                             )
 
                             // Toast Notification Host
+                            // The toast clears a bottom bar, and only a bottom bar: the 56 dp
+                            // reserve was applied whatever edge the bar was docked to.
                             SnackbarHost(
                                 hostState = snackbarHostState,
                                 modifier = Modifier
                                     .align(androidx.compose.ui.Alignment.BottomCenter)
-                                    .padding(bottom = 56.dp)
+                                    .padding(
+                                        bottom = if (uiState.customization.taskbarPosition == TaskbarPosition.BOTTOM) {
+                                            56.dp
+                                        } else {
+                                            12.dp
+                                        }
+                                    )
                             )
                         }
                     }

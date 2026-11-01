@@ -1359,3 +1359,41 @@ posY:918.7`; measured with the bar docked bottom the Browser tile and its captio
 (`artifacts/session/icons-bottom.png`). Custom positions are now clamped into the current icon area,
 so the icon is lifted clear of a bottom bar and returns to its stored spot when the bar leaves that
 edge. Fixed render-side only: the stored value is unchanged, so nothing drifts across dock changes.
+
+## §21 — "Lock Icons to Grid" snapped a second, imaginary grid (2026-11-01)
+
+`toggleLockIconsToGrid` kept its own grid: an 88 x 94 dp pitch measured from a 16,16 origin in the
+top-left corner, columns clamped at 5 and rows at 7, and it only visited shortcuts that already had
+a custom position. The renderer meanwhile laid un-dragged icons out bottom-left on a 90 x 88 dp
+pitch. So locking the grid moved the one dragged icon (the Phonix Browser) to row 7 — the middle of
+the screen — and left every other icon exactly where it was.
+
+- [measured] Before: `"sc_browser":{"gridCol":2,"gridRow":7,"posX":192,"posY":674}` in
+  `phonix_desktop_prefs.xml`, with File Explorer, Terminal and Settings still on the bottom row.
+- Fix: `model/DesktopIconGrid` is the one grid (90 x 88 dp pitch, rows counted from the **bottom**
+  row). The desktop reports its live column count and area height (`setIconGrid`), and locking snaps
+  *every* icon to its nearest free slot, marking each as explicitly positioned.
+- [measured] After the fix, on the DeX display: Disable Grid Snap → Align Shortcuts to Bottom-Left →
+  Enable Grid Snap leaves all four icons (File Explorer, Terminal, Phonix Browser, Settings) in one
+  row at the bottom-left, stored as `(0,0) (1,0) (2,0) (3,0)` with `posX` 0/90/180/270 and `posY` 880
+  (`artifacts/session/lock2.png`). Nothing jumps to the middle of the screen.
+- [measured] `assembleDebug testDebugUnitTest` green — 61 tests, 0 failures; the new test pins both
+  halves (every icon snapped to its auto slot; an icon dropped at 300,500 dp lands on column 3, its
+  nearest slot, not mid-screen).
+- Not measured on device: dropping an icon onto an occupied slot while locked (unit tests cover the
+  displacement).
+
+### Follow-ups from §20
+
+- **Maximized window, bar docked top** — [measured] the window starts below the 50 dp bar and its
+  accent border sits on the last row (1078), so a top bar reserves height only at the top
+  (`artifacts/session/maxtop.jpg`). **Left is still unmeasured**; it shares the same branch.
+- **Dragged icons follow the work area** — `PhonixViewModel.reanchorShortcuts` shifts every freeform
+  icon by the delta of the icon area's height, so an icon on the bottom row stays on the bottom row
+  when the bar changes edge. [static]: the render-side clamp from §20 remains as the outer guard.
+  Not re-measured across a dock change.
+- **Re-audit of every `taskbarPosition` reader** — one more unconditional reserve turned up: the
+  toast host in `MainActivity` was pinned 56 dp above the bottom edge whatever edge the bar was on;
+  it now clears the bar only when the bar is docked bottom (12 dp otherwise). The windows layer, the
+  icon paddings, the Start menu anchor, the top notch and the dock menu were already conditional.
+

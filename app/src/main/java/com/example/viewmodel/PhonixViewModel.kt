@@ -30,6 +30,7 @@ import com.example.model.MotherboardCoolingState
 import com.example.model.DebloatCatalog
 import com.example.model.DebloatPackage
 import com.example.model.DesktopCustomization
+import com.example.model.DesktopIconGrid
 import com.example.model.DesktopShortcut
 import com.example.model.DesktopWallpaper
 import com.example.model.DesktopAccentColor
@@ -1844,8 +1845,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val dragged = currentShortcuts.find { it.id == shortcutId } ?: return@update state
 
             if (lockGrid) {
-                val targetCol = Math.round((currentX - 16f) / 88f).coerceIn(0, 7).toInt()
-                val targetRow = Math.round((currentY - 16f) / 94f).coerceIn(0, 10).toInt()
+                val targetCol = DesktopIconGrid.nearestColumn(currentX, iconColumns)
+                val targetRow = DesktopIconGrid.nearestRow(currentY, iconAreaHeightDp)
+                val (targetX, targetY) =
+                    DesktopIconGrid.snap(targetCol, targetRow, iconAreaHeightDp)
 
                 // Check if another shortcut already occupies targetCol, targetRow
                 val occupant = currentShortcuts.find { it.id != shortcutId && it.gridCol == targetCol && it.gridRow == targetRow }
@@ -1861,7 +1864,13 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             .filter { it.id != shortcutId && it.id != occupant.id }
                             .map { Pair(it.gridCol, it.gridRow) }
                             .toSet() + Pair(targetCol, targetRow)
-                        findNearestFreeGridSlot(targetCol, targetRow, occupied)
+                        findNearestFreeGridSlot(
+                            targetCol,
+                            targetRow,
+                            occupied,
+                            maxCol = iconColumns - 1,
+                            maxRow = DesktopIconGrid.maxRow(iconAreaHeightDp)
+                        )
                     }
 
                     currentShortcuts.map { sc ->
@@ -1869,17 +1878,24 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             shortcutId -> sc.copy(
                                 gridCol = targetCol,
                                 gridRow = targetRow,
-                                posX = 16f + (targetCol * 88f),
-                                posY = 16f + (targetRow * 94f),
+                                posX = targetX,
+                                posY = targetY,
                                 hasCustomPosition = true
                             )
-                            occupant.id -> sc.copy(
-                                gridCol = occupantNewCol,
-                                gridRow = occupantNewRow,
-                                posX = 16f + (occupantNewCol * 88f),
-                                posY = 16f + (occupantNewRow * 94f),
-                                hasCustomPosition = true
-                            )
+                            occupant.id -> {
+                                val (occupantX, occupantY) = DesktopIconGrid.snap(
+                                    occupantNewCol,
+                                    occupantNewRow,
+                                    iconAreaHeightDp
+                                )
+                                sc.copy(
+                                    gridCol = occupantNewCol,
+                                    gridRow = occupantNewRow,
+                                    posX = occupantX,
+                                    posY = occupantY,
+                                    hasCustomPosition = true
+                                )
+                            }
                             else -> sc
                         }
                     }
@@ -1889,8 +1905,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             sc.copy(
                                 gridCol = targetCol,
                                 gridRow = targetRow,
-                                posX = 16f + (targetCol * 88f),
-                                posY = 16f + (targetRow * 94f),
+                                posX = targetX,
+                                posY = targetY,
                                 hasCustomPosition = true
                             )
                         } else sc
@@ -1918,26 +1934,46 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // ---- Desktop icon grid ---------------------------------------------------------------
+
+    /**
+     * The icon area the desktop is laying out into, reported by the desktop screen whenever it
+     * changes. Snapping works in this space instead of a second set of guessed numbers, which is
+     * why "Lock Icons to Grid" cannot drop an icon somewhere the desktop never draws.
+     */
+    private var iconColumns = 6
+    private var iconAreaHeightDp = 720f
+
+    fun setIconGrid(columns: Int, areaHeightDp: Float) {
+        iconColumns = columns.coerceAtLeast(1)
+        iconAreaHeightDp = areaHeightDp.coerceAtLeast(1f)
+    }
+
+    /**
+     * Moves freeform icons by [deltaDp] when the icon area changes height, which is what happens
+     * when the taskbar docks to another edge. Icon positions are offsets inside that area, so
+     * without this an icon dragged to the bottom row is left behind under the bar - or stranded
+     * above it - instead of following the work area.
+     */
+    fun reanchorShortcuts(deltaDp: Float, areaHeightDp: Float) {
+        if (deltaDp == 0f) return
+        _uiState.update { state ->
+            val lowest = DesktopIconGrid.bottomRowTop(areaHeightDp)
+            val updated = state.customization.shortcuts.map { sc ->
+                if (!sc.hasCustomPosition) {
+                    sc
+                } else {
+                    sc.copy(posY = (sc.posY + deltaDp).coerceIn(0f, lowest))
+                }
+            }
+            state.copy(customization = state.customization.copy(shortcuts = updated))
+        }
+    }
+
     fun toggleLockIconsToGrid(enabled: Boolean) {
         _uiState.update { state ->
             val shortcuts = if (enabled) {
-                val occupied = mutableSetOf<Pair<Int, Int>>()
-                state.customization.shortcuts.map { sc ->
-                    val desiredCol = if (!sc.hasCustomPosition) sc.gridCol else Math.round((sc.posX - 16f) / 88f).coerceIn(0, 5).toInt()
-                    val desiredRow = if (!sc.hasCustomPosition) sc.gridRow else Math.round((sc.posY - 16f) / 94f).coerceIn(0, 7).toInt()
-                    val (finalCol, finalRow) = if (Pair(desiredCol, desiredRow) !in occupied) {
-                        Pair(desiredCol, desiredRow)
-                    } else {
-                        findNearestFreeGridSlot(desiredCol, desiredRow, occupied)
-                    }
-                    occupied.add(Pair(finalCol, finalRow))
-                    sc.copy(
-                        gridCol = finalCol,
-                        gridRow = finalRow,
-                        posX = 16f + (finalCol * 88f),
-                        posY = 16f + (finalRow * 94f)
-                    )
-                }
+                snapShortcutsToGrid(state.customization.shortcuts)
             } else {
                 state.customization.shortcuts
             }
@@ -1947,6 +1983,51 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     shortcuts = shortcuts
                 ),
                 notificationMessage = if (enabled) "Grid Snapping: Locked to Grid" else "Freeform Mode: Move shortcuts wherever you want"
+            )
+        }
+    }
+
+    /**
+     * Pins every icon to its nearest free grid slot.
+     *
+     * All of them, not only the dragged ones: an icon that has never been moved is drawn from
+     * [DesktopIconGrid.autoPosition] and has to be pinned to the slot it is drawn on, otherwise
+     * locking the grid appears to do nothing at all. Slots are the renderer's (90 x 88 dp, bottom
+     * anchored), so an icon already on the grid keeps its position to the pixel.
+     */
+    private fun snapShortcutsToGrid(shortcuts: List<DesktopShortcut>): List<DesktopShortcut> {
+        val columns = iconColumns
+        val areaHeight = iconAreaHeightDp
+        val occupied = mutableSetOf<Pair<Int, Int>>()
+        return shortcuts.mapIndexed { index, sc ->
+            val current = if (sc.hasCustomPosition) {
+                Pair(sc.posX, sc.posY)
+            } else {
+                DesktopIconGrid.autoPosition(index, shortcuts.size, columns, areaHeight)
+            }
+            val wanted = Pair(
+                DesktopIconGrid.nearestColumn(current.first, columns),
+                DesktopIconGrid.nearestRow(current.second, areaHeight)
+            )
+            val slot = if (wanted in occupied) {
+                findNearestFreeGridSlot(
+                    wanted.first,
+                    wanted.second,
+                    occupied,
+                    maxCol = columns - 1,
+                    maxRow = DesktopIconGrid.maxRow(areaHeight)
+                )
+            } else {
+                wanted
+            }
+            occupied.add(slot)
+            val (x, y) = DesktopIconGrid.snap(slot.first, slot.second, areaHeight)
+            sc.copy(
+                gridCol = slot.first,
+                gridRow = slot.second,
+                posX = x,
+                posY = y,
+                hasCustomPosition = true
             )
         }
     }

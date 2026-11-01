@@ -66,6 +66,14 @@ changed edge, which put the Browser caption on top of a bottom bar; custom offse
 the current icon area now, render-side only, so nothing drifts. 60 tests green, crash buffer empty.
 [VERIFICATION.md](VERIFICATION.md) §20.
 
+"Lock Icons to Grid" then turned out to snap into a grid of its own (88 x 94 dp from the top corner,
+rows clamped at 7) and to visit only icons that had already been dragged — so it sent the Phonix
+Browser to the middle of the screen and left the other three alone. `model/DesktopIconGrid` is now
+the single grid the renderer and the view model both use (90 x 88 dp, rows counted from the bottom
+row), the desktop reports its live column count and area height, and locking snaps every icon to its
+nearest free slot. Measured: all four icons in one bottom-left row, stored as (0..3, 0). 61 tests
+green. [VERIFICATION.md](VERIFICATION.md) §21.
+
 ## Update-path round (2026-10-31, S10 over USB)
 
 The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`
