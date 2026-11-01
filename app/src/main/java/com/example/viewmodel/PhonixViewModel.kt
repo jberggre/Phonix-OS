@@ -2300,8 +2300,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         val packages = _uiState.value.debloatPackages.map { it.packageName }
         val (present, hidden) = withContext(Dispatchers.IO) {
             val hiddenSet = packages.filter { HostDebloat.isHidden(context, it) }.toSet()
+            // Presence means "on disk", not "safe to remove": a hidden package is still installed,
+            // and reporting it absent left it with no Restore button and no way back.
             val presentMap = packages.associate { pkg ->
-                pkg to (PackageFacts.isInstalled(context, pkg) && pkg !in hiddenSet)
+                pkg to (PackageFacts.isInstalled(context, pkg) || pkg in hiddenSet)
             }
             presentMap to hiddenSet
         }
@@ -2770,7 +2772,9 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value
         val presence = state.debloatInstalled
         return state.debloatPackages.filter { pkg ->
-            pkg.isEnabled && (presence.isEmpty() || presence[pkg.packageName] != false)
+            pkg.isEnabled &&
+                (presence.isEmpty() || presence[pkg.packageName] != false) &&
+                pkg.packageName !in state.debloatHidden
         }
     }
 

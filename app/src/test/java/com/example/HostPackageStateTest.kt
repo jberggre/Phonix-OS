@@ -18,6 +18,9 @@ class HostPackageStateTest {
         assertEquals(HostPackageState.ABSENT, HostDebloat.stateOf(installed = false, hidden = false))
         assertEquals(HostPackageState.HIDDEN, HostDebloat.stateOf(installed = true, hidden = true))
         assertEquals(HostPackageState.INSTALLED, HostDebloat.stateOf(installed = true, hidden = false))
+        // A hidden package stops answering getPackageInfo for this app, so this is the pair the
+        // debloater actually sees after a successful hide. It must still be restorable.
+        assertEquals(HostPackageState.HIDDEN, HostDebloat.stateOf(installed = false, hidden = true))
     }
 
     @Test

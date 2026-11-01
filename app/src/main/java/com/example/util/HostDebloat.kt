@@ -46,9 +46,12 @@ object HostDebloat {
 
     /** Pure mapping of the two platform answers, so the tri-state can be tested off-device. */
     fun stateOf(installed: Boolean, hidden: Boolean): HostPackageState = when {
-        !installed -> HostPackageState.ABSENT
+        // A hidden package stops answering getPackageInfo for this app, so "hidden" has to win
+        // over "not found". Ordering it the other way rendered a hidden package ABSENT, leaving
+        // it with no Restore button and no way back.
         hidden -> HostPackageState.HIDDEN
-        else -> HostPackageState.INSTALLED
+        installed -> HostPackageState.INSTALLED
+        else -> HostPackageState.ABSENT
     }
 
     /** True only while this install (as device owner) is hiding the package. */
