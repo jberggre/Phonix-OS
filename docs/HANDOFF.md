@@ -22,8 +22,10 @@ the device-owner build and the frame was checked against `screencap -d 0`.
 **Still owed on this path:** the stock consent window did not accept injected taps on this DeX
 display (a real pointer does; the run used a temporary `PROJECT_MEDIA` app-op that was reset), the
 display-0 recursion guard is unchanged, rotation during capture and the API 34 path are unmeasured.
-**Also measured, not fixed:** Start → All apps → "Phonix OS apps" clips at 11 of 19 entries with
-scrolling disabled, so eight apps are unreachable there. Details in [VERIFICATION.md](VERIFICATION.md) §14.
+**Also found and fixed in the same round:** Start laid out only 11 of its 21 app cells, and
+the Pinned view sliced its third row, because both were lazy grids with hard height caps
+inside a menu that already scrolls. They are whole rows in the menu's own scroller now, and a
+drag reaches the last pin. Details in [VERIFICATION.md](VERIFICATION.md) §15.
 
 ## Update-path round (2026-10-31, S10 over USB)
 

@@ -1156,7 +1156,35 @@ target display directly, exists only from API 34.
   still Android's per-session dialog and a real pointer is needed to answer it.
 - Not run: capture after moving the desktop onto display 0 (the recursion guard is unchanged),
   rotation during a live capture, and the API 34 config path (the unit is API 31).
-- Measured on the same display and **not fixed**: Start → All apps → "Phonix OS apps" shows 11 of
-  19 apps with `userScrollEnabled = false`, so the other eight cannot be reached from All apps.
-  That is the known Start-menu clipping issue, now measured on the desktop rather than the phone.
+- Start → All apps laid out only 11 of the catalog's entries on the same display; fixed in §15.
 
+## 15. Start menu: every app reachable (2026-11-01, S10 over wireless adb + HDMI monitor)
+
+[measured] With Phonix fullscreen on the HDMI desktop, Start → All apps laid out **11 of 21** Phonix
+cells: the "Phonix OS apps" grid was a `LazyVerticalGrid` capped at 132 dp with
+`userScrollEnabled = false`. The Pinned view had the same shape at 240 dp (`GridCells.Adaptive`) and
+its third row was cut through the icons. Both sit inside a `Column` that already scrolls vertically,
+so the caps hid entries without giving anything else room.
+
+Fixed in `ui/components/Windows11StartMenu.kt`: both surfaces are plain `Row`s of
+`START_GRID_COLUMNS = 5` weighted cells (`chunked`, with a trailing `Spacer(weight(1f))` so a short
+row keeps its columns) inside the menu's own scroller. The pinned tile moved into `StartTile`, so the
+row layout has one definition of a pin. The All-apps lists for Android apps (compact, storage weight,
+categories) were left alone: they scroll by themselves and carry no fixed cap.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, 58 tests, 0 failures. The change is
+  layout-only and no test covers Compose geometry, so the evidence below is the measurement.
+- [measured] `adb install -r` → `Success`; `versionCode=6`; crash buffer empty after the taps and
+  the drag.
+- [measured] All apps on the desktop: all **21** Phonix cells are drawn (App Store … "Photos &
+  Media" as the fifth row), against 11 before. `artifacts/session/start-fix-allapps.png`.
+- [measured] Pinned view: four whole rows, no tile sliced (row 3 was cut before), and one drag
+  (`input -d 2 swipe 960 950 960 560 400`) brings the 21st pin and the footer into view.
+  `artifacts/session/start-fix-pinned2.png`, `artifacts/session/start-fix-scrolled.png`.
+- [measured] Same build, same session: Phone Screen showed the phone's own home screen (status bar
+  1:19 / 58%, phone wallpaper and dock) while Phonix owned the desktop.
+
+Not run: the Android-app tabs (compact / storage weight / categories) were not clicked through after
+the change, and there was no rotation or 320 dp narrow-width check of the new rows.
