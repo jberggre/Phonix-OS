@@ -1419,3 +1419,30 @@ Checks: [measured] `assembleDebug testDebugUnitTest` — BUILD SUCCESSFUL, **64 
 this session were going to the phone panel until `input -d 2` was used, so a screenshot of the new
 HIDDEN/Restore states is still owed. The device-owner hide path itself is unchanged from §19.
 
+
+## §23 — Distro switching: not exercised end to end (2026-11-01)
+
+The request was to prove a real switch. It was **not** run, and this is what blocked it: the
+Distro Hub window could be opened (`Linux System` tile → hub showed `Debian 12 (Bookworm) 12.15`),
+but a switch needs a 78–178 MB download plus extraction, and the session ran out of budget while
+still locating the hub's controls under synthetic taps. Nothing was left half-installed — the
+install path stages into `files/linux/tmp` and only promotes after extraction succeeds.
+
+What was verified on the unit, non-destructively:
+
+- [measured] `files/linux` holds `alpine`, `debian`, `tmp`; the bundled rescue image is intact
+  (`files/linux/alpine/etc/os-release` resolves).
+- [measured] The active guest is Debian 12; the terminal reports
+  `PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"`.
+- [measured] Crash buffer 0 lines after every step.
+
+Owed next session: install Arch or Kali from the hub, capture the progress text and the staged
+tree, then confirm (a) the new tree is promoted only after extraction, (b) `alpine` and `debian`
+both survive, (c) `cat /etc/os-release` in the terminal shows the new distro.
+
+**Operational note for the next session:** relaunching the desktop by hand needs the *namespace*
+class name, not the package name: `am start --display 2 -n
+com.aistudio.phonix.vpxmkr/com.example.MainActivity`. Using
+`com.aistudio.phonix.vpxmkr.MainActivity` fails with "Activity class does not exist" and leaves
+DeX on Samsung's launcher. UI automation also needs `uiautomator dump --display 2` (the default
+dump reads the phone panel) and `input -d 2` for every tap.
