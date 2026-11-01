@@ -42,6 +42,10 @@ green, 58 tests, crash buffer empty. **Not measured:** real mouse right-click (a
 primary button) and the portrait phone layout with a vertical bar. Details in
 [VERIFICATION.md](VERIFICATION.md) §16.
 
+Follow-up in the same round: the Start panel's 560 dp cap now follows the screen
+(min(720 dp, 82%)), so All apps shows the Android-app list on a monitor instead of one clipped
+row — [VERIFICATION.md](VERIFICATION.md) §17.
+
 ## Update-path round (2026-10-31, S10 over USB)
 
 The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`

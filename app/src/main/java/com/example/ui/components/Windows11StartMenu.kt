@@ -87,6 +87,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
@@ -292,10 +293,16 @@ fun Windows11StartMenu(
         }
     }
 
+    // The panel used to be capped at 560 dp on every screen, which on a 1080p monitor left the
+    // Android-app list with a single clipped row under the Phonix grid. The cap follows the screen
+    // now: a phone still gets a floating card, a monitor gets the height it actually has.
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val maxPanelHeight = minOf(720.dp, (screenHeightDp * 0.82f).dp)
+
     Surface(
         modifier = modifier
             .widthIn(min = 320.dp, max = 560.dp)
-            .heightIn(max = 560.dp)
+            .heightIn(max = maxPanelHeight)
             .shadow(24.dp, RoundedCornerShape(16.dp))
             .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             .testTag("windows_11_start_menu"),

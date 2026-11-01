@@ -1236,3 +1236,22 @@ window can never be dragged under the bar or lose its resize grip to it.
   desktop icons use) was exercised only by long-press. It needs a real mouse on the DeX display.
 - Not run: dragging/resizing a window against a left or top bar, and the phone-panel portrait layout
   with a vertical bar (a 56 dp bar on a 360 dp-wide phone leaves 300 dp of desktop).
+
+## 17. Start menu height follows the screen (2026-11-01, S10 + HDMI monitor)
+
+The panel was capped at 560 dp on every display. On the 1080p monitor that left the Android-app list
+with a single clipped row under the 21-cell Phonix grid, even though the desktop is about 940 dp
+tall. `Windows11StartMenu` now caps at `min(720 dp, 82% of the screen height)`: a phone still gets a
+floating card, a monitor gets the height it actually has.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, 58 tests, 0 failures.
+- [measured] Pinned view on the desktop draws five whole rows of pins and the store banner
+  (`artifacts/session/start-h-1.png`), where the third row used to be sliced.
+- [measured] All apps draws all 21 Phonix cells, the "Android apps" header, the three view-mode chips
+  and the category chips, with real Android rows beneath them — Category Tabs selected, Air Zone and
+  Browser listed (`artifacts/session/start-h-2.png`).
+- [measured] Crash buffer empty.
+
+Not run: the phone-panel (portrait, non-DeX) layout at the new cap, and a 320 dp-wide window.
