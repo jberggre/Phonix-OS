@@ -11,6 +11,22 @@ data class DebloatPackage(
 )
 
 object DebloatCatalog {
+    /**
+     * Categories the screenless Mini PC preset ticks.
+     *
+     * These must be category names that exist below. The preset used to compare against
+     * "Telephony & Carrier", "Biometrics & Sensors" and "OEM Bloat", none of which the
+     * catalogue has, so pressing the button ticked nothing and copied an empty command list.
+     */
+    val applianceCategories: Set<String> = setOf(
+        "OEM Performance Throttler",
+        "OEM Voice Assistant",
+        "Analytics & Tracking",
+        "Carrier Telemetry",
+        "OEM Feed & News",
+        "Payment & Store Sync"
+    )
+
     fun getDefaultPackages(): List<DebloatPackage> = listOf(
         DebloatPackage(
             packageName = "com.android.chrome",

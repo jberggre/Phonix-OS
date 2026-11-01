@@ -38,10 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,7 +49,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.example.model.DebloatCatalog
 import com.example.model.DebloatPackage
 import com.example.ui.theme.PhonixAmber
 import com.example.ui.theme.PhonixBlue
@@ -68,6 +64,7 @@ import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import com.example.util.HostDebloat
+import com.example.util.HostPackageState
 import com.example.util.PackageFacts
 import com.example.viewmodel.PhonixUiState
 import com.example.viewmodel.PhonixViewModel
@@ -105,19 +102,22 @@ fun DebloatManagerContent(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var refreshKey by remember { mutableStateOf(0) }
 
-    val bloatPackages = remember(refreshKey) {
-        DebloatCatalog.getDefaultPackages().map { pkg ->
-            val apkSize = HostDebloat.getPackageApkSize(context, pkg.packageName)
-            val isInstalled = apkSize > 0L || runCatching {
-                context.packageManager.getPackageInfo(pkg.packageName, 0) != null
-            }.getOrDefault(false)
-            Triple(pkg, isInstalled, apkSize)
-        }
+    // The same list the wizard edits. This screen used to re-read the raw catalogue, so a tick
+    // made in the wizard and the presence map here disagreed, and a hidden package kept showing
+    // as INSTALLED because getPackageInfo answers for hidden packages too.
+    val bloatPackages = uiState.debloatPackages.map { pkg ->
+        val isHidden = pkg.packageName in uiState.debloatHidden
+        val isInstalled = uiState.debloatInstalled[pkg.packageName]
+            ?: PackageFacts.isInstalled(context, pkg.packageName)
+        Triple(
+            pkg,
+            HostDebloat.stateOf(isInstalled, isHidden),
+            PackageFacts.apkBytes(context, pkg.packageName)
+        )
     }
 
-    val installedBloat = bloatPackages.filter { it.second }
+    val installedBloat = bloatPackages.filter { it.second != HostPackageState.ABSENT }
     val totalReclaimableBytes = installedBloat.sumOf { it.third }
     val totalReclaimableRamMb = installedBloat.sumOf { it.first.estimatedRamMb }
 
@@ -196,7 +196,9 @@ fun DebloatManagerContent(
                         .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(bloatPackages) { (pkg, isInstalled, apkBytes) ->
+                    items(bloatPackages) { entry ->
+                        val (pkg, state, apkBytes) = entry
+                        val isInstalled = state != HostPackageState.ABSENT
                         Card(
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isInstalled) Color(0xFF0F1B2B) else Color(0xFF141923)
@@ -231,15 +233,24 @@ fun DebloatManagerContent(
                                         Text(pkg.packageName, color = PhonixBlueLight, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
                                     }
 
+                                    val badgeColor = when (state) {
+                                        HostPackageState.INSTALLED -> PhonixAmber
+                                        HostPackageState.HIDDEN -> PhonixCyan
+                                        HostPackageState.ABSENT -> Slate400
+                                    }
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
-                                            .background(if (isInstalled) PhonixAmber.copy(alpha = 0.2f) else Slate800)
+                                            .background(badgeColor.copy(alpha = 0.2f))
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
                                         Text(
-                                            text = if (isInstalled) "INSTALLED" else "ABSENT",
-                                            color = if (isInstalled) PhonixAmber else Slate400,
+                                            text = when (state) {
+                                                HostPackageState.INSTALLED -> "INSTALLED"
+                                                HostPackageState.HIDDEN -> "HIDDEN"
+                                                HostPackageState.ABSENT -> "ABSENT"
+                                            },
+                                            color = badgeColor,
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -274,17 +285,27 @@ fun DebloatManagerContent(
                                     if (isInstalled) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             if (uiState.canRemoveHostPackages) {
+                                                // Hiding is reversible, so the same button becomes the undo. There
+                                                // was no way back before: a hidden package kept reporting INSTALLED
+                                                // and the app offered Hide again instead of Restore.
                                                 Button(
                                                     onClick = {
-                                                        viewModel.hideHostPackage(pkg.packageName)
-                                                        refreshKey++
+                                                        if (state == HostPackageState.HIDDEN) {
+                                                            viewModel.unhideHostPackage(pkg.packageName)
+                                                        } else {
+                                                            viewModel.hideHostPackage(pkg.packageName)
+                                                        }
                                                     },
                                                     colors = ButtonDefaults.buttonColors(containerColor = PhonixCyan.copy(alpha = 0.30f)),
                                                     modifier = Modifier.height(28.dp)
                                                 ) {
                                                     Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(11.dp))
                                                     Spacer(Modifier.width(3.dp))
-                                                    Text("Hide", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                    Text(
+                                                        if (state == HostPackageState.HIDDEN) "Restore" else "Hide",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
                                                 }
                                             }
 
@@ -305,7 +326,6 @@ fun DebloatManagerContent(
                                             Button(
                                                 onClick = {
                                                     HostDebloat.launchUninstall(context, pkg.packageName)
-                                                    refreshKey++
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = PhonixRed.copy(alpha = 0.8f)),
                                                 modifier = Modifier.height(28.dp)
@@ -329,7 +349,7 @@ fun DebloatManagerContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        onClick = { refreshKey++ },
+                        onClick = { viewModel.refreshSetupFacts(context) },
                         colors = ButtonDefaults.buttonColors(containerColor = Slate800),
                         modifier = Modifier.height(34.dp)
                     ) {

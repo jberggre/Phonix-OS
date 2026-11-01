@@ -190,6 +190,8 @@ data class PhonixUiState(
     val installedBrowsers: List<com.example.util.InstalledBrowserInfo> = emptyList(),
     /** package name -> whether this device actually has it, so the trim list stops guessing. */
     val debloatInstalled: Map<String, Boolean> = emptyMap(),
+    /** Packages this install has hidden as device owner, so the list can offer an undo. */
+    val debloatHidden: Set<String> = emptySet(),
     /** The exact command text copied last, so the UI can confirm the paste really exists. */
     val debloatCopiedCommand: String? = null,
     /** Advice about the ticked packages, and whether a model or the built-in summary wrote it. */
@@ -2283,11 +2285,27 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     .mapNotNull { it.packageName }
                     .mapNotNull { pkg -> PackageFacts.browserInfo(context, pkg) }
             }
-            val presence = withContext(Dispatchers.IO) {
-                _uiState.value.debloatPackages.associate { it.packageName to PackageFacts.isInstalled(context, it.packageName) }
-            }
-            _uiState.update { it.copy(installedBrowsers = browsers, debloatInstalled = presence) }
+            _uiState.update { it.copy(installedBrowsers = browsers) }
+            refreshDebloatPresence(context)
         }
+    }
+
+    /**
+     * Re-reads what this device really has and what this install has hidden, in one place.
+     *
+     * The two maps are always written together: a hidden package must never be offered as a
+     * removal target a second time, and the debloater needs the hidden set to offer an undo.
+     */
+    private suspend fun refreshDebloatPresence(context: Context) {
+        val packages = _uiState.value.debloatPackages.map { it.packageName }
+        val (present, hidden) = withContext(Dispatchers.IO) {
+            val hiddenSet = packages.filter { HostDebloat.isHidden(context, it) }.toSet()
+            val presentMap = packages.associate { pkg ->
+                pkg to (PackageFacts.isInstalled(context, pkg) && pkg !in hiddenSet)
+            }
+            presentMap to hiddenSet
+        }
+        _uiState.update { it.copy(debloatInstalled = present, debloatHidden = hidden) }
     }
 
     /**
@@ -2379,9 +2397,22 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     if (failure == null) TerminalLine.LineType.SUCCESS else TerminalLine.LineType.ERROR
                 )
             )
-            val presence = DebloatCatalog.getDefaultPackages()
-                .associate { it.packageName to PackageFacts.isInstalled(app, it.packageName) }
-            _uiState.update { it.copy(debloatInstalled = presence) }
+            refreshDebloatPresence(app)
+        }
+    }
+
+    /** Undoes [hideHostPackage]: puts a hidden package back on the launcher. */
+    fun unhideHostPackage(packageName: String) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val failure = withContext(Dispatchers.IO) { HostDebloat.unhidePackage(app, packageName) }
+            appendTerminalLine(
+                TerminalLine(
+                    if (failure == null) "restored $packageName" else "could not restore $packageName: $failure",
+                    if (failure == null) TerminalLine.LineType.SUCCESS else TerminalLine.LineType.ERROR
+                )
+            )
+            refreshDebloatPresence(app)
         }
     }
 
@@ -2403,12 +2434,17 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         if (removed > 0) {
+            // A hidden package still answers getPackageInfo, so presence comes from the tri-state.
+            refreshDebloatPresence(context)
             _uiState.update { state ->
                 state.copy(
                     debloatPackages = state.debloatPackages.map { pkg ->
-                        if (pkg.isEnabled && !PackageFacts.isInstalled(context, pkg.packageName)) pkg.copy(isEnabled = false) else pkg
-                    },
-                    debloatInstalled = state.debloatPackages.associate { it.packageName to PackageFacts.isInstalled(context, it.packageName) }
+                        if (pkg.isEnabled && state.debloatInstalled[pkg.packageName] == false) {
+                            pkg.copy(isEnabled = false)
+                        } else {
+                            pkg
+                        }
+                    }
                 )
             }
         }
@@ -2776,14 +2812,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
         _uiState.update { state ->
             val updatedPkgs = state.debloatPackages.map { pkg ->
-                if (pkg.category.equals("Telephony & Carrier", ignoreCase = true) ||
-                    pkg.category.equals("Biometrics & Sensors", ignoreCase = true) ||
-                    pkg.category.equals("OEM Bloat", ignoreCase = true)
-                ) {
-                    pkg.copy(isEnabled = true)
-                } else {
-                    pkg
-                }
+                pkg.copy(isEnabled = pkg.category in DebloatCatalog.applianceCategories)
             }
             state.copy(debloatPackages = updatedPkgs)
         }

@@ -74,6 +74,15 @@ row), the desktop reports its live column count and area height, and locking sna
 nearest free slot. Measured: all four icons in one bottom-left row, stored as (0..3, 0). 61 tests
 green. [VERIFICATION.md](VERIFICATION.md) §21.
 
+Debloater audit, same round: a hidden package kept showing INSTALLED because nothing called
+`DevicePolicyManager.isApplicationHidden`, and there was no way to un-hide it at all; the
+"screenless Mini PC debloat" preset matched three category names that do not exist in its own
+catalogue, so it ticked nothing and copied an empty script; and per-package storage counted only
+the base APK. All four fixed — tri-state INSTALLED/HIDDEN/ABSENT, a Restore button,
+`DebloatCatalog.applianceCategories` with a test that every name exists, and `PackageFacts.apkBytes`
+for sizes. 64 tests green. The debloater UI was **not** re-opened on the unit this round.
+[VERIFICATION.md](VERIFICATION.md) §22.
+
 ## Update-path round (2026-10-31, S10 over USB)
 
 The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`

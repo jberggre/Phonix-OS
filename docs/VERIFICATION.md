@@ -1397,3 +1397,25 @@ the screen — and left every other icon exactly where it was.
   it now clears the bar only when the bar is docked bottom (12 dp otherwise). The windows layer, the
   icon paddings, the Start menu anchor, the top notch and the dock menu were already conditional.
 
+## §22 — The debloater could not tell a hidden package from an installed one (2026-11-01)
+
+Audit of every surface that acts on the host device. Four defects, all of them visible to the user:
+
+| Defect | Why it happened | Fix |
+| --- | --- | --- |
+| A hidden package kept reading **INSTALLED** | nothing called `DevicePolicyManager.isApplicationHidden`; `getPackageInfo` answers for hidden packages | `HostDebloat.packageState` / `stateOf` return INSTALLED / HIDDEN / ABSENT, and the view model publishes `debloatHidden` beside `debloatInstalled` |
+| Hiding was **not reversible** although the KDoc promised it | the UI only ever offered Hide | `HostDebloat.unhidePackage` + `PhonixViewModel.unhideHostPackage`; the Hide button becomes **Restore** for a hidden package |
+| "Screenless Mini PC debloat" ticked **nothing** | it matched categories `Telephony & Carrier`, `Biometrics & Sensors`, `OEM Bloat`, none of which exist in `DebloatCatalog` | `DebloatCatalog.applianceCategories` names real categories, and a test asserts every name exists and selects a non-empty set |
+| Storage per package **under-reported** | `HostDebloat.getPackageApkSize` counted `sourceDir` (base APK only) | it delegates to `PackageFacts.apkBytes`, which sums the splits |
+
+Also fixed: the debloater list now reads `uiState.debloatPackages` instead of re-reading the
+catalogue, so a tick in the wizard and the tri-state here cannot disagree; "Rescan" refreshes
+through `refreshSetupFacts` instead of bumping a local key before the async hide has finished; and
+`WallpaperProvisioner` logged its success line twice.
+
+Checks: [measured] `assembleDebug testDebugUnitTest` — BUILD SUCCESSFUL, **64 tests, 0 failures**
+(three new: tri-state mapping, preset categories exist, preset selects packages).
+**Not run on the device:** this round's debloater UI was not re-opened on the unit — the RDX taps in
+this session were going to the phone panel until `input -d 2` was used, so a screenshot of the new
+HIDDEN/Restore states is still owed. The device-owner hide path itself is unchanged from §19.
+
