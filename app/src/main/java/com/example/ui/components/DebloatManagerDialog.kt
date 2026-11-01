@@ -38,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,6 +103,10 @@ fun DebloatManagerContent(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    // Only the wizard used to read these facts, so opening this window on its own left
+    // canRemoveHostPackages false and hid the Hide/Restore button on a device-owner unit.
+    LaunchedEffect(Unit) { viewModel.refreshSetupFacts(context) }
 
     // The same list the wizard edits. This screen used to re-read the raw catalogue, so a tick
     // made in the wizard and the presence map here disagreed, and a hidden package kept showing
