@@ -1446,3 +1446,40 @@ com.aistudio.phonix.vpxmkr/com.example.MainActivity`. Using
 `com.aistudio.phonix.vpxmkr.MainActivity` fails with "Activity class does not exist" and leaves
 DeX on Samsung's launcher. UI automation also needs `uiautomator dump --display 2` (the default
 dump reads the phone panel) and `input -d 2` for every tap.
+
+## §24 — Stale hidden records, and a debloat entry that named a package that does not exist (2026-11-01)
+
+**Two defects, both found on the unit.**
+
+1. **A hidden package name outlived its package.** `DevicePolicyManager.isApplicationHidden` keeps
+   answering `true` for a name it was once asked to hide, even when nothing is installed under it.
+   The tri-state added in §22 therefore classified those names HIDDEN and the debloater drew a
+   **Restore** button that could not change anything — tapping it four times left the row identical.
+   Fixed in `refreshDebloatPresence`: presence now also asks
+   `PackageFacts.isInstalledIncludingHidden` (`MATCH_UNINSTALLED_PACKAGES`, because
+   `setApplicationHidden` makes a package look uninstalled for this user), and any hidden name with
+   nothing on disk is un-hidden once through `HostDebloat.unhidePackage` so the platform forgets it.
+   The row then reports ABSENT instead of offering a dead Restore.
+2. **The catalogue named a package this phone does not ship.** `DebloatItem.kt` listed Samsung Free
+   as `com.samsung.android.spage`. [measured] `pm list packages | grep spage` on the S10 returns
+   `com.samsung.android.app.spage`; the names differ, so that trim target could never match and the
+   removal was silently a no-op. The entry now carries the real name.
+
+Checks: [measured] `assembleDebug testDebugUnitTest` — BUILD SUCCESSFUL, **65 tests, 0 failures**
+(one new: `a hidden name with nothing installed under it is a stale record`). The debug APK was
+installed over the running unit (`adb install -r -d`, Success) and the desktop relaunched on the
+monitor; crash buffer untouched by the install.
+
+**Distro switching is still not exercised end to end,** and this round established why the
+synthetic-tap route does not work for that window. With the hub maximised on the monitor and
+`Install & Switch` visible on screen, `uiautomator dump --display 2` and `--display 9` return the
+**same 1080×1080 hierarchy**, the window chrome sits at the top-left of it instead of the
+monitor's right edge, and every `Install & Switch` and `CURRENT` node reports
+`bounds="[0,0][0,0]"` — Compose keeps those labels inside a merged parent, so there is no
+coordinate to tap. Taps computed from the monitor screenshot (1831,762 — the Ubuntu pill), from
+hub coordinates, and keyboard traversal (six `KEYCODE_TAB`) all left `files/linux` at
+`alpine debian tmp` with no download started. The button is unreachable without an
+instrumentation harness, so the switch itself remains owed: install Ubuntu 24.04 (127 MB) or Arch
+(178 MB) from the hub, watch `files/linux/tmp` during extraction, then confirm promotion, that
+`alpine` and `debian` survive, and that `cat /etc/os-release` in the terminal shows the new guest.
+Nothing is half-installed: `files/linux` was `alpine debian tmp` before and after every attempt.

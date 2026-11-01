@@ -24,6 +24,17 @@ class HostPackageStateTest {
     }
 
     @Test
+    fun `a hidden name with nothing installed under it is a stale record`() {
+        // The platform kept answering isApplicationHidden == true for these two after the
+        // packages were gone, so the debloater showed a Restore button that changed nothing.
+        val hidden = setOf("com.carrier.analytics.diag", "com.samsung.android.game.gos")
+        val onDisk = setOf("com.samsung.android.game.gos")
+
+        assertEquals(setOf("com.carrier.analytics.diag"), HostDebloat.staleHiddenRecords(hidden, onDisk))
+        assertTrue(HostDebloat.staleHiddenRecords(hidden, hidden).isEmpty())
+    }
+
+    @Test
     fun `the appliance preset names categories the catalogue actually has`() {
         val categories = DebloatCatalog.getDefaultPackages().map { it.category }.toSet()
         assertTrue("the preset must not be empty", DebloatCatalog.applianceCategories.isNotEmpty())

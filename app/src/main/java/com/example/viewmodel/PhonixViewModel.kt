@@ -2299,13 +2299,21 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun refreshDebloatPresence(context: Context) {
         val packages = _uiState.value.debloatPackages.map { it.packageName }
         val (present, hidden) = withContext(Dispatchers.IO) {
-            val hiddenSet = packages.filter { HostDebloat.isHidden(context, it) }.toSet()
+            // "on disk" has to include packages the platform is hiding from this user, because
+            // setApplicationHidden makes getPackageInfo answer as if they were uninstalled.
+            val onDisk = packages.filter {
+                PackageFacts.isInstalled(context, it) || PackageFacts.isInstalledIncludingHidden(context, it)
+            }
+            val hiddenNow = packages.filter { HostDebloat.isHidden(context, it) }
+            // A name the platform still calls hidden but that nothing is installed under is a
+            // stale record: unhide it once so the row can go back to ABSENT instead of offering
+            // a Restore button that cannot do anything.
+            val stale = HostDebloat.staleHiddenRecords(hiddenNow, onDisk)
+            stale.forEach { HostDebloat.unhidePackage(context, it) }
             // Presence means "on disk", not "safe to remove": a hidden package is still installed,
             // and reporting it absent left it with no Restore button and no way back.
-            val presentMap = packages.associate { pkg ->
-                pkg to (PackageFacts.isInstalled(context, pkg) || pkg in hiddenSet)
-            }
-            presentMap to hiddenSet
+            val presentMap = packages.associate { pkg -> pkg to (pkg in onDisk) }
+            presentMap to (hiddenNow.toSet() - stale)
         }
         _uiState.update { it.copy(debloatInstalled = present, debloatHidden = hidden) }
     }

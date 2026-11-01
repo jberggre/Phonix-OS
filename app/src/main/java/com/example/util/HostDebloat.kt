@@ -54,6 +54,18 @@ object HostDebloat {
         else -> HostPackageState.ABSENT
     }
 
+    /**
+     * Hidden names that are not on disk any more.
+     *
+     * DevicePolicyManager keeps answering `isApplicationHidden == true` for a package name it
+     * was once asked to hide, even after that package is gone, so the debloater offered a
+     * Restore button for `com.carrier.analytics.diag` on a phone that never had it and tapping
+     * it changed nothing. These names have to be dropped from the hidden set, and it takes a
+     * one-off `setApplicationHidden(false)` to make the platform forget them.
+     */
+    fun staleHiddenRecords(hidden: Collection<String>, onDisk: Collection<String>): Set<String> =
+        hidden.toSet() - onDisk.toSet()
+
     /** True only while this install (as device owner) is hiding the package. */
     fun isHidden(context: Context, packageName: String): Boolean = try {
         dpm(context)?.isApplicationHidden(admin(context), packageName) == true

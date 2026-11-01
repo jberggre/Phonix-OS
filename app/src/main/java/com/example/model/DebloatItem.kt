@@ -83,7 +83,10 @@ object DebloatCatalog {
             estimatedRamMb = 20
         ),
         DebloatPackage(
-            packageName = "com.samsung.android.spage",
+            // Samsung Free. The catalogue used to say com.samsung.android.spage, which is not
+            // the package name this phone ships (com.samsung.android.app.spage), so the row could
+            // never match a real install and the trim was silently a no-op.
+            packageName = "com.samsung.android.app.spage",
             displayName = "Samsung Daily / Free Content Hub",
             category = "OEM Feed & News",
             isEnabled = true,
