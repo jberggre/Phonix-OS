@@ -21,6 +21,9 @@
     <!-- Required on Android 14+ for the read-only Phone Screen capture service. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The manual updater downloads a verified APK and hands it to Android's installer, which
+         still asks for confirmation. There is no silent install path. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Lets Phonix paint its own wallpaper onto the device so DeX/lock screen match the desktop -->
     <uses-permission android:name="android.permission.SET_WALLPAPER" />

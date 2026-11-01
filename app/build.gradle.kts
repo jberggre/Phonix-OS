@@ -16,6 +16,18 @@ android {
     versionCode = 6
     versionName = "1.5"
 
+    // The update feed is a build input, never a hardcoded endpoint. A unit built with no feed
+    // configured says so; it must not claim it is current when it has not checked anything.
+    //   gradle -PphonixUpdateFeed=https://example.org/phonix/update.json assembleDebug
+    // or set PHONIX_UPDATE_FEED in the environment.
+    val updateFeed = providers.gradleProperty("phonixUpdateFeed")
+      .orElse(providers.environmentVariable("PHONIX_UPDATE_FEED"))
+      .orElse("")
+      .get()
+      .replace("\\", "\\\\")
+      .replace("\"", "\\\"")
+    buildConfigField("String", "UPDATE_FEED_URL", "\"$updateFeed\"")
+
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

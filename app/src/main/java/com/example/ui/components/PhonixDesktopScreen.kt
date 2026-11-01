@@ -2685,7 +2685,10 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                     color = Slate400,
                     fontSize = 10.sp
                 )
-                AboutRow("Repository", "jberggre/Phonix-OS")
+                val feedHost = runCatching {
+                    android.net.Uri.parse(com.example.BuildConfig.UPDATE_FEED_URL).host
+                }.getOrNull()
+                AboutRow("Update feed", feedHost ?: "not configured in this build")
 
                 when (uiState.updateState) {
                     UpdateCheckState.IDLE -> {
@@ -2708,7 +2711,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PhonixCyan, strokeWidth = 2.dp)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Checking GitHub Releases...", color = Slate300, fontSize = 11.sp)
+                            Text("Checking the update feed...", color = Slate300, fontSize = 11.sp)
                         }
                     }
                     UpdateCheckState.UP_TO_DATE -> {
@@ -2753,8 +2756,32 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                             ) {
                                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Open Download Page", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Download & Install", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
+                            Text(
+                                "The APK is checked against the feed's SHA-256 and must carry this " +
+                                    "app's signing certificate. Android asks before installing.",
+                                color = Slate400,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                    UpdateCheckState.DOWNLOADING, UpdateCheckState.READY_TO_INSTALL -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().background(Slate950, RoundedCornerShape(6.dp)).padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (uiState.updateState == UpdateCheckState.DOWNLOADING) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = PhonixCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(14.dp))
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                uiState.updateInfo?.releaseNotes ?: "Preparing the update...",
+                                color = Slate200,
+                                fontSize = 10.sp
+                            )
                         }
                     }
                     else -> {
@@ -2780,7 +2807,11 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Linux guest", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                AboutRow("Distribution", if (guest != null) "Alpine " + guest else "not installed")
+                // The active guest, not a hardcoded Alpine: a switch to Debian must change this line.
+                AboutRow(
+                    "Distribution",
+                    uiState.currentDistro.name + if (guest != null) " · " + guest else " · not running"
+                )
                 AboutRow(
                     "Container",
                     if (uiState.containerStatus == com.example.viewmodel.ContainerStatus.RUNNING) "running" else "stopped"

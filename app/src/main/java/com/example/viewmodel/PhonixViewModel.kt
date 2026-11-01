@@ -9,6 +9,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.engine.LinuxDesktop
 import com.example.engine.LinuxRuntime
 import com.example.engine.LocalAiEngine
@@ -55,8 +56,10 @@ import com.example.model.DeviceCompatibilityClassifier
 import com.example.model.WindowBounds
 import com.example.model.WindowGeometry
 import com.example.model.AppUpdateInfo
-import com.example.model.VersionComparator
 import com.example.model.UpdateCheckState
+import com.example.model.UpdateFeed
+import com.example.model.UpdateManifest
+import com.example.engine.UpdateInstaller
 import com.example.model.AiChatMessage
 import com.example.model.AiEngineState
 import com.example.model.DefaultAiKnowledge
@@ -2725,110 +2728,184 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // -------------------------------------------------------------
-    // Manual GitHub Software Updates (User-initiated, No Backdoors)
+    // Manual software updates (user-initiated, verified, never silent)
     // -------------------------------------------------------------
     fun checkAppUpdates() {
-        _uiState.update { it.copy(updateState = UpdateCheckState.CHECKING) }
+        val app = getApplication<Application>()
         val packageInfo = runCatching {
-            getApplication<Application>().packageManager.getPackageInfo(getApplication<Application>().packageName, 0)
+            app.packageManager.getPackageInfo(app.packageName, 0)
         }.getOrNull()
-        val currentVersionName = packageInfo?.versionName ?: "1.5"
+        val currentVersionName = packageInfo?.versionName ?: BuildConfig.VERSION_NAME
         val currentVersionCode = packageInfo?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
             else @Suppress("DEPRECATION") it.versionCode
-        } ?: 4
+        } ?: BuildConfig.VERSION_CODE
+
+        fun unknownState(note: String) = AppUpdateInfo(
+            currentVersionName = currentVersionName,
+            currentVersionCode = currentVersionCode,
+            latestVersionName = currentVersionName,
+            latestVersionCode = currentVersionCode,
+            releaseNotes = note,
+            releaseUrl = "",
+            isUpdateAvailable = false
+        )
+
+        // A build with no feed has checked nothing. Say that instead of implying it is current.
+        val feedUrl = BuildConfig.UPDATE_FEED_URL.trim()
+        if (feedUrl.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    updateState = UpdateCheckState.ERROR,
+                    updateInfo = unknownState(
+                        "No update feed is configured for this build. Nothing was checked and no update status is known."
+                    )
+                )
+            }
+            return
+        }
+
+        _uiState.update { it.copy(updateState = UpdateCheckState.CHECKING) }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val url = java.net.URL("https://api.github.com/repos/jberggre/Phonix-OS/releases/latest")
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 4000
-                conn.readTimeout = 4000
-                conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
-                conn.setRequestProperty("User-Agent", "PhonixOS-Updater")
-
-                val responseCode = conn.responseCode
-                if (responseCode == 200) {
-                    val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    val tagName = extractJsonString(body, "tag_name") ?: "v1.3"
-                    val notes = extractJsonString(body, "body") ?: "Latest bug fixes and performance enhancements."
-                    val downloadUrl = extractAssetDownloadUrl(body) ?: "https://github.com/jberggre/Phonix-OS/releases"
-
-                    val isAvailable = isNewerVersion(tagName, currentVersionName)
-                    val info = AppUpdateInfo(
-                        currentVersionName = currentVersionName,
-                        currentVersionCode = currentVersionCode,
-                        latestVersionName = tagName,
-                        releaseNotes = notes,
-                        apkDownloadUrl = downloadUrl,
-                        releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
-                        isUpdateAvailable = isAvailable
-                    )
-                    _uiState.update {
-                        it.copy(
-                            updateState = if (isAvailable) UpdateCheckState.UPDATE_AVAILABLE else UpdateCheckState.UP_TO_DATE,
-                            updateInfo = info
-                        )
-                    }
-                } else {
-                    val info = AppUpdateInfo(
-                        currentVersionName = currentVersionName,
-                        currentVersionCode = currentVersionCode,
-                        latestVersionName = currentVersionName,
-                        latestVersionCode = currentVersionCode,
-                        releaseNotes = if (responseCode == 404) {
-                            "No public update feed is configured for this build. No update status is known."
-                        } else {
-                            "Update check failed (HTTP $responseCode). No update status is known."
-                        },
-                        apkDownloadUrl = "",
-                        releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
-                        isUpdateAvailable = false
-                    )
-                    _uiState.update {
-                        it.copy(updateState = UpdateCheckState.ERROR, updateInfo = info)
-                    }
-                }
-            } catch (_: Exception) {
+                val document = UpdateInstaller(app).readFeed(feedUrl)
+                val manifest = UpdateFeed.parse(document) ?: throw IllegalStateException(
+                    "The update feed is malformed: versionCode, versionName, an https apkUrl and a SHA-256 are required."
+                )
+                val available = UpdateFeed.isNewer(manifest, currentVersionCode)
                 val info = AppUpdateInfo(
                     currentVersionName = currentVersionName,
                     currentVersionCode = currentVersionCode,
-                    latestVersionName = currentVersionName,
-                    latestVersionCode = currentVersionCode,
-                    releaseNotes = "Could not reach the update feed. No update status is known.",
-                    apkDownloadUrl = "",
-                    releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
-                    isUpdateAvailable = false
+                    latestVersionName = manifest.versionName,
+                    latestVersionCode = manifest.versionCode,
+                    releaseUrl = feedUrl,
+                    apkDownloadUrl = manifest.apkUrl,
+                    sha256 = manifest.sha256,
+                    releaseNotes = if (available) {
+                        manifest.notes.ifBlank { "${manifest.versionName} is published." }
+                    } else {
+                        "This unit runs the newest published build (${manifest.versionName})."
+                    },
+                    publishedDate = manifest.published,
+                    isUpdateAvailable = available
                 )
                 _uiState.update {
-                    it.copy(updateState = UpdateCheckState.ERROR, updateInfo = info)
+                    it.copy(
+                        updateState = if (available) UpdateCheckState.UPDATE_AVAILABLE else UpdateCheckState.UP_TO_DATE,
+                        updateInfo = info
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        updateState = UpdateCheckState.ERROR,
+                        updateInfo = unknownState(
+                            "The update check failed: ${e.message ?: e.javaClass.simpleName}. No update status is known."
+                        )
+                    )
                 }
             }
         }
     }
 
+    /**
+     * Downloads the feed's APK, verifies it, and hands it to Android's installer. The user sees
+     * the system's confirmation; this method never installs anything on its own.
+     */
     fun downloadAndInstallUpdate(context: Context) {
-        val downloadUrl = _uiState.value.updateInfo?.downloadUrl ?: "https://github.com/jberggre/Phonix-OS/releases"
-        try {
-            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(downloadUrl)).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        val info = _uiState.value.updateInfo ?: return
+        if (info.apkDownloadUrl.isBlank() || info.sha256.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    updateState = UpdateCheckState.ERROR,
+                    updateInfo = info.copy(
+                        releaseNotes = "The feed published no APK with a SHA-256, so this build cannot install it itself."
+                    )
+                )
             }
-            context.startActivity(intent)
-        } catch (_: Exception) {
+            return
         }
-    }
 
-    private fun isNewerVersion(candidate: String, current: String): Boolean {
-        return VersionComparator.isNewer(candidate, current)
-    }
+        val manifest = UpdateManifest(
+            versionCode = info.latestVersionCode,
+            versionName = info.latestVersionName,
+            apkUrl = info.apkDownloadUrl,
+            sha256 = info.sha256,
+            notes = info.releaseNotes,
+            published = info.publishedDate
+        )
 
-    private fun extractJsonString(json: String, key: String): String? {
-        val pattern = "\"$key\"\\s*:\\s*\"([^\"]*)\"".toRegex()
-        return pattern.find(json)?.groups?.get(1)?.value?.replace("\\r\\n", "\n")?.replace("\\n", "\n")
-    }
+        _uiState.update {
+            it.copy(
+                updateState = UpdateCheckState.DOWNLOADING,
+                updateInfo = info.copy(releaseNotes = "Downloading ${info.latestVersionName}...")
+            )
+        }
 
-    private fun extractAssetDownloadUrl(json: String): String? {
-        val pattern = "\"browser_download_url\"\\s*:\\s*\"([^\"]*\\.apk)\"".toRegex()
-        return pattern.find(json)?.groups?.get(1)?.value
+        viewModelScope.launch {
+            try {
+                val installer = UpdateInstaller(getApplication())
+                val apk = withContext(Dispatchers.IO) {
+                    installer.download(
+                        manifest,
+                        onProgress = { line ->
+                            _uiState.update { state ->
+                                state.updateInfo?.let { current ->
+                                    state.copy(updateInfo = current.copy(releaseNotes = line))
+                                } ?: state
+                            }
+                        },
+                        onBytes = { written, total ->
+                            if (total > 0) {
+                                val percent = (written * 100 / total).toInt()
+                                val megabytes = written / (1024 * 1024)
+                                val totalMegabytes = total / (1024 * 1024)
+                                _uiState.update { state ->
+                                    state.updateInfo?.let { current ->
+                                        state.copy(
+                                            updateInfo = current.copy(
+                                                releaseNotes = "Downloading $percent% ($megabytes of $totalMegabytes MB)..."
+                                            )
+                                        )
+                                    } ?: state
+                                }
+                            }
+                        }
+                    )
+                }
+
+                _uiState.update {
+                    it.copy(
+                        updateState = UpdateCheckState.READY_TO_INSTALL,
+                        updateInfo = info.copy(
+                            releaseNotes = "Downloaded ${apk.length() / (1024 * 1024)} MB and matched the " +
+                                "published SHA-256. Android will ask you to confirm the install."
+                        )
+                    )
+                }
+
+                withContext(Dispatchers.Main) {
+                    installer.install(apk) { installed, message ->
+                        _uiState.update { state ->
+                            state.copy(
+                                updateState = if (installed) UpdateCheckState.IDLE else UpdateCheckState.ERROR,
+                                updateInfo = state.updateInfo?.copy(releaseNotes = message)
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        updateState = UpdateCheckState.ERROR,
+                        updateInfo = info.copy(
+                            releaseNotes = "The update was not installed: ${e.message ?: e.javaClass.simpleName}. " +
+                                "Nothing was changed."
+                        )
+                    )
+                }
+            }
+        }
     }
 
     // -------------------------------------------------------------
