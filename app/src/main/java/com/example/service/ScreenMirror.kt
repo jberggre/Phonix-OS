@@ -24,7 +24,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
-import android.view.WindowManager
+import android.view.Display
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
@@ -79,6 +79,24 @@ object ScreenMirror {
     internal fun setRunning(value: Boolean) {
         _running.value = value
     }
+
+    /**
+     * Surface size for a panel of [width]x[height] pixels.
+     *
+     * Pure so the arithmetic is testable. The defect this replaces used the metrics of whichever
+     * display the app was on: with the desktop on a 1920x1080 monitor it produced a 16:9 540x303
+     * surface for a 1080x2280 phone panel, so the mirrored picture had the monitor's shape.
+     */
+    fun captureSize(width: Int, height: Int, targetWidth: Int = CAPTURE_WIDTH): Pair<Int, Int> {
+        val w = width.coerceAtLeast(1)
+        val h = height.coerceAtLeast(1)
+        val outWidth = targetWidth.coerceAtLeast(1)
+        val outHeight = (h.toFloat() * outWidth / w).toInt().coerceAtLeast(1)
+        return outWidth to outHeight
+    }
+
+    /** Width the phone panel is scaled to; its height follows the panel's own aspect ratio. */
+    const val CAPTURE_WIDTH = 540
 
     private const val TAG = "PhonixScreenMirror"
 }
@@ -145,9 +163,13 @@ class ScreenMirrorService : Service() {
             return START_NOT_STICKY
         }
 
-        val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+        // Ask for the projection from a context that belongs to the phone panel. On Samsung DeX
+        // the framework binds a capture to the display of the requesting context, which is why a
+        // projection requested from the desktop returned the desktop. `MediaProjectionConfig`
+        // states the target display explicitly, but it only exists from API 34, so on this API 31
+        // unit the display-0 context is the lever. Measured, not assumed: see the log line below.
         val mediaProjection = try {
-            manager?.getMediaProjection(resultCode, data)
+            projectionManagerFor(phonePanel())?.getMediaProjection(resultCode, data)
         } catch (e: Throwable) {
             Log.w(TAG, "getMediaProjection failed", e)
             null
@@ -175,19 +197,40 @@ class ScreenMirrorService : Service() {
         }
     }
 
+    /** The built-in panel (display 0) as the system reports it, independent of this app's display. */
+    private fun phonePanel(): Display? = try {
+        getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+    } catch (_: Throwable) {
+        null
+    }
+
+    /** A MediaProjectionManager reached through a display-0 context, when one is available. */
+    private fun projectionManagerFor(display: Display?): MediaProjectionManager? {
+        val context = if (display != null) createDisplayContext(display) else this
+        return context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+    }
+
     private fun startCapture() {
         val mediaProjection = projection ?: return
         releaseVirtualDisplay()
 
+        // Measure the PHONE panel, not whichever display this app happens to be on. Measured on
+        // the SM-G973U with DeX on its HDMI monitor (2026-11-01): the service's
+        // WindowManager.defaultDisplay answered the 1920x1080 desktop, so the old code built a
+        // 16:9 540x303 surface and the window showed the desktop instead of the phone screen.
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
-        (getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(metrics)
+        phonePanel()?.getRealMetrics(metrics)
+        if (metrics.widthPixels <= 0 || metrics.heightPixels <= 0) {
+            @Suppress("DEPRECATION")
+            (getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager)
+                .defaultDisplay.getRealMetrics(metrics)
+        }
         val sourceWidth = metrics.widthPixels.coerceAtLeast(1)
         val sourceHeight = metrics.heightPixels.coerceAtLeast(1)
-        captureWidth = CAPTURE_WIDTH
-        captureHeight = (sourceHeight.toFloat() * CAPTURE_WIDTH / sourceWidth)
-            .toInt()
-            .coerceAtLeast(1)
+        val size = ScreenMirror.captureSize(sourceWidth, sourceHeight)
+        captureWidth = size.first
+        captureHeight = size.second
 
         val reader = ImageReader.newInstance(
             captureWidth,
@@ -207,7 +250,11 @@ class ScreenMirrorService : Service() {
             null,
             handler
         )
-        Log.i(TAG, "capturing at ${captureWidth}x$captureHeight")
+        Log.i(
+            TAG,
+            "panel ${sourceWidth}x$sourceHeight @${metrics.densityDpi}dpi -> " +
+                "capturing ${captureWidth}x$captureHeight"
+        )
     }
 
     private fun onImageAvailable(reader: ImageReader) {
@@ -331,7 +378,6 @@ class ScreenMirrorService : Service() {
         private const val TAG = "PhonixScreenMirror"
         private const val CHANNEL_ID = "phonix_screen_mirror"
         private const val NOTIFICATION_ID = 4711
-        private const val CAPTURE_WIDTH = 540
         private const val FRAME_INTERVAL_MS = 300L
     }
 }

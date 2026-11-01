@@ -32,7 +32,10 @@ features that were only placeholders now do real work:
   Alpine guest. The model is downloaded outside the APK, SHA-256 verified, and only marked READY
   after `/health` answers. Measured on the S10: **8.2–17.2 tok/s**, CPU only, no cloud call.
 - **Phone Screen** — restored as a real, read-only `MediaProjection` view. It shows the actual
-  default display (verified first frame 540×1140) and does not pretend to inject touches.
+  default display (verified first frame 540×1140) and does not pretend to inject touches. On
+  2026-11-01 the capture was aimed at the built-in panel by display: with the desktop on the HDMI
+  monitor it had been mirroring the monitor (`panel 1080x2280 -> capturing 540x1140` now, see
+  [VERIFICATION §14](docs/VERIFICATION.md)).
 
 The **installed** APK on the bench unit is `1.5 (versionCode 6)`, installed 2026-10-31 over the
 device-owner build from this tree (APK 30,013,418 bytes). See

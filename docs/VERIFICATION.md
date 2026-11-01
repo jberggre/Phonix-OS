@@ -1104,3 +1104,59 @@ unit is current unless the feed actually said so.
 - A download needs a connection and about 30 MB free while the old build is still installed. Nothing
   prunes the cache except a successful install.
 
+## 14. Phone Screen targets the phone panel — 2026-11-01 (measured, S10 + DeX)
+
+### The defect
+
+With Phonix running fullscreen on the 1920x1080 HDMI desktop (display 2) and the phone panel on
+display 0:
+
+- The capture service measured `WindowManager.defaultDisplay` from its own context and got the
+  **desktop**: 1920x1080 at 160 dpi.
+- It built a **540x303 (16:9)** virtual display — `dumpsys display` showed
+  `phonix-phone-screen ... 540 x 303` — and logged `capturing at 540x303`.
+- The frames were the desktop: the window showed Phonix's own network-onboarding card while a
+  simultaneous `screencap -d 0` showed the phone's Gemini dialog on a black panel.
+
+So the one surface that exists to show the cracked phone screen showed the monitor instead.
+
+### What changed
+
+| Change | File |
+|---|---|
+| Panel metrics come from `DisplayManager.getDisplay(Display.DEFAULT_DISPLAY)`; the surface keeps the panel's aspect ratio | `service/ScreenMirror.kt` |
+| The projection is requested from a **display-0 context** (`Context.createDisplayContext(panel)`) | `service/ScreenMirror.kt` |
+| API 34+ asks the system for `MediaProjectionConfig.createConfigForDefaultDisplay()` | `ui/components/PhoneMirrorWindow.kt` |
+| Copy says it captures the panel, not this desktop; the display-0 recursion card is unchanged | `ui/components/PhoneMirrorWindow.kt` |
+| `ScreenMirror.captureSize()` is pure and unit-tested | `ScreenMirrorGeometryTest` |
+
+One UI 4.1 binds a MediaProjection capture to the display of the requesting context, so the
+display-0 context is the only app-level lever on API 31; `MediaProjectionConfig`, which states the
+target display directly, exists only from API 34.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL, 58 tests, 0 failures**. New
+  `ScreenMirrorGeometryTest` (4): 1080x2280 → 540x1140, 1920x1080 → 540x303 and deliberately *not*
+  equal to the panel size, landscape 2280x1080 → 540x255, and degenerate input cannot produce a
+  zero-height surface.
+- [measured] `adb install -r` over the device-owner build: `Success`; device owner intact.
+- [measured] log after consent: `panel 1080x2280 @420dpi -> capturing 540x1140`, then
+  `first captured frame 540x1140`; `dumpsys display` reports the virtual display at 540x1140.
+- [measured] the window frame shows the phone panel (Gemini dialog, status bar 58%), matching a
+  simultaneous `screencap -d 0`; no part of the desktop is in the picture.
+- [measured] closing the window stopped the session: `dumpsys media_projection` → `null`, no
+  `ScreenMirrorService`, crash buffer empty.
+
+### Not run, and why it matters
+
+- **The stock consent window ignored injected taps** on this DeX display in most attempts, while the
+  same `input -d 2 tap` works on Phonix's own windows. The run above was granted with
+  `appops set … PROJECT_MEDIA allow`, which was then reset to `default`, so the shipped gate is
+  still Android's per-session dialog and a real pointer is needed to answer it.
+- Not run: capture after moving the desktop onto display 0 (the recursion guard is unchanged),
+  rotation during a live capture, and the API 34 config path (the unit is API 31).
+- Measured on the same display and **not fixed**: Start → All apps → "Phonix OS apps" shows 11 of
+  19 apps with `userScrollEnabled = false`, so the other eight cannot be reached from All apps.
+  That is the known Start-menu clipping issue, now measured on the desktop rather than the phone.
+

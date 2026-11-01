@@ -5,6 +5,26 @@ Phone Screen as a real view. This page is the **work queue**. Read
 [VERIFICATION.md](VERIFICATION.md) for the evidence behind every claim, [ROADMAP.md](ROADMAP.md)
 for the research and sources, and [PROVISIONING.md](PROVISIONING.md) before touching the unit.
 
+## Phone Screen round (2026-11-01, S10 over wireless adb + HDMI monitor)
+
+The window that exists to show the cracked phone panel was showing the desktop. Measured with the
+desktop fullscreen on the HDMI display: the capture service sized its surface from its own
+`defaultDisplay` (1920x1080 at 160 dpi → **540x303, 16:9**) and the frames held Phonix's own
+network-onboarding card, while display 0 was showing the phone's Gemini dialog.
+
+Fixed in `service/ScreenMirror.kt` and `ui/components/PhoneMirrorWindow.kt`: the surface now comes
+from display 0's real metrics (`panel 1080x2280 @420dpi -> capturing 540x1140`), the projection is
+requested from a display-0 context because One UI 4.1/DeX binds the capture to the requesting
+context's display, and API 34+ asks for `MediaProjectionConfig.createConfigForDefaultDisplay()`.
+`ScreenMirror.captureSize()` is pure, with 4 new tests (58 total, green). The APK was installed over
+the device-owner build and the frame was checked against `screencap -d 0`.
+
+**Still owed on this path:** the stock consent window did not accept injected taps on this DeX
+display (a real pointer does; the run used a temporary `PROJECT_MEDIA` app-op that was reset), the
+display-0 recursion guard is unchanged, rotation during capture and the API 34 path are unmeasured.
+**Also measured, not fixed:** Start → All apps → "Phonix OS apps" clips at 11 of 19 entries with
+scrolling disabled, so eight apps are unreachable there. Details in [VERIFICATION.md](VERIFICATION.md) §14.
+
 ## Update-path round (2026-10-31, S10 over USB)
 
 The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`
