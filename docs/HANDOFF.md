@@ -57,6 +57,15 @@ refuses a plain-http feed. 60 tests green, shipping check PASS. Container/update
 code+unit evidence only — no distro switch or feed was run. Remaining findings listed at the end
 of [VERIFICATION.md](VERIFICATION.md) §19.
 
+Same round, after the audit: a maximized window carried its own 50 dp bottom reserve on top of the
+window layer's bar inset, so a bar on the right (or left, or top) still lifted every maximized window
+50 dp off the bottom edge, and a bottom bar reserved 100 dp. That reserve is gone — the layer's inset
+is the only one — measured maximized with the bar right (border in rows 1078-1079) and bottom (border
+at 1028-1029, bar 1030-1079). A dragged desktop icon also used to keep its raw offset when the bar
+changed edge, which put the Browser caption on top of a bottom bar; custom offsets are clamped into
+the current icon area now, render-side only, so nothing drifts. 60 tests green, crash buffer empty.
+[VERIFICATION.md](VERIFICATION.md) §20.
+
 ## Update-path round (2026-10-31, S10 over USB)
 
 The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`

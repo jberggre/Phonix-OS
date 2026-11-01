@@ -1332,3 +1332,30 @@ distro download/installed sizes in `LinuxDistro` are stale (measured today: 90.6
 74.1 MB, and the Debian tree on the unit is 1.3 GB, not ~300 MB); `PhoneMirrorWindow` still suggests
 `adb shell input tap` for consent, which VERIFICATION §14 measured as not working; `HANDOFF` §12
 credits an xz dependency this build does not have.
+
+## §20 — Content keeps clear of the bar only on the edge the bar is on (2026-11-01)
+
+`DesktopWindowFrame` drew a maximized window as `fillMaxSize().padding(bottom = 50.dp)` while the
+window layer around it was *already* inset by the docked bar on whichever edge it sat on. A bottom bar
+therefore reserved 100 dp — 50 dp of dead space between the window and the bar — and a bar on the
+right, left or top still reserved 50 dp at the bottom, so a maximized Phonix Browser hung off the
+bottom edge with nothing under it.
+
+The maximized branch is `Modifier.fillMaxSize()` now; the layer's own inset is the only reserve.
+
+- [measured] Bar **right**, Phonix Browser maximized on the 1920x1080 DeX display: the window's accent
+  border occupies rows 1078-1079, i.e. the window reaches the bottom edge of the screen
+  (`artifacts/session/max-right2.png`).
+- [measured] Bar **bottom**, the same maximized window: border at 1028-1029, bar at 1030-1079 —
+  exactly the 50 dp the bar needs and no gap (`artifacts/session/max-bottom.png`).
+- [measured] `assembleDebug testDebugUnitTest` green, 60 tests, 0 failures; crash buffer empty after
+  install, launch, maximize/restore and two dock changes.
+- Not measured: left and top bars with a maximized window (same branch, same single expression), and
+  non-maximized windows, which were never affected — their size comes from `WindowBounds`.
+
+The same edge change moved the bar's bottom reserve from 54 dp to 12 dp under a *dragged* desktop
+icon, which stores its offset inside the icon area. `sc_browser` held `hasCustomPosition:true,
+posY:918.7`; measured with the bar docked bottom the Browser tile and its caption sat on the bar
+(`artifacts/session/icons-bottom.png`). Custom positions are now clamped into the current icon area,
+so the icon is lifted clear of a bottom bar and returns to its stored spot when the bar leaves that
+edge. Fixed render-side only: the stored value is unchanged, so nothing drifts across dock changes.

@@ -307,6 +307,14 @@ fun PhonixDesktopScreen(
                     val iconsByPackage = remember(uiState.installedApps) {
                         uiState.installedApps.associateBy { it.packageName }
                     }
+                    // A freeform icon stores its offset inside this area, and the area changes
+                    // size when the bar moves to another edge. Clamp instead of translating: an
+                    // icon dragged to the very bottom of a right-docked desktop is lifted clear of
+                    // a bottom bar rather than drawn on top of it, and returns to exactly where it
+                    // was when the bar leaves the bottom edge.
+                    val maxIconX = (screenWidth - startPadding - endPadding - 100.dp)
+                        .coerceAtLeast(0.dp).value
+                    val maxIconY = (iconAreaHeight - 96.dp).coerceAtLeast(0.dp).value
                     desktopShortcuts.forEachIndexed { index, shortcut ->
                         val effectiveShortcut = if (!shortcut.hasCustomPosition) {
                             shortcut.copy(
@@ -314,7 +322,10 @@ fun PhonixDesktopScreen(
                                 posY = gridTop.value + ((index / iconColumns) * rowStride.value)
                             )
                         } else {
-                            shortcut
+                            shortcut.copy(
+                                posX = shortcut.posX.coerceIn(0f, maxIconX),
+                                posY = shortcut.posY.coerceIn(0f, maxIconY)
+                            )
                         }
                         val appIcon = effectiveShortcut.launchPackage
                             ?.let { iconsByPackage[it] }
@@ -1439,7 +1450,11 @@ fun DesktopWindowFrame(
                 )
             }
             .then(
-                if (window.isMaximized) Modifier.fillMaxSize().padding(bottom = 50.dp)
+                // The windows layer is already inset by the docked taskbar on every edge, so a
+                // maximized window fills exactly that area. This used to reserve a fixed 50 dp at
+                // the bottom, which double-inset a bottom bar and, with the bar on the left or
+                // right, lifted the window off the bottom edge for no reason at all.
+                if (window.isMaximized) Modifier.fillMaxSize()
                 else Modifier.size(width = window.width.dp, height = window.height.dp)
             )
             .zIndex(window.zIndex)
