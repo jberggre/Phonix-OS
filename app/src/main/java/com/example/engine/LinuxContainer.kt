@@ -88,13 +88,8 @@ class LinuxContainer(
         val marker = File(target, ".phonix-installed")
         if (marker.isFile && isInstalled) return
 
-        // A previous run may have died mid-extraction; start from a clean tree.
-        if (target.exists()) target.deleteRecursively()
-        target.mkdirs()
-        workDir.mkdirs()
-
         onProgress("Unpacking Alpine Linux root filesystem (first run, ~4 MB)...")
-        val extracted = TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
+        val extracted = extractBundled(target)
         onProgress("Unpacked $extracted files.")
         writeGuestConfig(target)
         marker.writeText("alpine-minirootfs-3.24.3-aarch64\n")
@@ -144,11 +139,42 @@ class LinuxContainer(
         }
 
         prefs.edit().putString("active_distro_id", distro.id).apply()
-        if (debloatPrevious && previousId != distro.id) {
+        // The bundled guest is never pruned: it ships inside the APK, so it is the offline
+        // rescue image, and the promise that it survives every switch has to hold in code. The
+        // prune used to delete it like any other tree, which left one userspace and no fallback.
+        val previous = com.example.model.DistroCatalog.getDistro(previousId)
+        if (debloatPrevious && previousId != distro.id && !previous.isBundled) {
             onProgress("Debloating $previousId to recover storage...")
             File(context.filesDir, "linux/$previousId").deleteRecursively()
         }
         onProgress("${distro.name} is ready.")
+    }
+
+    /**
+     * Unpacks the bundled minirootfs into [target] without destroying the guest already there.
+     *
+     * The tree is built in a sibling staging directory and promoted only after extraction has
+     * finished, so a disk-full, OOM or corrupt asset leaves the existing userspace untouched.
+     * The old code deleted `target` first, which could leave the app with no userspace at all
+     * and no way back in.
+     */
+    private fun extractBundled(target: File): Int {
+        val staging = File(target.parentFile, ".${target.name}-staging")
+        staging.deleteRecursively()
+        staging.mkdirs()
+        workDir.mkdirs()
+        val extracted = try {
+            TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(staging)
+        } catch (e: Throwable) {
+            staging.deleteRecursively()
+            throw e
+        }
+        target.deleteRecursively()
+        if (!staging.renameTo(target)) {
+            staging.copyRecursively(target, overwrite = true)
+            staging.deleteRecursively()
+        }
+        return extracted
     }
 
     private fun installBundled(
@@ -156,11 +182,8 @@ class LinuxContainer(
         target: File,
         onProgress: (String) -> Unit
     ) {
-        target.deleteRecursively()
-        target.mkdirs()
-        workDir.mkdirs()
         onProgress("Extracting bundled ${distro.name} rootfs...")
-        val extracted = TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(target)
+        val extracted = extractBundled(target)
         onProgress("Extracted $extracted files for ${distro.name}.")
     }
 

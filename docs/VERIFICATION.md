@@ -1280,3 +1280,55 @@ the expanded panel opens underneath it.
 - [measured] Crash buffer empty.
 
 Not run: the compact phone-panel form with a top bar (the pill shortens to "Phonix" below 600 dp).
+
+## 19. Audit fixes: lost settings, rescue guest, updater threading (2026-11-01)
+
+An audit pass over every feature found six defects that either lost user state or broke a promise
+made in these documents. All six are fixed here.
+
+| Defect | Fix | File |
+|---|---|---|
+| The icon-frame toggle never came back: the saver wrote `showIconFramesV3`, the reader asked for `showIconFramesV2` | reader follows the writer; V2 is still read for layouts written before the rename | `util/DesktopPrefs.kt` |
+| `areAllWindowsHidden` was set in the view model and never written to disk | saved and restored, so "Show Desktop" survives a relaunch | `util/DesktopPrefs.kt` |
+| The prune deleted the bundled Alpine tree, so "the rescue image is never pruned" was not true | a bundled distro is excluded from the prune | `engine/LinuxContainer.kt` |
+| Bundled extraction deleted the working tree *before* unpacking, so a failure left no userspace | unpack into `.alpine-staging`, promote only after a complete extraction | `engine/LinuxContainer.kt` |
+| `UpdateInstaller.install()` did PackageManager queries and the APK copy on the caller's (main) thread, and kept one static receiver slot | work moved to a single-thread executor, results posted back to main, one receiver per session | `engine/UpdateInstaller.kt` |
+| `readFeed()` accepted a plain-http feed URL although the class documents HTTPS | `require(url.startsWith("https://"))` | `engine/UpdateInstaller.kt` |
+
+`DesktopPrefsRoundTripTest` is new and pins the two prefs fixes: a save/load round trip of
+`showIconFrames`, `areAllWindowsHidden`, `iconSize`, `taskbarPosition` and `lockIconsToGrid`, plus a
+legacy layout written with `showIconFramesV2` still being honoured.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL, 60 tests, 0 failures** (58 + the 2 new
+  prefs tests).
+- [measured] `tools/verify-shipping.sh --apk … --serial …` — **PASS**: install `Success`,
+  `1.5 (versionCode 6)`, crash buffer clean, device owner intact, `rootfs trees: alpine debian tmp`,
+  bundled Alpine rescue present.
+- [measured] The saved layout on the unit now carries both repaired keys
+  (`"showIconFramesV3":false`, `"areAllWindowsHidden":false`) inside `desktop_state_v1`.
+- [measured] After this reinstall the desktop came back with the taskbar still on the **top** edge it
+  had been left on, i.e. the stored position is applied at launch (`artifacts/session/fix-1-top.png`);
+  docking it to the right from the bar's own menu still works (`fix-2-dock.png`).
+- [measured] Crash buffer empty after install, launch and a re-dock.
+
+### Not exercised on device
+
+The three container/updater repairs are code- and unit-level only:
+
+- bundled re-extraction into staging (needs the Alpine tree deleted first — destructive, and the
+  project rule is not to remove a working userspace),
+- the prune exclusion (needs a real distro switch, ~90 MB download),
+- the HTTPS feed guard (no feed is hosted; the update path still has no end-to-end run).
+
+### Remaining audit findings, knowingly left
+
+`Windows11StartMenu` counts Android apps under an "App Collection (N)" label above a mixed list;
+`ScreenMirror` allocates a frame per 300 ms without recycling the previous bitmap; `HostDebloat`
+sizes only the base APK so the storage-weight view under-reports split apps; the dock menu's
+`onDismiss` is unused and the hint line is not clickable; the vertical bar drops the IP readout; the
+distro download/installed sizes in `LinuxDistro` are stale (measured today: 90.6 / 121.8 / 170.0 /
+74.1 MB, and the Debian tree on the unit is 1.3 GB, not ~300 MB); `PhoneMirrorWindow` still suggests
+`adb shell input tap` for consent, which VERIFICATION §14 measured as not working; `HANDOFF` §12
+credits an xz dependency this build does not have.

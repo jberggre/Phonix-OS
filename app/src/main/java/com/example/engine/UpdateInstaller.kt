@@ -11,6 +11,8 @@ import android.content.pm.PackageManager
 import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -22,6 +24,8 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 import java.util.Locale
 
 /**
@@ -41,8 +45,18 @@ class UpdateInstaller(private val context: Context, private val userAgent: Strin
 
     private val appContext: Context = context.applicationContext
 
+    /** Package-manager queries, the APK copy and the session commit run here, never on main. */
+    private val io = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "phonix-update").apply { isDaemon = true }
+    }
+
     /** Reads the feed document. Redirects are followed; a non-2xx is an error, not an empty state. */
     fun readFeed(url: String): String {
+        // The feed decides which APK is offered, so it gets the same https rule the archive
+        // URL has. A plain-http feed could otherwise hand over any build it liked.
+        require(url.startsWith("https://", ignoreCase = true)) {
+            "The update feed must be served over https"
+        }
         val conn = open(url, timeoutMs = 20_000)
         try {
             val code = conn.responseCode
@@ -135,93 +149,116 @@ class UpdateInstaller(private val context: Context, private val userAgent: Strin
      * Android's confirmation through [onResult]. Must be called on the main thread.
      */
     fun install(apk: File, onResult: (Boolean, String) -> Unit) {
-        val pm = appContext.packageManager
+        val main = Handler(Looper.getMainLooper())
+        // Results are posted back to the main thread; every exit below goes through `finish`.
+        val finish: (Boolean, String) -> Unit = { ok, message -> main.post { onResult(ok, message) } }
 
-        if (!signersMatch(apk)) {
-            onResult(
-                false,
-                "The downloaded APK is not signed by this app's key, so Android would refuse it. " +
-                    "Nothing was installed."
-            )
-            return
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !pm.canRequestPackageInstalls()) {
-            onResult(
-                false,
-                "Android needs “Install unknown apps” for Phonix before it can apply an update. " +
-                    "The setting has been opened for you."
-            )
-            runCatching {
-                appContext.startActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                        Uri.parse("package:${appContext.packageName}")
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-            return
-        }
-
-        val installer = pm.packageInstaller
-        val sessionId: Int
-        try {
-            val params = PackageInstaller.SessionParams(
-                PackageInstaller.SessionParams.MODE_FULL_INSTALL
-            ).apply { setAppPackageName(appContext.packageName) }
-            sessionId = installer.createSession(params)
-
-            installer.openSession(sessionId).use { session ->
-                val out = session.openWrite("phonix-update.apk", 0, apk.length())
-                try {
-                    FileInputStream(apk).use { it.copyTo(out) }
-                    session.fsync(out)
-                } finally {
-                    out.close()
+        // Signing checks are two PackageManager queries plus an archive parse, and the session
+        // writes the whole APK. Running that on the caller's (main) thread was the stall this
+        // class's own documentation warns about.
+        io.execute {
+            try {
+                if (!signersMatch(apk)) {
+                    finish(
+                        false,
+                        "The downloaded APK is not signed by this app's key, so Android would refuse it. " +
+                            "Nothing was installed."
+                    )
+                    return@execute
                 }
 
-                val receiver = object : BroadcastReceiver() {
-                    override fun onReceive(ctx: Context?, intent: Intent?) {
-                        runCatching { appContext.unregisterReceiver(this) }
-                        if (pendingReceiver === this) pendingReceiver = null
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    !appContext.packageManager.canRequestPackageInstalls()
+                ) {
+                    main.post { openUnknownSourcesSettings() }
+                    finish(
+                        false,
+                        "Android needs “Install unknown apps” for Phonix before it can apply an update. " +
+                            "The setting has been opened for you."
+                    )
+                    return@execute
+                }
 
-                        val status = intent?.getIntExtra(
-                            PackageInstaller.EXTRA_STATUS,
-                            PackageInstaller.STATUS_FAILURE
-                        ) ?: PackageInstaller.STATUS_FAILURE
-                        val message = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
-                        apk.delete()
+                commitSession(apk, finish)
+            } catch (e: Exception) {
+                Log.w(TAG, "could not start the update install", e)
+                finish(
+                    false,
+                    "Could not hand the update to Android: ${e.message ?: e.javaClass.simpleName}"
+                )
+            }
+        }
+    }
 
-                        if (status == PackageInstaller.STATUS_SUCCESS) {
-                            onResult(true, "Android installed the verified update.")
-                        } else {
-                            onResult(
-                                false,
-                                "The installer refused the update (status $status)" +
-                                    if (message.isBlank()) "." else ": $message"
-                            )
-                        }
+    /** Opens Android's per-app "install unknown apps" screen. Main thread only. */
+    private fun openUnknownSourcesSettings() {
+        runCatching {
+            appContext.startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${appContext.packageName}")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    /**
+     * Creates the package-install session and commits it.
+     *
+     * Each session keeps its own receiver in [pendingReceivers]; the single static slot this
+     * replaced meant a second update silently orphaned the first session's result.
+     */
+    private fun commitSession(apk: File, finish: (Boolean, String) -> Unit) {
+        val installer = appContext.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(
+            PackageInstaller.SessionParams.MODE_FULL_INSTALL
+        ).apply { setAppPackageName(appContext.packageName) }
+        val sessionId = installer.createSession(params)
+
+        installer.openSession(sessionId).use { session ->
+            val out = session.openWrite("phonix-update.apk", 0, apk.length())
+            try {
+                FileInputStream(apk).use { it.copyTo(out) }
+                session.fsync(out)
+            } finally {
+                out.close()
+            }
+
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    runCatching { appContext.unregisterReceiver(this) }
+                    pendingReceivers.remove(this)
+
+                    val status = intent?.getIntExtra(
+                        PackageInstaller.EXTRA_STATUS,
+                        PackageInstaller.STATUS_FAILURE
+                    ) ?: PackageInstaller.STATUS_FAILURE
+                    val message = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
+                    apk.delete()
+
+                    if (status == PackageInstaller.STATUS_SUCCESS) {
+                        finish(true, "Android installed the verified update.")
+                    } else {
+                        finish(
+                            false,
+                            "The installer refused the update (status $status)" +
+                                if (message.isBlank()) "." else ": $message"
+                        )
                     }
                 }
-                ContextCompat.registerReceiver(
-                    appContext,
-                    receiver,
-                    IntentFilter(ACTION_INSTALL_RESULT),
-                    ContextCompat.RECEIVER_NOT_EXPORTED
-                )
-                pendingReceiver = receiver
-
-                val intent = Intent(ACTION_INSTALL_RESULT).setPackage(appContext.packageName)
-                val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                val pending = PendingIntent.getBroadcast(appContext, sessionId, intent, flags)
-                session.commit(pending.intentSender)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "could not start the update install", e)
-            onResult(
-                false,
-                "Could not hand the update to Android: ${e.message ?: e.javaClass.simpleName}"
+            ContextCompat.registerReceiver(
+                appContext,
+                receiver,
+                IntentFilter(ACTION_INSTALL_RESULT),
+                ContextCompat.RECEIVER_NOT_EXPORTED
             )
+            pendingReceivers += receiver
+
+            val intent = Intent(ACTION_INSTALL_RESULT).setPackage(appContext.packageName)
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            val pending = PendingIntent.getBroadcast(appContext, sessionId, intent, flags)
+            session.commit(pending.intentSender)
         }
     }
 
@@ -276,7 +313,7 @@ class UpdateInstaller(private val context: Context, private val userAgent: Strin
 
         private const val TAG = "PhonixUpdate"
 
-        /** The session's receiver must outlive the call that registered it. */
-        private var pendingReceiver: BroadcastReceiver? = null
+        /** Receivers for in-flight sessions. Each removes itself when its result arrives. */
+        private val pendingReceivers = CopyOnWriteArrayList<BroadcastReceiver>()
     }
 }
