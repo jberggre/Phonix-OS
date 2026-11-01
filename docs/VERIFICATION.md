@@ -1188,3 +1188,51 @@ categories) were left alone: they scroll by themselves and carry no fixed cap.
 
 Not run: the Android-app tabs (compact / storage weight / categories) were not clicked through after
 the change, and there was no rotation or 320 dp narrow-width check of the new rows.
+
+## 16. Taskbar docking: bottom, left, right, top (2026-11-01, S10 + HDMI monitor)
+
+The bar could only sit at the bottom. `TaskbarPosition` had two values (`BOTTOM`, `TOP`), nothing
+called `updateTaskbarPosition`, and `PhonixDesktopScreen` hard-placed the bar at
+`Alignment.BottomCenter` with a fixed 50 dp inset, so on a monitor the bar permanently cost 50 dp of
+height and there was no way to move it.
+
+### What changed
+
+| Change | File |
+|---|---|
+| `TaskbarPosition` gains `LEFT`/`RIGHT`, a `title`, `isVertical`; new `TaskbarMenu` menu data | `model/DesktopCustomization.kt` |
+| `openTaskbarContextMenu(position)` | `viewmodel/PhonixViewModel.kt` |
+| Vertical bar layout (56 dp column: start, search, scrolling app strip, stacked tray, show-desktop) and the dock gesture on the bar | `ui/components/Windows11Taskbar.kt` |
+| Dock menu with Bottom / Left / Right / Top and a tick on the current edge | `ui/components/DesktopContextMenu.kt` |
+| Work area, icon grid, window layer and Start menu follow the bar's edge | `ui/components/PhonixDesktopScreen.kt` |
+
+The menu is placed by alignment, on the opposite side of the bar's edge, rather than at the pointer
+offset, so it can never open underneath the bar or off-screen. The gesture is a secondary-button
+press with a mouse and a long press in the empty bar area for touch. The bar's own dimensions
+(`TASKBAR_HEIGHT_DP`, `TASKBAR_WIDTH_DP`) are single constants that the work-area inset reads, so a
+window can never be dragged under the bar or lose its resize grip to it.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, 58 tests, 0 failures.
+- [measured] Long-press on the bar opens the dock menu on the DeX display, at the bar's bottom edge
+  (`artifacts/session/dock-1-menu.png`) and, after docking to the top, just below the top bar
+  (`dock-6-menu-top.png`, tick on "Top").
+- [measured] All four edges applied in one session on 1920x1080: bottom, **left** (`dock-2-left.png`
+  — vertical bar, desktop icons shifted right of it), **top** (`dock-4-top.png` — bar across the
+  top, icons and widgets below it), **right** (`dock-7-right.png` — vertical bar, Vitals widget
+  pulled left of it).
+- [measured] Start opens beside the right-docked bar instead of under it (`dock-8-start-right.png`).
+- [measured] A Terminal window opened inside the inset work area, clear of the right bar, and the
+  guest answered `root@debian:~#` (`dock-9-window-right.png`).
+- [measured] The choice persists: `shared_prefs/phonix_desktop_prefs.xml` holds
+  `"taskbarPosition":"RIGHT"` in `desktop_state_v1` after the change.
+- [measured] Crash buffer empty (`logcat -b crash` → 0 entries for the package).
+
+### Not run
+
+- **Mouse right-click is unmeasured.** `adb shell input` only injects the primary button, so the
+  secondary-button path (`PointerType.Mouse && buttons.isSecondaryPressed`, the same mechanism the
+  desktop icons use) was exercised only by long-press. It needs a real mouse on the DeX display.
+- Not run: dragging/resizing a window against a left or top bar, and the phone-panel portrait layout
+  with a vertical bar (a 56 dp bar on a 360 dp-wide phone leaves 300 dp of desktop).

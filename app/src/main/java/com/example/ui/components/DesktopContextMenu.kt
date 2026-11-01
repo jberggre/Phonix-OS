@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -70,6 +71,7 @@ import com.example.model.DesktopShortcut
 import com.example.model.IconSizeMode
 import com.example.model.ShortcutBgStyle
 import com.example.model.ShortcutShape
+import com.example.model.TaskbarPosition
 import com.example.model.WindowType
 import com.example.ui.theme.PhonixAmber
 import com.example.ui.theme.PhonixBlue
@@ -202,6 +204,16 @@ fun DesktopContextMenu(
                 modifier = modifier
             )
 
+        }
+        is DesktopContextMenuData.TaskbarMenu -> {
+            TaskbarContextMenuView(
+                position = menuData.position,
+                onSelect = { docked ->
+                    viewModel.updateTaskbarPosition(docked)
+                    viewModel.closeContextMenu()
+                },
+                onDismiss = { viewModel.closeContextMenu() }
+            )
         }
     }
 }
@@ -690,5 +702,92 @@ private fun ContextMenuItem(
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
         Text(title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Normal)
+    }
+}
+
+/**
+ * The taskbar's own menu: dock it to the bottom, left, right or top.
+ *
+ * It is placed by alignment instead of pointer offset, and always on the opposite side of the edge
+ * the bar occupies, so the menu can neither cover the bar it belongs to nor land off-screen when
+ * the bar is docked to the right or the top.
+ */
+@Composable
+private fun TaskbarContextMenuView(
+    position: TaskbarPosition,
+    onSelect: (TaskbarPosition) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val alignment = when (position) {
+        TaskbarPosition.BOTTOM -> Alignment.BottomCenter
+        TaskbarPosition.TOP -> Alignment.TopCenter
+        TaskbarPosition.LEFT -> Alignment.CenterStart
+        TaskbarPosition.RIGHT -> Alignment.CenterEnd
+    }
+    val dx = when (position) {
+        TaskbarPosition.LEFT -> 64.dp
+        TaskbarPosition.RIGHT -> (-64).dp
+        else -> 0.dp
+    }
+    val dy = when (position) {
+        TaskbarPosition.BOTTOM -> (-60).dp
+        TaskbarPosition.TOP -> 60.dp
+        else -> 0.dp
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier
+                .align(alignment)
+                .offset(x = dx, y = dy)
+                .widthIn(min = 200.dp, max = 240.dp)
+                .shadow(16.dp, RoundedCornerShape(10.dp))
+                .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                .testTag("taskbar_context_menu"),
+            shape = RoundedCornerShape(10.dp),
+            color = Slate950.copy(alpha = 0.96f)
+        ) {
+            Column(modifier = Modifier.padding(6.dp)) {
+                Text(
+                    "Taskbar position",
+                    color = Slate400,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 10.dp, top = 2.dp, bottom = 4.dp)
+                )
+                TaskbarPosition.entries.forEach { option ->
+                    val isSelected = option == position
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onSelect(option) }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = if (isSelected) PhonixCyan else Color.Transparent,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            option.title,
+                            color = if (isSelected) Color.White else Slate200,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+                HorizontalDivider(color = Slate800, modifier = Modifier.padding(vertical = 3.dp))
+                Text(
+                    "Right-click the taskbar, or long-press it on a touch screen, to reopen this.",
+                    color = Slate400,
+                    fontSize = 9.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
     }
 }

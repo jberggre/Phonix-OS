@@ -49,9 +49,20 @@ enum class ShortcutBgStyle(val title: String) {
     TRANSPARENT("Transparent")
 }
 
-enum class TaskbarPosition {
-    BOTTOM,
-    TOP
+/**
+ * Which edge the taskbar is docked to.
+ *
+ * Left and right matter most on a monitor: a vertical bar gives back the 50 dp of height a
+ * bottom bar costs, and a window that is taller than the screen finally fits. Every surface that
+ * lays out against the bar reads this one value (work area, icon grid, Start menu, taskbar).
+ */
+enum class TaskbarPosition(val title: String) {
+    BOTTOM("Bottom"),
+    LEFT("Left"),
+    RIGHT("Right"),
+    TOP("Top");
+
+    val isVertical: Boolean get() = this == LEFT || this == RIGHT
 }
 
 enum class TaskbarStyle(val title: String) {
@@ -210,6 +221,12 @@ sealed class DesktopContextMenuData {
         val posX: Float,
         val posY: Float
     ) : DesktopContextMenuData()
+
+    /**
+     * Right-click (mouse) or long-press (finger) on the taskbar itself. The bar's own menu, so
+     * changing its edge does not require opening Personalize.
+     */
+    data class TaskbarMenu(val position: TaskbarPosition) : DesktopContextMenuData()
 }
 
 data class DesktopCustomization(

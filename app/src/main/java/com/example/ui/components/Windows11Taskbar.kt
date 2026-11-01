@@ -6,14 +6,18 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -22,25 +26,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Storefront
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.Composable
@@ -63,9 +55,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.DesktopShortcut
+import com.example.model.TaskbarPosition
 import com.example.model.WindowType
 import com.example.ui.theme.PhonixAmber
-import com.example.ui.theme.PhonixBlue
 import com.example.ui.theme.PhonixBlueLight
 import com.example.ui.theme.PhonixCyan
 import com.example.ui.theme.PhonixGreen
@@ -93,12 +85,21 @@ private data class TaskbarAppEntry(
     val shortcut: DesktopShortcut?
 )
 
+/**
+ * The desktop taskbar.
+ *
+ * It docks to any edge: [position] decides whether the bar is a horizontal strip along the top or
+ * bottom, or a vertical strip down the left or right. The bar owns its own dock gesture
+ * (right-click with a mouse, long-press with a finger) so the edge can be changed from where the
+ * user is looking, without opening a settings window.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Windows11Taskbar(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    position: TaskbarPosition = TaskbarPosition.BOTTOM
 ) {
     val context = LocalContext.current
     // The brand block and fixed tray leave too little room for the app strip on a phone or a
@@ -106,6 +107,7 @@ fun Windows11Taskbar(
     // clipping them; the wide desktop keeps the centered Windows 11 layout untouched.
     val compactTaskbar = LocalConfiguration.current.screenWidthDp < 600
     val taskbarAppsScroll = rememberScrollState()
+    val verticalAppsScroll = rememberScrollState()
     var currentTime by remember { mutableStateOf("") }
     var currentDate by remember { mutableStateOf("") }
 
@@ -156,10 +158,143 @@ fun Windows11Taskbar(
         }
     }
 
+    // A mouse right-click opens the dock menu directly. detectTapGestures only understands the
+    // primary button, so the secondary button is read from the raw pointer event. The press is
+    // consumed so it cannot also start an app from the button underneath.
+    val dockMenuGesture = Modifier.pointerInput(uiState.customization.taskbarPosition) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val secondary = down.type == PointerType.Mouse && currentEvent.buttons.isSecondaryPressed
+            if (secondary) {
+                down.consume()
+                viewModel.openTaskbarContextMenu(uiState.customization.taskbarPosition)
+            }
+        }
+    }
+    // Touch has no second button, so the same menu opens on a long press in the empty bar area.
+    val longPressDock = Modifier.combinedClickable(
+        onClick = {},
+        onLongClick = { viewModel.openTaskbarContextMenu(uiState.customization.taskbarPosition) }
+    )
+
+    if (position.isVertical) {
+        Surface(
+            modifier = modifier
+                .width(TASKBAR_VERTICAL_WIDTH)
+                .fillMaxHeight()
+                .testTag("windows_11_taskbar"),
+            color = Slate950.copy(alpha = 0.94f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(dockMenuGesture)
+                    .then(longPressDock)
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(PhonixGreen)
+                )
+
+                StartButton(
+                    isOpen = uiState.isStartMenuOpen,
+                    onClick = { viewModel.toggleStartMenu() }
+                )
+                SearchButton(onClick = { viewModel.toggleStartMenu() })
+
+                Box(
+                    modifier = Modifier
+                        .width(24.dp)
+                        .height(1.dp)
+                        .background(Slate800)
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(verticalAppsScroll),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    taskbarApps.forEach { app ->
+                        TaskbarAppIcon(
+                            app = app,
+                            onClick = {
+                                if (app.shortcut != null && !app.isRunning && app.shortcut.launchPackage != null) {
+                                    viewModel.launchShortcutOrHostApp(context, app.shortcut)
+                                } else {
+                                    viewModel.toggleWindow(app.windowType)
+                                }
+                            },
+                            // Long-press opens the rename dialog, which also carries the
+                            // unpin action for a bar entry (the bar owns its own pins).
+                            onLongClick = { viewModel.startRename(app.id) }
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(24.dp)
+                        .height(1.dp)
+                        .background(Slate800)
+                )
+
+                // Vertical tray: the phone cannot spend 170 dp of width on it, so the readings
+                // stack above a compact clock.
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier
+                        .clickable { viewModel.toggleWindow(WindowType.RESOURCE_MONITOR) }
+                        .padding(horizontal = 2.dp, vertical = 2.dp)
+                        .testTag("taskbar_clock")
+                ) {
+                    Text(
+                        text = if (uiState.isBatteryRemovedDirectPower) "AC" else "UPS",
+                        color = if (uiState.isBatteryRemovedDirectPower) PhonixAmber else PhonixGreen,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = currentTime.ifEmpty { "10:00 AM" },
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = currentDate,
+                        color = Slate400,
+                        fontSize = 7.sp
+                    )
+                }
+
+                // Show-desktop: the bottom sliver of a horizontal bar, rotated to the bar's end.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .clickable { viewModel.toggleAllWindowVisibility() }
+                        .background(Slate700.copy(alpha = 0.4f))
+                        .testTag("taskbar_show_desktop_edge")
+                )
+            }
+        }
+        return
+    }
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(50.dp)
+            .height(TASKBAR_HEIGHT)
             .testTag("windows_11_taskbar"),
         color = Slate950.copy(alpha = 0.94f),
         border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
@@ -168,6 +303,8 @@ fun Windows11Taskbar(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
+                .then(dockMenuGesture)
+                .then(longPressDock)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = if (compactTaskbar) Arrangement.Start else Arrangement.SpaceBetween
@@ -207,122 +344,28 @@ fun Windows11Taskbar(
                         else Modifier
                     )
             ) {
-                // 1. Windows 11 Start Button (Phonix Flame Emblem)
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { viewModel.toggleStartMenu() }
-                        .background(if (uiState.isStartMenuOpen) Slate800 else Color.Transparent)
-                        .border(
-                            1.dp,
-                            if (uiState.isStartMenuOpen) PhonixBlueLight else Color.Transparent,
-                            RoundedCornerShape(8.dp)
-                        )
-                        .testTag("taskbar_start_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                Brush.linearGradient(listOf(PhonixAmber, PhonixRed))
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "🔥",
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-
-                // 2. Search Pill
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable {
-                            viewModel.toggleStartMenu()
-                        }
-                        .background(Color.Transparent)
-                        .testTag("taskbar_search_pill"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = Slate400,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                StartButton(
+                    isOpen = uiState.isStartMenuOpen,
+                    onClick = { viewModel.toggleStartMenu() }
+                )
+                SearchButton(onClick = { viewModel.toggleStartMenu() })
 
                 Spacer(Modifier.width(2.dp))
 
-                // 3. Centered App Icons with Running Indicator Dots
                 taskbarApps.forEach { app ->
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .combinedClickable(
-                                onClick = {
-                                    if (app.shortcut != null && !app.isRunning && app.shortcut.launchPackage != null) {
-                                        viewModel.launchShortcutOrHostApp(context, app.shortcut)
-                                    } else {
-                                        viewModel.toggleWindow(app.windowType)
-                                    }
-                                },
-                                // Long-press opens the rename dialog, which also carries the
-                                // unpin action for a bar entry (the bar owns its own pins).
-                                onLongClick = {
-                                    viewModel.startRename(app.id)
-                                }
-                            )
-                            .background(
-                                if (app.isFocused) Slate800.copy(alpha = 0.8f) else Color.Transparent
-                            )
-                            .border(
-                                1.dp,
-                                if (app.isFocused) PhonixBlueLight.copy(alpha = 0.6f) else Color.Transparent,
-                                RoundedCornerShape(8.dp)
-                            )
-                            .testTag("taskbar_app_${app.id.lowercase()}"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val artRes = app.shortcut?.customArtKey?.let { AppIconGlyphs.artForKey(it) }
-                            ?: AppIconGlyphs.artFor(app.windowType)
-
-                        if (artRes != null) {
-                            Image(
-                                painter = painterResource(id = artRes),
-                                contentDescription = app.title,
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        } else {
-                            Icon(
-                                imageVector = app.icon,
-                                contentDescription = app.title,
-                                tint = app.defaultColor,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        // Running Dot Indicator
-                        if (app.isRunning) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(bottom = 2.dp)
-                                    .width(if (app.isFocused) 16.dp else 5.dp)
-                                    .height(3.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(if (app.isFocused) PhonixCyan else Slate400)
-                            )
-                        }
-                    }
+                    TaskbarAppIcon(
+                        app = app,
+                        onClick = {
+                            if (app.shortcut != null && !app.isRunning && app.shortcut.launchPackage != null) {
+                                viewModel.launchShortcutOrHostApp(context, app.shortcut)
+                            } else {
+                                viewModel.toggleWindow(app.windowType)
+                            }
+                        },
+                        // Long-press opens the rename dialog, which also carries the unpin
+                        // action for a bar entry (the bar owns its own pins).
+                        onLongClick = { viewModel.startRename(app.id) }
+                    )
                 }
             }
 
@@ -383,6 +426,128 @@ fun Windows11Taskbar(
                         .testTag("taskbar_show_desktop_edge")
                 )
             }
+        }
+    }
+}
+
+/** Height of a horizontal bar; the desktop work area subtracts exactly this. */
+internal const val TASKBAR_HEIGHT_DP = 50
+
+/** Width of a vertical bar; the desktop work area subtracts exactly this. */
+internal const val TASKBAR_WIDTH_DP = 56
+
+private val TASKBAR_HEIGHT = TASKBAR_HEIGHT_DP.dp
+private val TASKBAR_VERTICAL_WIDTH = TASKBAR_WIDTH_DP.dp
+
+@Composable
+private fun StartButton(isOpen: Boolean, onClick: () -> Unit) {
+    // 1. Windows 11 Start Button (Phonix Flame Emblem)
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .background(if (isOpen) Slate800 else Color.Transparent)
+            .border(
+                1.dp,
+                if (isOpen) PhonixBlueLight else Color.Transparent,
+                RoundedCornerShape(8.dp)
+            )
+            .testTag("taskbar_start_button"),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(
+                    Brush.linearGradient(listOf(PhonixAmber, PhonixRed))
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "🔥",
+                fontSize = 13.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchButton(onClick: () -> Unit) {
+    // 2. Search Pill
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .background(Color.Transparent)
+            .testTag("taskbar_search_pill"),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = "Search",
+            tint = Slate400,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TaskbarAppIcon(
+    app: TaskbarAppEntry,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    // 3. App Icon with Running Indicator Dot
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .background(
+                if (app.isFocused) Slate800.copy(alpha = 0.8f) else Color.Transparent
+            )
+            .border(
+                1.dp,
+                if (app.isFocused) PhonixBlueLight.copy(alpha = 0.6f) else Color.Transparent,
+                RoundedCornerShape(8.dp)
+            )
+            .testTag("taskbar_app_${app.id.lowercase()}"),
+        contentAlignment = Alignment.Center
+    ) {
+        val artRes = app.shortcut?.customArtKey?.let { AppIconGlyphs.artForKey(it) }
+            ?: AppIconGlyphs.artFor(app.windowType)
+
+        if (artRes != null) {
+            Image(
+                painter = painterResource(id = artRes),
+                contentDescription = app.title,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(22.dp)
+            )
+        } else {
+            Icon(
+                imageVector = app.icon,
+                contentDescription = app.title,
+                tint = app.defaultColor,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
+        // Running Dot Indicator
+        if (app.isRunning) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 2.dp)
+                    .width(if (app.isFocused) 16.dp else 5.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(if (app.isFocused) PhonixCyan else Slate400)
+            )
         }
     }
 }

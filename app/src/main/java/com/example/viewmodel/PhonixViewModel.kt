@@ -2022,6 +2022,16 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Right-click or long-press on the taskbar: dock it to any of the four edges. */
+    fun openTaskbarContextMenu(position: TaskbarPosition) {
+        _uiState.update {
+            it.copy(
+                activeContextMenu = DesktopContextMenuData.TaskbarMenu(position),
+                isStartMenuOpen = false
+            )
+        }
+    }
+
     fun closeContextMenu() {
         _uiState.update { it.copy(activeContextMenu = null) }
     }

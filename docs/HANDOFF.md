@@ -27,6 +27,21 @@ the Pinned view sliced its third row, because both were lazy grids with hard hei
 inside a menu that already scrolls. They are whole rows in the menu's own scroller now, and a
 drag reaches the last pin. Details in [VERIFICATION.md](VERIFICATION.md) §15.
 
+## Taskbar docking round (2026-11-01, S10 over wireless adb + HDMI monitor)
+
+The bar was hard-placed at `Alignment.BottomCenter` and `TaskbarPosition` only had `BOTTOM`/`TOP`,
+with no caller for `updateTaskbarPosition` — so a monitor permanently lost 50 dp of height to a bar
+that could not be moved. Right-click (mouse) or long-press (finger) on the bar now offers Bottom,
+Left, Right and Top; the vertical bar is a 56 dp column with the tray stacked, and the work area,
+icon grid, window layer and Start menu all read the same edge so nothing lands under the bar.
+
+Measured on the DeX display: all four edges applied on 1920x1080, the dock menu opens without
+covering the bar, Start opens beside a vertical bar, a Terminal window opens inside the inset work
+area, and the choice is stored (`"taskbarPosition":"RIGHT"` in `phonix_desktop_prefs.xml`). Build
+green, 58 tests, crash buffer empty. **Not measured:** real mouse right-click (adb only injects the
+primary button) and the portrait phone layout with a vertical bar. Details in
+[VERIFICATION.md](VERIFICATION.md) §16.
+
 ## Update-path round (2026-10-31, S10 over USB)
 
 The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`

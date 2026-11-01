@@ -174,6 +174,8 @@ import com.example.model.IconSizeMode
 import com.example.model.MonitorDisplayMode
 import com.example.model.TaskbarPosition
 import com.example.model.TaskbarStyle
+import com.example.ui.components.TASKBAR_HEIGHT_DP
+import com.example.ui.components.TASKBAR_WIDTH_DP
 import com.example.model.WindowType
 import com.example.ui.theme.PhonixAmber
 import com.example.ui.theme.PhonixBlue
@@ -199,6 +201,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Work-area insets that match the taskbar's own dimensions, in one place. */
+private val WINDOWS_TASKBAR_HEIGHT = TASKBAR_HEIGHT_DP.dp
+private val WINDOWS_TASKBAR_WIDTH = TASKBAR_WIDTH_DP.dp
+
 @Composable
 fun PhonixDesktopScreen(
     uiState: PhonixUiState,
@@ -220,14 +226,19 @@ fun PhonixDesktopScreen(
         val isWidescreenMonitor = isHardwareLandscape || customization.displayMode.isWidescreen
 
         val desktopWidth = screenWidth
-        // Windows live in the work area above the 50 dp taskbar. Without this the bottom
-        // edge of a full-height window (and its resize grip) disappears under the bar at
-        // high densities, where the window's 180 dp minimum is the whole desktop.
-        val taskbarHeight = 50.dp
-        val bounds = remember(screenWidth, screenHeight) {
+        // Windows live in the work area the taskbar leaves. Without this the edge of a
+        // full-height window (and its resize grip) disappears under the bar at high densities,
+        // where the window's 180 dp minimum is the whole desktop. The bar can be on any of the
+        // four edges, so the inset follows whichever side it is docked to.
+        val barPosition = customization.taskbarPosition
+        val barThickness = WINDOWS_TASKBAR_HEIGHT
+        val barWidth = WINDOWS_TASKBAR_WIDTH
+        val bounds = remember(screenWidth, screenHeight, barPosition) {
             WindowBounds(
-                widthDp = screenWidth.value,
-                heightDp = (screenHeight - taskbarHeight).coerceAtLeast(1.dp).value
+                widthDp = (screenWidth - if (barPosition.isVertical) barWidth else 0.dp)
+                    .coerceAtLeast(1.dp).value,
+                heightDp = (screenHeight - if (barPosition.isVertical) 0.dp else barThickness)
+                    .coerceAtLeast(1.dp).value
             )
         }
         LaunchedEffect(bounds) { viewModel.normalizeWindows(bounds) }
@@ -238,8 +249,11 @@ fun PhonixDesktopScreen(
         // there; it never hides the icon or claims its slot.
         val desktopShortcuts = customization.shortcuts
         val rowStride = 88.dp
-        val topPadding = if (customization.taskbarPosition == TaskbarPosition.TOP) 54.dp else 10.dp
-        val bottomPadding = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp
+        val topPadding = if (barPosition == TaskbarPosition.TOP) 54.dp else 10.dp
+        val bottomPadding = if (barPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp
+        // Icons keep clear of a vertical bar too, instead of hiding under it.
+        val startPadding = if (barPosition == TaskbarPosition.LEFT) barWidth + 12.dp else 12.dp
+        val endPadding = if (barPosition == TaskbarPosition.RIGHT) barWidth + 12.dp else 12.dp
         // The default position is the BOTTOM-left quadrant, which is what the align action and
         // the label both promise. This was pinned to 0.dp, so "Align to Bottom-Left" dropped the
         // whole block in the top-left corner.
@@ -282,8 +296,8 @@ fun PhonixDesktopScreen(
                         .padding(
                             top = topPadding,
                             bottom = bottomPadding,
-                            start = 12.dp,
-                            end = 12.dp
+                            start = startPadding,
+                            end = endPadding
                         )
                 ) {
                     // Reflow the grid from the live window width. The inner fold gets several
@@ -394,6 +408,18 @@ fun PhonixDesktopScreen(
                 }
 
                 // 4. Desktop Windows Layer (Toggleable on / off)
+                // Inset by the docked taskbar, so a window can never be dragged under it or
+                // lose its resize grip to it, whichever edge the bar is on.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            top = if (barPosition == TaskbarPosition.TOP) barThickness else 0.dp,
+                            bottom = if (barPosition == TaskbarPosition.BOTTOM) barThickness else 0.dp,
+                            start = if (barPosition == TaskbarPosition.LEFT) barWidth else 0.dp,
+                            end = if (barPosition == TaskbarPosition.RIGHT) barWidth else 0.dp
+                        )
+                ) {
                 uiState.windows.filter { !it.isMinimized }.forEach { window ->
                     DesktopWindowFrame(
                         window = window,
@@ -403,6 +429,8 @@ fun PhonixDesktopScreen(
                         viewModel = viewModel,
                         bounds = bounds
                     )
+                }
+
                 }
 
                 // 5. Windows 11 Desktop Context Menu (Shortcut & Wallpaper)
@@ -428,22 +456,48 @@ fun PhonixDesktopScreen(
                     RenameEntryDialog(uiState = uiState, viewModel = viewModel)
                 }
 
-                // 6. Windows 11 Fluent Acrylic Start Menu (Centered Floating Card)
+                // 6. Windows 11 Fluent Acrylic Start Menu, anchored to the bar's edge so it
+                // never opens underneath the taskbar.
                 if (uiState.isStartMenuOpen) {
+                    val menuAlignment = when (barPosition) {
+                        TaskbarPosition.TOP -> Alignment.TopCenter
+                        TaskbarPosition.LEFT -> Alignment.BottomStart
+                        TaskbarPosition.RIGHT -> Alignment.BottomEnd
+                        TaskbarPosition.BOTTOM -> Alignment.BottomCenter
+                    }
+                    val menuOffsetX = when (barPosition) {
+                        TaskbarPosition.LEFT -> barWidth
+                        TaskbarPosition.RIGHT -> -barWidth
+                        else -> 0.dp
+                    }
+                    val menuOffsetY = when (barPosition) {
+                        TaskbarPosition.TOP -> barThickness + 6.dp
+                        TaskbarPosition.BOTTOM -> -(barThickness + 6.dp)
+                        else -> (-8).dp
+                    }
                     Windows11StartMenu(
                         uiState = uiState,
                         viewModel = viewModel,
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .offset(y = (-56).dp)
+                            .align(menuAlignment)
+                            .offset(x = menuOffsetX, y = menuOffsetY)
                     )
                 }
 
-                // 7. Windows 11 Centered Taskbar (App Pointers, System Tray & Show Desktop)
+                // 7. Taskbar (App Pointers, System Tray & Show Desktop), docked to its edge.
+                // Right-click or long-press on the bar opens the dock menu.
                 Windows11Taskbar(
                     uiState = uiState,
                     viewModel = viewModel,
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    position = barPosition,
+                    modifier = Modifier.align(
+                        when (barPosition) {
+                            TaskbarPosition.BOTTOM -> Alignment.BottomCenter
+                            TaskbarPosition.TOP -> Alignment.TopCenter
+                            TaskbarPosition.LEFT -> Alignment.CenterStart
+                            TaskbarPosition.RIGHT -> Alignment.CenterEnd
+                        }
+                    )
                 )
             }
         }
