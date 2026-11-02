@@ -1479,7 +1479,107 @@ monitor's right edge, and every `Install & Switch` and `CURRENT` node reports
 coordinate to tap. Taps computed from the monitor screenshot (1831,762 — the Ubuntu pill), from
 hub coordinates, and keyboard traversal (six `KEYCODE_TAB`) all left `files/linux` at
 `alpine debian tmp` with no download started. The button is unreachable without an
-instrumentation harness, so the switch itself remains owed: install Ubuntu 24.04 (127 MB) or Arch
-(178 MB) from the hub, watch `files/linux/tmp` during extraction, then confirm promotion, that
-`alpine` and `debian` survive, and that `cat /etc/os-release` in the terminal shows the new guest.
+instrumentation harness; §25 is that harness, and it found the switch was not merely untested —
+it was broken on every streamed install.
 Nothing is half-installed: `files/linux` was `alpine debian tmp` before and after every attempt.
+
+## §25 — Every streamed distro install died after its download: nobody could unpack xz (2026-11-01, measured, S10)
+
+### What was wrong
+
+`LinuxContainer.installStreamed` unpacks the archive **inside the running guest**, because Android
+has no xz decoder and this build takes no dependency for one. The KDoc asserted the guest could do
+it: "busybox already provides `unxz` and `tar`". Neither half of that held on this unit.
+
+First instrumented run, `debian -> kali`, measured end to end:
+
+```
+17:18:31  Resolved Kali Linux Minimal build 20261029_17:14.
+17:18:31  Downloading rootfs.tar.xz (74 MB)...
+17:18:36  Verified the official SHA-256.
+17:18:36  Unpacking Kali Linux Minimal in the guest...
+17:18:36  /bin/sh: 1: unxz: not found
+17:18:36  tar: This does not look like a tar archive
+17:18:36  java.lang.IllegalStateException: tar exited with status 2 while unpacking Kali Linux Minimal
+```
+
+So the download, the resume, the SHA-256 check and the index resolution all worked, and the install
+then failed on its first useful byte of work — after the user had already paid for the download.
+
+Where `unxz` actually is, read from the two trees on the phone rather than assumed:
+
+- `files/linux/debian/bin` + `usr/bin`: `tar` (GNU, 539896 bytes) present; `xz`, `unxz`, `xzcat`
+  count **0**. Debian 12's minimal image does not ship `xz-utils`.
+- `files/linux/alpine/bin`: symlinks for `tar`, `gunzip`, `gzip`, `zcat`, `lzop` — and **no `xz`
+  or `unxz` applet**. The bundled busybox was built without XZ_SUPPORT.
+
+So there was no guest in the product that could unpack the archives the hub offers: every streamed
+switch (Debian, Ubuntu, Arch, Kali) was broken on both the Alpine default and the Debian default.
+
+### The fix [measured]
+
+- `LinuxDistro.unpackToolPackages` names the package per manager: `xz-utils tar` on apt,
+  `xz tar` on apk/pacman.
+- `LinuxContainer.ensureGuestUnpacker` probes `command -v unxz && command -v tar` and, when either
+  is missing, installs the pair through the guest's own package manager **before the download
+  starts**, then re-probes and throws with the command and its last output line if the tool still
+  is not there. It keys on a printed marker rather than the exit status, because `execOnce` returns
+  the status of the guest's `sh` and a failing `command -v` inside an `&&` chain is
+  indistinguishable from a broken shell.
+
+### How it was measured
+
+An instrumented test, `app/src/androidTest/.../DistroSwitchInstrumentedTest.kt`, calls the same
+`LinuxContainer.switchDistro()` the hub's "Install & Switch" button calls. The target comes from the
+instrumentation argument `distro`, so one binary switches out and back:
+
+```
+gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.distro=kali
+gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.distro=debian
+```
+
+It asserts the persisted id, the `.phonix-installed` marker, `/bin/sh` and `/etc/os-release`, a
+command run inside the new guest, that staging and the download cache are gone, that the replaced
+guest was pruned, and that the bundled Alpine rescue image survived.
+
+**Run 1, `debian -> kali`** [measured]: xz-utils installed into the guest, 74 MB downloaded and
+SHA-256-verified, unpacked in the guest in **32 s**, rootfs verified, `debian` pruned, `alpine`
+kept. Inside the new guest: `PRETTY_NAME="Kali GNU/Linux Rolling"`, `VERSION_ID="2026.3"`,
+`ID=kali`, `id -u` = 0, `uname -m` = aarch64.
+
+**Run 2, `kali -> debian`** [measured]: the reverse direction, from the guest the first run had just
+created. `apt-get install -y -q xz-utils tar` reported `Unpacking xz-utils (5.8.4-1)` and the
+re-probe passed; 91 MB downloaded and verified, unpacked in **30 s**, promoted, `kali` pruned,
+`alpine` kept. Inside: `PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"`, `VERSION_ID="12"`,
+`debian_version` = `12.15`, `id -u` = 0.
+
+After both runs `files/linux` = `alpine debian tmp`, `active_distro_id` = `debian`, `/data` 99 GB
+free. Both `connectedDebugAndroidTest` runs: **BUILD SUCCESSFUL**, 2 tests per run.
+
+One detail worth keeping: on run 1 the guest's `apt-get` printed
+`E: Sub-process /usr/bin/dpkg returned an error code (1)` while installing, and `unxz` was present
+anyway. That is why `ensureGuestUnpacker` re-probes instead of trusting the install's exit status.
+
+### Why the hub's button was not used
+
+The instrumented test exists because the window cannot be driven by synthetic taps, and the reasons
+are worth recording (all [measured] on this unit):
+
+- `uiautomator dump --display 2` and `--display 9` return the **same 1080×1080 hierarchy** — the
+  phone display's — so the monitor's window tree is never dumped. Every `Install & Switch` node in
+  it reports `bounds="[0,0][0,0]"` because Compose keeps the label in a merged parent.
+- `screencap -d 2` returns a real 1920×1080 frame, but the first captures this round were **three
+  hours stale** (framebuffer identical four seconds apart, clock reading 2:13 PM while the shell
+  said 17:13); `input keyevent KEYCODE_WAKEUP` plus `svc power stayon true` made it live.
+- Injection to display 2 works — `input -d 2 keyevent KEYCODE_BACK` closed the hub window — but
+  `input -d 2 tap` at coordinates read off a fresh screenshot did nothing, because the hub is a
+  **floating window stacked over other windows** (My Files and Settings were open behind it). The
+  kill shot is `b1-small.png`: BACK closed the hub and revealed them.
+
+### Not claimed
+
+- Tapping "Install & Switch" in the hub UI. The code path is measured; the button is not.
+- Ubuntu 24.04, Arch and the VNC desktop after a switch. Only Kali and Debian were switched, and
+  the new guests were checked with `cat /etc/os-release` and `id -u`, not by opening a desktop.
+- A switch with no network: it fails at the download and leaves the previous guest in place by
+  design, but that branch was not exercised this round.

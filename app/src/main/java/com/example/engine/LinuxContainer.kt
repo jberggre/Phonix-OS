@@ -205,6 +205,12 @@ class LinuxContainer(
         check(isInstalled) { "Install the bundled guest first: it provides unxz and tar" }
         workDir.mkdirs()
 
+        // Settled before the download, not after it. The unpacking guest used to be assumed to
+        // have `unxz`; Debian 12's minimal image does not (nor does Alpine's busybox), so every
+        // streamed switch downloaded ~100 MB, verified its SHA-256 and then died with
+        // "unxz: not found" followed by "tar: This does not look like a tar archive".
+        ensureGuestUnpacker(distro, onProgress)
+
         val installer = DistroInstaller()
         val ref = installer.resolve(distro)
         onProgress("Resolved ${distro.name} build ${ref.buildDate}.")
@@ -242,6 +248,55 @@ class LinuxContainer(
             staging.deleteRecursively()
             cache.deleteRecursively()
         }
+    }
+
+    /**
+     * Makes sure the running guest can unpack a `.tar.xz` at all: `unxz` and `tar`.
+     *
+     * Checks the cheap probe first, so a guest that already has the tools - the normal case after
+     * one streamed install - pays nothing. Otherwise the tools come from the guest's own package
+     * manager, which is a few hundred KB instead of a wasted rootfs download.
+     */
+    private fun ensureGuestUnpacker(
+        distro: com.example.model.LinuxDistro,
+        onProgress: (String) -> Unit
+    ) {
+        if (hasUnpacker()) return
+
+        val command = distro.installCommand(distro.unpackToolPackages)
+        onProgress("${distro.name} has no xz decoder; installing ${distro.unpackToolPackages}...")
+        val lastLines = ArrayDeque<String>()
+        execOnce(command, timeoutSeconds = 900) { line ->
+            if (line.isNotBlank()) {
+                if (lastLines.size == 8) lastLines.removeFirst()
+                lastLines.addLast(line.trim())
+                onProgress(line)
+            }
+        }
+        if (!hasUnpacker()) {
+            val tail = lastLines.lastOrNull()?.let { " (last output: $it)" }.orEmpty()
+            throw IllegalStateException(
+                "${distro.name} cannot unpack the xz archive: `$command` did not provide " +
+                    "unxz$tail"
+            )
+        }
+        onProgress("xz decoder ready in ${distro.name}.")
+    }
+
+    /**
+     * True when the running guest has both halves of the unpack pipeline.
+     *
+     * The marker echo is the signal, not the status: `execOnce` returns the exit status of the
+     * guest's `sh`, and `command -v` failing inside an `&&` chain is indistinguishable from the
+     * shell itself failing.
+     */
+    private fun hasUnpacker(): Boolean {
+        val probe = StringBuilder()
+        val status = execOnce(
+            "command -v unxz >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 && echo PHONIX_UNPACKER_OK",
+            timeoutSeconds = 60
+        ) { line -> probe.appendLine(line) }
+        return status == 0 && probe.contains("PHONIX_UNPACKER_OK")
     }
 
     /** A rootfs is promoted only if it really contains a shell and its own release file. */

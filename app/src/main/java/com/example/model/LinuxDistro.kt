@@ -42,6 +42,20 @@ data class LinuxDistro(
         else -> "apk info -e $pkg >/dev/null 2>&1"
     }
 
+    /**
+     * Packages that provide `unxz` and `tar` in this userland.
+     *
+     * The mirror only publishes `rootfs.tar.xz`, and Android ships no xz decoder, so the guest
+     * does the unpacking. Almost every minimal image leaves the decoder out: Debian's `bin` and
+     * `usr/bin` carry `tar` but no `xz`/`unxz`/`xzcat`, and the bundled Alpine busybox has
+     * `gunzip`/`zcat` but was built without an xz applet. The package is `xz-utils` on apt
+     * systems and `xz` everywhere else.
+     */
+    val unpackToolPackages: String get() = when (packageManager) {
+        "apt" -> "xz-utils tar"
+        else -> "xz tar"
+    }
+
     /** Approximate until the download starts, then replaced by the server's Content-Length. */
     val downloadSizeEstimate: String get() = "~${downloadSizeMb} MB"
     val installedDiskFootprint: String get() = "~${installedSizeMb} MB"
