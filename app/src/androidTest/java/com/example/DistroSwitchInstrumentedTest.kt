@@ -90,9 +90,12 @@ class DistroSwitchInstrumentedTest {
             File(context.filesDir, "linux/.${target.id}-staging").exists()
         )
 
-        // 5. The pruned guest is gone but the bundled rescue image is not — the promise that a
-        //    switch can never leave the app with no userspace at all.
-        if (before != target.id) {
+        // 5. A replaced guest is pruned, but the bundled rescue image is not - the promise that a
+        //    switch can never leave the app with no userspace at all. Switching *out of* the
+        //    bundled guest therefore has nothing to prune; asserting otherwise fails the test on
+        //    a correct switch.
+        val previous = DistroCatalog.getDistro(before)
+        if (before != target.id && !previous.isBundled) {
             assertFalse(
                 "$before should have been pruned after a successful switch",
                 File(context.filesDir, "linux/$before").exists()

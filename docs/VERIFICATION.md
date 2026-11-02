@@ -1583,3 +1583,47 @@ are worth recording (all [measured] on this unit):
   the new guests were checked with `cat /etc/os-release` and `id -u`, not by opening a desktop.
 - A switch with no network: it fails at the download and leaves the previous guest in place by
   design, but that branch was not exercised this round.
+
+### Second round: three more defects sat between the download and a bootable guest
+
+Kali and Debian both have an apt userland, so they exercise the same branch. Arch does not, and
+driving the switch at Arch exposed three further faults - two of them in the first fix above.
+
+**1. The tool probe asked the wrong guest.** `ensureGuestUnpacker` installed via the *target*
+`distro`'s package manager while `execOnce` shells into the *running* guest. `debian -> arch` ran
+`pacman -S --noconfirm --needed xz tar` inside Debian and got
+`/bin/sh: 1: pacman: not found`. It failed before the download and left Debian intact, so the
+safety property held, but the switch could never have worked. The probe now uses `activeDistro()`.
+
+**2. Promotion followed symlinks and threw the install away.** `staging.renameTo(target)` returned
+false on this unit, and the fallback was `copyRecursively`, which *follows* links. Every rootfs
+ships dangling ones; Arch's install died with
+`NoSuchFileException: .../root/.phonix-stage/usr/share/licenses/xz/COPYING: The source file doesn't
+exist` after 103 s of unpacking, and `if (!wasInstalled) target.deleteRecursively()` then discarded
+the verified tree. `moveTree` now walks the tree itself and recreates links with `Os.symlink`
+instead of following them.
+
+**3. The tree move dropped every exec bit.** `copyTo` copies bytes, not modes, so the promoted
+Arch guest produced `proot error: '/usr/bin/env' is not executable` and every command in it exited
+1 - a tree that looks complete on disk and cannot run a single binary. `moveTree` now reapplies the
+source's exec and read-only bits.
+
+**4. Two deletes silently did nothing.** Guest trees keep the archive's modes (`usr`, `bin` are
+`0555`), and an app cannot unlink entries from a directory it may not write, so `deleteRecursively`
+returned without error having freed little. A failed Arch attempt left a **560 MB** staging tree
+that the in-guest `rm -rf` could not clear either (`rm: bin: Permission denied`, and dozens more),
+and the pruned `debian` left its `root` directory behind. `deleteTree` opens the directories up
+before deleting, and is used for staging, the download cache, the replaced guest and the abandoned
+target.
+
+**Run 3, `alpine -> debian`** [measured]: after the arch tree was removed by hand (it had no exec
+bits, so it could not repair itself), the active guest fell back to the bundled Alpine rescue and
+the switch ran from there. That is the one path with an `apk` userland: the probe found no `unxz`,
+the guest ran `apk add --no-cache xz tar`, the decoder was ready, 91 MB downloaded and verified,
+unpacked, promoted, `Debian GNU/Linux 12 (bookworm)` reported from inside, `active_distro_id`
+`debian`, `files/linux` = `alpine debian tmp`, 99 GB free. `alpine` was correctly **not** pruned -
+it is the bundled rescue image.
+
+That run also caught a mistake in the test itself: it asserted that the replaced guest is always
+pruned, which fails on a *correct* switch away from the bundled guest. The assertion now excludes
+bundled images.

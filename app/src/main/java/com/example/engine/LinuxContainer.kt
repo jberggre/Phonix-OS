@@ -134,7 +134,7 @@ class LinuxContainer(
             // A rootfs promoted but never marked would sit on disk unaccounted for (Debian's tree
             // is ~525 MB) and the next attempt would download the archive again anyway. Remove it
             // so a failed switch costs only the download.
-            if (!wasInstalled) target.deleteRecursively()
+            if (!wasInstalled) deleteTree(target)
             throw e
         }
 
@@ -145,7 +145,7 @@ class LinuxContainer(
         val previous = com.example.model.DistroCatalog.getDistro(previousId)
         if (debloatPrevious && previousId != distro.id && !previous.isBundled) {
             onProgress("Debloating $previousId to recover storage...")
-            File(context.filesDir, "linux/$previousId").deleteRecursively()
+            deleteTree(File(context.filesDir, "linux/$previousId"))
         }
         onProgress("${distro.name} is ready.")
     }
@@ -160,20 +160,17 @@ class LinuxContainer(
      */
     private fun extractBundled(target: File): Int {
         val staging = File(target.parentFile, ".${target.name}-staging")
-        staging.deleteRecursively()
+        deleteTree(staging)
         staging.mkdirs()
         workDir.mkdirs()
         val extracted = try {
             TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(staging)
         } catch (e: Throwable) {
-            staging.deleteRecursively()
+            deleteTree(staging)
             throw e
         }
         target.deleteRecursively()
-        if (!staging.renameTo(target)) {
-            staging.copyRecursively(target, overwrite = true)
-            staging.deleteRecursively()
-        }
+        moveTree(staging, target)
         return extracted
     }
 
@@ -209,7 +206,7 @@ class LinuxContainer(
         // have `unxz`; Debian 12's minimal image does not (nor does Alpine's busybox), so every
         // streamed switch downloaded ~100 MB, verified its SHA-256 and then died with
         // "unxz: not found" followed by "tar: This does not look like a tar archive".
-        ensureGuestUnpacker(distro, onProgress)
+        ensureGuestUnpacker(onProgress)
 
         val installer = DistroInstaller()
         val ref = installer.resolve(distro)
@@ -217,7 +214,7 @@ class LinuxContainer(
 
         val cache = File(rootfs, "root/.phonix-cache").apply { mkdirs() }
         val staging = File(rootfs, "root/.phonix-stage").apply {
-            deleteRecursively()
+            deleteTree(this)
             mkdirs()
         }
         val archive = File(cache, "rootfs.tar.xz")
@@ -239,14 +236,11 @@ class LinuxContainer(
 
             target.deleteRecursively()
             target.parentFile?.mkdirs()
-            if (!staging.renameTo(target)) {
-                staging.copyRecursively(target, overwrite = true)
-                staging.deleteRecursively()
-            }
+            moveTree(staging, target)
         } finally {
             // Releases up to a few hundred MB whether the install worked or not.
-            staging.deleteRecursively()
-            cache.deleteRecursively()
+            deleteTree(staging)
+            deleteTree(cache)
         }
     }
 
@@ -257,14 +251,16 @@ class LinuxContainer(
      * one streamed install - pays nothing. Otherwise the tools come from the guest's own package
      * manager, which is a few hundred KB instead of a wasted rootfs download.
      */
-    private fun ensureGuestUnpacker(
-        distro: com.example.model.LinuxDistro,
-        onProgress: (String) -> Unit
-    ) {
+    private fun ensureGuestUnpacker(onProgress: (String) -> Unit) {
         if (hasUnpacker()) return
 
-        val command = distro.installCommand(distro.unpackToolPackages)
-        onProgress("${distro.name} has no xz decoder; installing ${distro.unpackToolPackages}...")
+        // The tools must be installed by the guest that is actually running, because that is the
+        // guest `execOnce` shells into - not by the one being installed. Asking for the target's
+        // manager ran `pacman -S ...` inside Debian and failed with "pacman: not found", which is
+        // how the first arch attempt aborted.
+        val guest = activeDistro()
+        val command = guest.installCommand(guest.unpackToolPackages)
+        onProgress("${guest.name} has no xz decoder; installing ${guest.unpackToolPackages}...")
         val lastLines = ArrayDeque<String>()
         execOnce(command, timeoutSeconds = 900) { line ->
             if (line.isNotBlank()) {
@@ -276,11 +272,11 @@ class LinuxContainer(
         if (!hasUnpacker()) {
             val tail = lastLines.lastOrNull()?.let { " (last output: $it)" }.orEmpty()
             throw IllegalStateException(
-                "${distro.name} cannot unpack the xz archive: `$command` did not provide " +
+                "${guest.name} cannot unpack the xz archive: `$command` did not provide " +
                     "unxz$tail"
             )
         }
-        onProgress("xz decoder ready in ${distro.name}.")
+        onProgress("xz decoder ready in ${guest.name}.")
     }
 
     /**
@@ -297,6 +293,86 @@ class LinuxContainer(
             timeoutSeconds = 60
         ) { line -> probe.appendLine(line) }
         return status == 0 && probe.contains("PHONIX_UNPACKER_OK")
+    }
+
+    /**
+     * Promotes [source] to [destination], preserving every link in the tree.
+     *
+     * `File.renameTo` is the fast path. Its fallback used to be `copyRecursively`, which follows
+     * symlinks, and every rootfs image carries dangling ones (`usr/share/licenses/xz/COPYING`
+     * points outside the image). Arch's 170 MB install unpacked and verified, then threw
+     * `NoSuchFileException` in the copy and the entire tree was discarded. This walks the tree
+     * itself and recreates links instead of following them; device nodes and fifos, which an
+     * unprivileged app cannot create, are skipped.
+     */
+    private fun moveTree(source: File, destination: File) {
+        if (source.renameTo(destination)) return
+
+        deleteTree(destination)
+        destination.mkdirs()
+        source.walkTopDown().forEach { entry ->
+            val relative = entry.toRelativeString(source)
+            if (relative.isEmpty()) return@forEach
+            val out = File(destination, relative)
+            when {
+                isSymlink(entry) -> {
+                    val linkTarget = runCatching { Os.readlink(entry.absolutePath) }.getOrNull()
+                    if (linkTarget != null) {
+                        out.parentFile?.mkdirs()
+                        out.delete()
+                        runCatching { Os.symlink(linkTarget, out.absolutePath) }
+                    }
+                }
+                entry.isDirectory -> out.mkdirs()
+                entry.isFile -> {
+                    out.parentFile?.mkdirs()
+                    runCatching {
+                        entry.copyTo(out, overwrite = true)
+                        // `copyTo` copies bytes, not modes. Without this the promoted guest has
+                        // no exec bits and cannot start at all: the guest reported
+                        // "proot error: '/usr/bin/env' is not executable" and every command
+                        // run in the new distro failed with status 1.
+                        if (entry.canExecute()) out.setExecutable(true, false)
+                        if (!entry.canWrite()) out.setWritable(false, false)
+                    }
+                }
+                else -> Unit
+            }
+        }
+        deleteTree(source)
+    }
+
+    private fun isSymlink(file: File): Boolean = try {
+        Os.lstat(file.absolutePath).st_mode and 0xF000 == 0xA000
+    } catch (_: ErrnoException) {
+        false
+    }
+
+    /**
+     * Deletes a tree that may still carry an image's permission bits.
+     *
+     * A guest tree is extracted with the modes the archive records - `usr`, `bin` and most other
+     * directories are `0555` - and an app cannot unlink entries from a directory it may not write.
+     * `deleteRecursively()` therefore returns having removed only what it was allowed to, and
+     * reports no error: a failed Arch install left a 560 MB staging tree behind that the in-guest
+     * `rm -rf` could not clear either. Opening the directories up first makes the delete happen.
+     */
+    private fun deleteTree(file: File) {
+        if (!file.exists()) return
+        file.walkTopDown()
+            .filter { it.isDirectory }
+            .forEach { dir ->
+                runCatching {
+                    dir.setReadable(true, false)
+                    dir.setWritable(true, true)
+                    dir.setExecutable(true, false)
+                }
+            }
+        file.deleteRecursively()
+        if (file.exists()) {
+            // Contents before parents, for directories whose mode the archive marked read-only.
+            file.walkBottomUp().forEach { entry -> runCatching { entry.delete() } }
+        }
     }
 
     /** A rootfs is promoted only if it really contains a shell and its own release file. */
