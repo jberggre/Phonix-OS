@@ -526,7 +526,9 @@ again; the reasoning is kept short and the evidence is linked.
    not blocked by anything sensitive: `git ls-files` holds no keystore, no `.env` and no secret, and
    the only binary is `app/src/main/assets/alpine-rootfs.tgz` at 4.1 MB [measured]. Two things do
    block a store-style publication, and neither is urgent: the AI Studio application ID, and the
-   bundled rootfs. Both are written up in [ROADMAP.md](ROADMAP.md) section "Open-source route".
+   bundled rootfs. Both are written up in [ROADMAP.md](ROADMAP.md) section "Open-source route". The licence is Apache-2.0, added as `LICENSE` the same day, so a fork - and a unit running
+   one - may be sold; the bundled Alpine userspace keeps its own licences in
+   `docs/THIRD-PARTY-NOTICES.md`.
 
 
 ## Still open

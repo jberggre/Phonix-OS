@@ -137,3 +137,14 @@ chrome are implemented and were measured on the S10 before this round. What is *
 
 The 1.5B model is usable but small: its first water answer was fluent and grounded yet conflated
 boiling time with SODIS, so safety-critical answers still need the curated notes.
+
+## Licence
+
+Phonix OS is **Apache-2.0** - see [LICENSE](LICENSE). Use it, modify it, ship it, sell it, keep your
+changes closed; keep the notices and you are compliant.
+
+The Alpine userspace bundled as `app/src/main/assets/alpine-rootfs.tgz` is **not** covered by that
+licence. The packages inside carry their own, recorded in
+[docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md); distros downloaded at runtime stay under
+their own upstream terms. `debug.keystore` is not in the repository and never has been - builds from
+a fresh clone are signed with your own key, which means they cannot take over an existing install.

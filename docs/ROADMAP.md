@@ -487,9 +487,11 @@ Two things work today and should not be disturbed by a publication:
   differently-named build can hold it. Sideloading a renamed build alongside is safe; transferring
   ownership is the part that is not.
 
-There is no licence file in the tree, only [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Any
-publication needs one - Apache-2.0 or GPL-3.0 both satisfy F-Droid's FLOSS requirement - and the
-choice is the owner's, because it also decides whether someone else may fork this and sell it.
+The licence is **Apache-2.0** (`LICENSE` in the root), chosen by the owner on 2026-11-02. It
+satisfies F-Droid's FLOSS requirement with room to spare, and it deliberately leaves the commercial
+door open: a fork may be sold, and so may a unit running one. The Alpine userspace inside
+`alpine-rootfs.tgz` keeps its own licences, listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); Apache-2.0 covers Phonix's own code, not Alpine's.
 
 The updater's permission is not a problem for this channel: `REQUEST_INSTALL_PACKAGES` is a Play
 restriction, not an Android one, and a release-hosted feed is still a sideload. An F-Droid submission
