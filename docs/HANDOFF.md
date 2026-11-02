@@ -489,7 +489,7 @@ module cache in `~/.gradle/caches` already holds every dependency this build nee
 
 ## Decisions taken (2026-11-02)
 
-The owner answered the five open questions. This section is the answer, so a session does not ask
+The owner answered the five open questions, and added a hardware constraint afterwards. This section is the answer, so a session does not ask
 again; the reasoning is kept short and the evidence is linked.
 
 1. **Phone Screen input - read-only stays.** Touch works on the mirrored phone in the owner's setup,
@@ -508,6 +508,14 @@ again; the reasoning is kept short and the evidence is linked.
 5. **Model size - stay at 1.5B.** The owner's actual want was not a larger model but an offline
    *library* in three sizes, removable again. That is now queue item 2 and
    [ROADMAP.md](ROADMAP.md) section "Offline library".
+
+6. **Build machine - modest, so nothing large is staged here.** The owner reports no great hardware;
+   measured: 12th-gen i5-1245U, 10 cores, 15.7 GB RAM, **27.6 GB free** on the system drive
+   [measured 2026-11-02]. Building is not the constraint - this machine compiles the APK and ran the
+   distro switch tests - disk is. A 16 GB or 85 GB pack cannot be downloaded, generated or mirrored
+   here. Consequence: content packs stream from the upstream public mirror to the phone, the project
+   hosts a manifest and an APK only, and no multi-gigabyte staging step belongs in the build.
+
 
 ## Still open
 

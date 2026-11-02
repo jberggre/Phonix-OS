@@ -455,3 +455,9 @@ decided.
 Kiwix's own Play build reads only `Android/media/<pkg>`, while its sideloaded build holds
 `MANAGE_EXTERNAL_STORAGE`. Large packs belong in app-private storage or a media directory, and
 "debloat" has to delete the file, not just forget it.
+
+**Where the bytes come from.** They are not mirrored or staged on the build machine: it has 27.6 GB
+free on its system drive [measured 2026-11-02], so the Medium tier does not fit on it and the Heavy
+tier is five times too large. Packs download from the upstream public mirror straight to the phone,
+which means the project hosts one manifest and one APK rather than 100 GB of content, and a pack
+download can be verified against a digest that does not require the build machine to hold the file.
