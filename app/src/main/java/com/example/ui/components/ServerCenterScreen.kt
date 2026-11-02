@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -195,6 +196,20 @@ fun ServerCenterScreen(
                         fontFamily = FontFamily.Monospace
                     )
                     Text(service.description, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
+
+                    // Supervision is opt-in and its state is probe-derived: the line says what was
+                    // observed, and tapping it starts or stops the restart policy.
+                    val supervisionLine = uiState.supervision[service.id]
+                    Text(
+                        text = supervisionLine?.let { "$it - tap to stop supervising" }
+                            ?: "Not supervised - tap to keep it running",
+                        color = if (supervisionLine == null) Slate400 else PhonixCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable {
+                            viewModel.toggleServiceSupervision(service.id)
+                        }
+                    )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(

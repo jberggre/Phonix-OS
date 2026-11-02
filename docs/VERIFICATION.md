@@ -1903,3 +1903,58 @@ else branch. Both are fixed; the second is now pinned by an assertion.
 **Not measured:** a genuinely hot phone. The guard has never refused a real start, because reaching
 70 C means running the soak this project still owes. It is `[static]`: modelled, unit tested, not
 observed.
+
+## 34. Service supervisor: restart under a bounded policy, health from probes — 2026-11-02 [measured]
+
+PRoot has no init, so a server started from the terminal stayed dead the moment it exited, and the app
+had no way to tell "started" from "working": the old Server Hub printed a start command and reported
+whatever `pidof` said when it looked. Supervision now lives in the app process, over the readiness-gate
+pattern the AI path already uses.
+
+**The policy is a pure model** (`SupervisionPolicy` + `SupervisionMachine`), and every number is a
+decision rather than a default:
+
+- Backoff doubles from 2 s (2, 4, 8, 16, 32 s) and is capped at 60 s. The cap matters more than the
+  base: unbounded doubling reads as "it never comes back".
+- The attempt cap is 5, which is about 30 s of trying, after which the state is GAVE_UP with the reason
+  attached. A supervisor that retries forever hides the failure.
+- A run that stayed healthy for 60 s resets the budget, so a service that worked for a week is not one
+  failure from GAVE_UP; only flapping exhausts it.
+- Three consecutive unhealthy probes while the process is alive stop and replace it, so a slow boot is
+  not mistaken for a crash but a wedged process is not kept either.
+- Health is observed, never assumed. An HTTP service is HEALTHY only on a 2xx from its port; alive but
+  silent is UNHEALTHY; a service with no HTTP surface uses a process probe, and the state says which
+  signal it used. Nothing reaches HEALTHY because a launch command returned 0.
+
+**PRoot does not detach a backgrounded child, and that changed the design.** A diagnostic test measured
+a launch of `nohup … &` returning `Guest command timed out after 15s` (15124 ms) while the pid file had
+already been written and `kill -0` answered `ph-alive`. So the launch command blocks for the life of the
+service, and the launcher now owns a thread for it; success is reported from the liveness probe, not
+from the command returning.
+
+**Measured on the bench unit** (SM-G973U, wireless adb, Debian guest, monitor attached):
+
+- `am instrument … ServiceSupervisorInstrumentedTest` → **OK (3 tests)** in 22.9 s, against the real
+  guest through the production `GuestServiceRunner`.
+- Killed supervised process: logcat shows `svprobe: RUNNING health=HEALTHY` → external `kill -9` →
+  `RUNNING health=UNHEALTHY` → `BACKOFF failures=1 (the process exited)` → `STARTING` →
+  `RUNNING health=HEALTHY`, and the test logged `restarted svprobe: 2203 -> 2310`. A new pid, not an
+  adopted one.
+- Service that leaves nothing behind: `BACKOFF failures=1`, `BACKOFF failures=2`, `GAVE_UP failures=3`
+  with `The guest did not keep Dies immediately running; nothing answered the liveness probe.`
+- Unit suite: `gradle --no-daemon assembleDebug assembleDebugAndroidTest testDebugUnitTest` —
+  **BUILD SUCCESSFUL in 3m52s**, **124 unit tests, 0 failures, 19 suites** (105 in 17 before
+  this round: 14 machine/policy tests and 4 loop tests, one of which caught a timing assumption in its
+  own first version).
+
+Bugs the work surfaced, all fixed and pinned: a test asserted `BACKOFF` at the exact millisecond the
+relaunch fired; `runBlocking {}` inferred a non-void return so JUnit rejected both instrumented methods
+before running them; `android.util.Log` is a stub on the JVM and killed four unit tests until it was
+wrapped; and an exception thrown by a probe used to kill the supervising coroutine silently, leaving the
+state frozen at STARTING. That last one is the failure mode the brief forbids, so the loop now converts
+a throwing launch, probe or stop into a reported failure with the exception text.
+
+**Not measured:** a 24-hour soak, and supervision across an app-process death — there is no init to
+survive it, so when the process goes, the supervision goes with it; §34 states that rather than implying
+otherwise. The Server Hub's new supervision line has not been tapped on hardware; it was driven through
+the same view-model entry point the button calls.

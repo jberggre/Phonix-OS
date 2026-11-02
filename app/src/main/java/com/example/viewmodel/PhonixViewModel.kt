@@ -189,6 +189,8 @@ data class PhonixUiState(
     val desktopDisplayLabel: String = "",
     /** The deck arrangement remembered for that screen, if any. */
     val desktopDeckPreset: String = "",
+    /** service id -> one-line supervision state, derived from probes and never assumed. */
+    val supervision: Map<String, String> = emptyMap(),
     val deviceChanges: DeviceChangeChoices = DeviceChangeChoices(),
     val deviceCapabilityReport: DeviceCapabilityReport? = null,
     val foldPosture: FoldPosture = FoldPosture.UNKNOWN,
@@ -376,6 +378,16 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     /** Screens already taken over in this process, so a display event cannot re-apply forever. */
     private val deckAppliedTo = mutableSetOf<String>()
 
+    /**
+     * Keeps guest services alive. It lives in the view model's scope because PRoot has no init: when
+     * this process dies there is nothing left to restart anything, which is stated in the UI rather
+     * than hidden.
+     */
+    private val serviceSupervisor = com.example.engine.ServiceSupervisor(
+        scope = viewModelScope,
+        runner = com.example.engine.GuestServiceRunner(getApplication())
+    )
+
     init {
         // Packs are read from private storage once, at construction, so the shelves are complete
         // before the first screen asks for them.
@@ -414,6 +426,19 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             val active = runCatching { LinuxRuntime.container(getApplication<Application>()).activeDistro() }.getOrNull()
             if (active != null) _uiState.update { it.copy(currentDistro = active) }
+        }
+
+        // Supervision states are mirrored for the UI on every transition.
+        viewModelScope.launch {
+            serviceSupervisor.states.collect { states ->
+                _uiState.update { state ->
+                    state.copy(
+                        supervision = states.mapValues { (_, supervisionState) ->
+                            com.example.model.SupervisionMachine.describe(supervisionState)
+                        }
+                    )
+                }
+            }
         }
 
         detectLocalIp()
@@ -1159,6 +1184,46 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * it does not. So this asks the guest and, when missing, runs the real install command in
      * the terminal. Nothing is reported as running until the process is actually found.
      */
+    /**
+     * Starts or stops supervising a catalog service.
+     *
+     * Deliberately separate from [toggleServerService]: that path installs a package or prints the
+     * start command, and changing it would change behaviour people already rely on. This one adds
+     * the restart policy and a health signal on top, and refuses to start when the guest is not up.
+     */
+    fun toggleServiceSupervision(serviceId: String) {
+        val service = _uiState.value.serverServices.find { it.id == serviceId } ?: return
+        val current = serviceSupervisor.state(serviceId)
+        val active = current != null && current.phase in setOf(
+            com.example.model.SupervisionPhase.STARTING,
+            com.example.model.SupervisionPhase.RUNNING,
+            com.example.model.SupervisionPhase.BACKOFF
+        )
+        if (active) {
+            serviceSupervisor.stopSupervising(serviceId)
+            _uiState.update {
+                it.copy(notificationMessage = "${service.name}: no longer supervised (the process keeps running)")
+            }
+            return
+        }
+        if (!LinuxRuntime.isRunning) {
+            _uiState.update {
+                it.copy(notificationMessage = "Start the Linux container first (Terminal power button)")
+            }
+            return
+        }
+        if (!service.isInstalled) {
+            _uiState.update {
+                it.copy(notificationMessage = "Install ${service.apkPackage} in the guest first")
+            }
+            return
+        }
+        serviceSupervisor.start(com.example.engine.ServiceSupervisor.specFor(service))
+        _uiState.update {
+            it.copy(notificationMessage = "Supervising ${service.name}: restarts and health come from the guest")
+        }
+    }
+
     fun toggleServerService(serviceId: String) {
         val service = _uiState.value.serverServices.find { it.id == serviceId } ?: return
         viewModelScope.launch {
@@ -3966,6 +4031,7 @@ ${moduleList}
         // battery and thermal cost the customer did not ask for.
         aiChatJob?.cancel()
         aiSetupJob?.cancel()
+        serviceSupervisor.stopAll()
         localAi.stopServerNow()
         networkWatcher?.close()
         LinuxRuntime.removeListener(linuxOutput)
