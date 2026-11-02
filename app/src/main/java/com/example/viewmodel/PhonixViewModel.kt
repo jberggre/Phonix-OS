@@ -436,6 +436,31 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * first measured bounds arrive, so a live rotation or dock/undock still normalises the
      * windows the user has now instead of swapping in an old layout.
      */
+    /**
+     * Replaces the desktop with one of the three deck arrangements, sized to the display in front of
+     * the phone. The windows it creates are ordinary windows: the existing per-size layout saver
+     * persists them, so a preset is not a second, competing kind of state.
+     */
+    fun applyDeckPreset(preset: com.example.model.DeckPreset) {
+        val bounds = windowBounds.value
+        if (bounds == null) {
+            _uiState.update {
+                it.copy(notificationMessage = "The desktop size is not known yet; try again in a moment.")
+            }
+            return
+        }
+        val windows = preset.windows(bounds)
+        maxZIndex = (windows.maxOfOrNull { it.zIndex } ?: 0f) + 1f
+        _uiState.update {
+            it.copy(
+                windows = windows,
+                activeWindowId = windows.lastOrNull()?.id,
+                isStartMenuOpen = false,
+                notificationMessage = "Deck layout: ${preset.title}"
+            )
+        }
+    }
+
     private fun persistWindowLayout() {
         viewModelScope.launch {
             combine(_uiState.map { it.windows }.distinctUntilChanged(), windowBounds) { windows, bounds ->

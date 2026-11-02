@@ -427,6 +427,58 @@ fun Windows11StartMenu(
                 }
             }
 
+            // Deck layouts. Three arrangements, sized to whatever display is in front of the phone;
+            // they are reachable by typing, because the menu has no room for nine more tiles.
+            val deckHits = remember(searchQuery) {
+                val query = searchQuery.trim().lowercase()
+                if (query.isBlank()) emptyList()
+                else com.example.model.DeckPreset.entries.filter { preset ->
+                    preset.title.lowercase().contains(query) ||
+                        preset.subtitle.lowercase().contains(query) ||
+                        query in setOf("deck", "decks", "layout", "layouts")
+                }
+            }
+            if (deckHits.isNotEmpty()) {
+                Text(
+                    text = "Deck layouts (${deckHits.size})",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+                Spacer(Modifier.height(4.dp))
+                deckHits.forEach { preset ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { viewModel.applyDeckPreset(preset) }
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "#", color = PhonixCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = preset.title,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = preset.subtitle,
+                                color = Slate400,
+                                fontSize = 9.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+
             // 2. Section Header: Pinned vs All Apps Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),

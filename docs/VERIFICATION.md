@@ -1805,3 +1805,29 @@ adds 9).
 **Not measured:** any of it on hardware. No device was reachable from this session, so the palette
 is `[static]` — compiled and unit-tested, never tapped. The deck-layout half of the queue item is
 still open: saving, naming and restoring three deck arrangements has no UI and no persistence yet.
+
+## 31. Deck presets — 2026-11-02 [static]
+
+Arranging a usable desktop on the monitor meant dragging every window by hand, and the arrangement
+died with the session. Three presets now exist — Workstation (terminal and browser side by side),
+Build (editor over the terminal, files down the side) and Media (browser wide, phone screen beside
+it).
+
+- `DeckPreset` stores each window as a fraction of the viewport and runs every one through
+  `WindowGeometry.normalize`, so a 1920x1080 monitor and a 411x869 phone screen get usable layouts
+  from one table rather than two. A test asserts no window starts off-screen or overflows either
+  size class.
+- Ids are derived from the preset and the window type (`deck_build_vs_code`), so re-applying a preset
+  replaces its windows instead of stacking duplicates on the desktop.
+- `applyDeckPreset` refuses while the desktop size is still unknown, and says so, rather than
+  arranging windows against a guessed viewport.
+- Persistence is the existing per-size layout saver (§21): a preset produces ordinary windows, so
+  there is no second kind of desktop state to keep in sync.
+- Reachable by typing in the start menu's search field — `deck`, `layout`, or a preset's own name.
+
+Measured: `gradle --no-daemon assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL in 3m15s**,
+**91 unit tests, 0 failures, 14 suites** (86 in 13 before this round; `DeckPresetTest`
+adds 5).
+
+**Not measured:** on hardware. The presets are unit-tested against both viewports and `[static]`
+everywhere else; nobody has pressed one on the DeX display.
