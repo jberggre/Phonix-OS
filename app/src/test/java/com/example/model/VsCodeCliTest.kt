@@ -14,6 +14,7 @@ import org.junit.Test
  */
 class VsCodeCliTest {
 
+    @Test
     fun onlyTheMuslBuildIsPublishedForArm64() {
         assertTrue(GuestLibc.MUSL.supportsCli)
         assertTrue(GuestLibc.MUSL.downloadUrl, GuestLibc.MUSL.downloadUrl.endsWith("os=cli-alpine-arm64"))
@@ -22,6 +23,7 @@ class VsCodeCliTest {
         assertFalse(GuestLibc.GNU.supportsCli)
     }
 
+    @Test
     fun theRefusalNamesTheMeasuredReason() {
         assertTrue(VsCodeCli.NO_ARMV64_GLIBC_CLI, VsCodeCli.NO_ARMV64_GLIBC_CLI.contains("404"))
         assertTrue(VsCodeCli.NO_ARMV64_GLIBC_CLI, VsCodeCli.NO_ARMV64_GLIBC_CLI.contains("Alpine"))
@@ -66,6 +68,7 @@ class VsCodeCliTest {
         assertTrue(fetch, fetch.contains("os=cli-alpine-arm64"))
     }
 
+    @Test
     fun theFetchAsksTheOneUrlMicrosoftServes() {
         val fetch = VsCodeCli.fetchCommand(GuestLibc.MUSL)
         assertEquals(2, Regex("os=cli-alpine-arm64").findAll(fetch).count())
@@ -82,9 +85,11 @@ class VsCodeCliTest {
     }
 
     @Test
-    fun theVersionIsTheSemverLineTheCliPrints() {
-        assertEquals("1.109.5", VsCodeCli.parseVersion("1.109.5\n0e1a5c2f0e5e0c9d0b1a\narm64\n"))
-        assertEquals("1.96.2", VsCodeCli.parseVersion("1.96.2\n"))
+    fun theVersionIsReadFromTheShapeTheCliActuallyPrints() {
+        assertEquals("1.109.5", VsCodeCli.parseVersion("1.109.5" + System.lineSeparator() + "0e1a5c" + System.lineSeparator() + "arm64"))
+        // Measured on the Alpine guest, 2026-11-02.
+        val real = "code 1.144.0 (commit 2c33b50b16c472efe58357d1d2a8a5414bc23fbf)"
+        assertEquals("1.144.0", VsCodeCli.parseVersion(real))
     }
 
     @Test
@@ -102,6 +107,7 @@ class VsCodeCliTest {
     fun outputWithoutAVersionLineIsNotAnInstall() {
         assertNull(VsCodeCli.parseVersion("bash: ./code: No such file or directory"))
         assertNull(VsCodeCli.parseVersion("curl: (22) The requested URL returned error: 404"))
+        assertNull("a URL is not a version", VsCodeCli.parseVersion("https://192.168.1.5/pack"))
         assertNull(VsCodeCli.parseVersion(""))
     }
 }

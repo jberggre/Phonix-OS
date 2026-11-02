@@ -2267,3 +2267,42 @@ the refusal path is measured on the phone, the Alpine path is code plus unit tes
 switch (`Linux Systems -> Alpine -> Switch`) followed by **Install VS Code** is what turns the rest
 into evidence. Until then this file makes no claim that an editor has rendered.
 
+## 39. Code Studio on the Alpine guest
+
+The glibc refusal was already proven; this round got the real install to run, on the guest that can
+actually run it, without touching the distro-hub card the DeX pointer cannot reach.
+
+**Switching the guest without the hub [measured].** `am start --display 2 -n
+com.aistudio.phonix.vpxmkr/com.example.MainActivity --es phonix.distro alpine` runs the hub's own
+switch path (`activateDistro` → `LinuxContainer.switchDistro`) with `debloatPrevious = false`, so the
+previous rootfs survives a measurement. After it, the widget read `Alpine Linux · 3.24.3`, and
+`files/linux/alpine/etc/alpine-release` answers `3.24.3` with `lib/ld-musl-aarch64.so.1` present.
+
+**The install the user presses [measured].** With that guest active, the app's own *Install VS Code*
+button reported `CLI 1.144.0 installed in the guest (musl build).` and left
+`files/linux/alpine/root/.phonix/vscode/` holding `code` and `cli.tar.gz`. The guest's own output,
+quoted: `code 1.144.0 (commit 2c33b50b16c472efe58357d1d2a8a5414bc23fbf)`.
+
+**The defect that hid it.** `parseVersion` accepted only a line that was exactly a semver, so the
+real CLI banner was read as "did not report a version" and a successful install looked like a
+failure. It now reads the `code <semver> (commit …)` shape and still refuses a bare URL with dotted
+numbers; both shapes are tested. A stale block replace had also stripped `@Test` from five test
+functions, which is why they silently stopped running; the annotations are restored.
+
+**Not yet proven — `serve-web` [open].** No listening server has been observed on the phone. Two
+probe attempts are not evidence: the uiautomator dump showed the DeX launcher (`Tap for weather
+info | Gallery | Play Store | …`), so the tap never reached the button, and the follow-up attempt
+lost the transport (`adb.exe: device offline`). `/tmp/phonix-vscode.log` does not exist in the guest,
+and no HTTP response came back through `adb forward tcp:18000 tcp:8000`. Next step: drive
+`startVsCodeServer` with the app in the foreground and read the suspect log path — the guest may not
+have a `/tmp` the redirect can write to, which would kill the detached command before it starts.
+
+**Suites.** 201 unit tests / 28 suites / 0 failures [measured]. The instrumented suite has not been
+re-run on this APK.
+
+**Push is blocked at authentication, not the network.** `GIT_TRACE=1` shows `git push` stopping in
+`git credential-manager get`; with `GCM_INTERACTIVE=never GIT_TERMINAL_PROMPT=0` it exits 128 with
+`Cannot prompt because user interactivity has been disabled`, and `-c credential.helper=` exits 128
+with `could not read Username`. There is no `~/.git-credentials`. Pushes therefore cannot
+authenticate from this session; commit `06bccaa` and its successors remain local.
+

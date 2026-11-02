@@ -24,6 +24,7 @@ class VsCodeInstallerTest {
         }
     }
 
+    @Test
     fun aPrintedVersionMeansTheCliIsInstalled() = runBlocking {
         val shell = FakeShell("PHONIX_LIBC=MUSL", "1.109.5" + System.lineSeparator() + "abc" + System.lineSeparator() + "arm64")
         val outcome = VsCodeInstaller(shell::run).install()
@@ -53,6 +54,7 @@ class VsCodeInstallerTest {
         assertTrue((outcome as VsCodeInstall.Refused).reason.contains("did not report a version"))
     }
 
+    @Test
     fun aGlibcGuestIsRefusedBeforeAnyDownload() = runBlocking {
         val shell = FakeShell("PHONIX_LIBC=GNU")
         val outcome = VsCodeInstaller(shell::run).install()

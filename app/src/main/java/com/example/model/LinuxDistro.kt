@@ -175,4 +175,18 @@ object DistroCatalog {
     val distros = listOf(alpine, debian, ubuntu, arch, kali)
 
     fun getDistro(id: String): LinuxDistro = distros.firstOrNull { it.id == id } ?: alpine
+
+    /**
+     * Looks a distribution up by the id an intent or a manifest names.
+     *
+     * The ids are the ones the hub and the store already use; an unknown id returns null so a
+     * caller can say so instead of quietly switching to something else.
+     */
+    fun byId(id: String): LinuxDistro? = when (id.trim().lowercase(java.util.Locale.ROOT)) {
+        "alpine" -> alpine
+        "debian" -> debian
+        "ubuntu" -> ubuntu
+        "arch" -> arch
+        else -> null
+    }
 }

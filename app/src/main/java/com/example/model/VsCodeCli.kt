@@ -4,8 +4,9 @@ package com.example.model
  * The VS Code command-line interface, as the guest has to run it.
  *
  * Microsoft publishes two arm64 builds of the CLI: one linked against glibc and one against musl.
- * The wrong one fails at exec time with a loader error, so the build is chosen from the loader the
- * guest actually has rather than from the distribution's name.
+ * Only the musl build exists at the download endpoint - measured 2026-11-02, `os=cli-linux-arm64`
+ * answers 404 while `os=cli-alpine-arm64` answers 302 - so the guest that can run this is Alpine,
+ * which is also the image bundled in the APK.
  */
 enum class GuestLibc(val os: String, val label: String, val supportsCli: Boolean) {
     GNU("cli-linux-arm64", "glibc", false),
@@ -23,10 +24,8 @@ object VsCodeCli {
     const val INSTALL_DIR = "\$HOME/.phonix/vscode"
 
     /**
-     * What to tell a glibc guest. Measured 2026-11-02: the download endpoint answers **404** for
-     * `os=cli-linux-arm64` and **302** for `os=cli-alpine-arm64`, and `cli-linux-x64` is 404 too,
-     * so the musl build is the only arm64 CLI Microsoft publishes. Pretending otherwise would
-     * install nothing and blame the network.
+     * What to tell a glibc guest. The glibc arm64 URL answers 404 and no other arm64 glibc build is
+     * published, so pretending it could work would install nothing and blame the network.
      */
     const val NO_ARMV64_GLIBC_CLI =
         "Microsoft publishes no glibc build of the arm64 CLI - the download URL answers 404. " +
@@ -48,9 +47,6 @@ object VsCodeCli {
      * `--version` is the only evidence this code accepts that a runnable binary now exists: a URL
      * that 404s, an archive that does not unpack, or a binary the loader refuses all leave nothing
      * for it to print, and [parseVersion] then returns null.
-     *
-     * The bytes are fetched by the guest's own `curl`, not by the app: they never pass through the
-     * app's storage, and the trust store doing the TLS check is the one the guest will run under.
      */
     fun installScript(libc: GuestLibc): String =
         "mkdir -p " + INSTALL_DIR + " && cd " + INSTALL_DIR + " && " +
@@ -94,9 +90,16 @@ object VsCodeCli {
         return " Guest said: " + if (joined.length > maxChars) joined.take(maxChars) + "..." else joined
     }
 
-    /** The version `code --version` printed, or null when it printed none. */
-    fun parseVersion(output: String): String? =
-        output.lineSequence()
-            .map { it.trim() }
-            .firstOrNull { SEMVER.matches(it) }
+    /**
+     * The version the CLI printed, or null when it printed none.
+     *
+     * Measured on the Alpine guest: `code 1.144.0 (commit 2c33b50b...)`. Older builds print the bare
+     * version, and neither shape may be confused with a URL that happens to contain dotted numbers.
+     */
+    fun parseVersion(output: String): String? {
+        val lines = output.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        val announced = lines.firstOrNull { it.startsWith("code ") }
+        if (announced != null) return SEMVER.find(announced)?.value
+        return lines.firstOrNull { SEMVER.matches(it) }
+    }
 }

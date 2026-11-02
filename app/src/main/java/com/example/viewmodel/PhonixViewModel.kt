@@ -1568,6 +1568,46 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Activates a distribution from the debug channel, on the same path the hub's button uses.
+     *
+     * `am start … --es phonix.distro alpine`. The previous rootfs is deliberately kept
+     * (`debloatPrevious = false`): a bench measurement must not cost the owner a working guest, and
+     * the switch already refuses to prune anything before the new tree is in place.
+     */
+    fun activateDistro(distroId: String) {
+        val target = com.example.model.DistroCatalog.byId(distroId)
+        if (target == null) {
+            _uiState.update { it.copy(notificationMessage = "No distribution has the id \"" + distroId + "\"") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(notificationMessage = "Switching to " + target.name + "...") }
+            val failure = withContext(Dispatchers.IO) {
+                runCatching {
+                    LinuxRuntime.stop()
+                    LinuxRuntime.container(getApplication()).switchDistro(
+                        distro = target,
+                        debloatPrevious = false,
+                        onProgress = { line -> appendTerminalLine(TerminalLine(line, TerminalLine.LineType.INPUT)) }
+                    )
+                }.exceptionOrNull()
+            }
+            selectDistro(target)
+            refreshStorage()
+            restartContainer()
+            _uiState.update {
+                it.copy(
+                    notificationMessage = if (failure == null) {
+                        "Switched to " + target.name
+                    } else {
+                        target.name + " was not switched: " + (failure.message ?: failure.javaClass.simpleName)
+                    }
+                )
+            }
+        }
+    }
+
     fun selectDistro(distro: LinuxDistro) {
         _uiState.update { state ->
             state.copy(

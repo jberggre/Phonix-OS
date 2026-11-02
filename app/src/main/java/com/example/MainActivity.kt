@@ -63,6 +63,9 @@ import com.example.viewmodel.PhonixViewModel
 /** Intent extra naming a module id whose window should open on launch (bench automation). */
 const val EXTRA_PHONIX_WINDOW = "phonix.window"
 
+/** Intent extra naming a distribution id to activate on launch (bench automation). */
+const val EXTRA_PHONIX_DISTRO = "phonix.distro"
+
 class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
     private val viewModel: PhonixViewModel by viewModels()
@@ -120,6 +123,12 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         // `am start … --es phonix.window vscode` opens that module's window. Without the extra this
         // changes nothing; with it, a session driving the phone over adb can reach a surface the
         // pointer cannot, instead of guessing at palette coordinates.
+        // The distro hub's own switch path, reachable without a pointer: the card could not be
+        // tapped on the DeX display, and a measurement should not depend on that.
+        intent?.getStringExtra(EXTRA_PHONIX_DISTRO)?.let { requested ->
+            viewModel.activateDistro(requested)
+        }
+
         intent?.getStringExtra(EXTRA_PHONIX_WINDOW)?.let { requested ->
             com.example.model.ModuleRegistry.openable(requested)?.let { window ->
                 viewModel.openWindow(window)
