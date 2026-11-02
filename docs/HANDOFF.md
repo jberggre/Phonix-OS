@@ -150,13 +150,16 @@ view modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
   open product question, not a bug.
 
 - `main` is committed and pushed at the build described here. The APK was built from this source.
-- **Version:** `1.1 (versionCode 2)`. The version was deliberately not bumped during the bench
-  round, so identify this build by its **2026-10-29 16:58:38** install time or SHA-256
-  `a7516b6cef12cbbd80378d510ff031c2a04c9a3b8248c0f5e3bddba5c74a7674`, not by “1.1” alone.
+- **Version on the unit:** `1.5 (versionCode 6)`, installed 2026-10-31 over the device-owner
+  build. The measured 1.1 build (`versionCode 2`, **2026-10-29 16:58:38**, SHA-256
+  `a7516b6cef12cbbd80378d510ff031c2a04c9a3b8248c0f5e3bddba5c74a7674`) is dated history; do not
+  identify the current install by “1.1”.
 - **Unit:** SM-G973U Galaxy S10, Android 12 / One UI 4.1 (API 31), serial `R38M200YNRA`,
   device owner, `1080x2280` override on a 1440x3040 panel at 420 dpi, rotation 0.
-- **No external monitor is attached.** DeX was simulated with `wm size`/`wm density`; real DeX,
-  dock/undock and caption-bar behaviour remain unverified.
+- **A monitor is attached:** ES-G34C5 HDMI at 1920x1080 (`type EXTERNAL`, `FLAG_PRESENTATION`,
+  display id 7) plus Samsung's virtual `Desktop` display (id 2, 160 dpi). DeX was **measured on
+  the 1.3 build** ([VERIFICATION §12](VERIFICATION.md), monitor pass); 1.5 carries install-level
+  checks only. Dock/undock and caption-bar behaviour remain unverified.
 - **Left running:** nothing. `llama-server` is stopped and Phone Screen is OFF. The desktop is
   open; the package is device owner.
 
