@@ -1722,5 +1722,27 @@ Gradle prints `failed to uninstall test APK … DELETE_FAILED_INTERNAL_ERROR` af
 the device-owner install refusing removal, not a test failure: the tests had already passed and the
 app version is unchanged at `1.5 (versionCode 6)`.
 
-**Not run:** the `arch` target — §25 records its promotion as the one still unusable before the
-exec-bit fix — and the VNC desktop after a switch.
+**Not run:** the VNC desktop after a switch. The `arch` target listed here as not run was measured
+the same day — §28.
+
+## 28. Arch switch — 2026-11-02 [measured]
+
+Arch was the last distro target and the only one §25 recorded as failing: its promotion ended with
+`proot error: '/usr/bin/env' is not executable` and every command in the guest exited non-zero until
+the exec-bit fix. It had not been re-run on hardware since.
+
+- `:app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.distro=arch` —
+  **BUILD SUCCESSFUL in 3m49s**, 1 test, 0 failed. Logcat: `switching debian -> arch; alpine rescue
+  present=true`, `PRETTY_NAME="Arch Linux ARM"`, then `switch OK: arch Arch Linux ARM, 57 progress
+  lines`.
+- That name is read back from inside the guest, not from the catalogue: the test only passes if
+  `execOnce("cat /etc/os-release; echo ID=$(id -u); uname -m")` returns 0. So the §25 `proot error`
+  is gone — `/usr/bin/env` is executable in the promoted tree.
+- After the switch `files/linux` reads `alpine arch tmp`: Debian was pruned, the bundled Alpine
+  rescue image was not. Crash buffer: 0 package entries.
+- The unit was returned to Debian straight afterwards (`switch OK: debian 12.15`), so the bench is
+  as it was found.
+
+Matrix status across the record: Kali and Debian re-run from the recovered tree (§27), Arch now
+(§28), Ubuntu and alpine→debian by the 2026-11-01 session (§25). Every target in the catalogue has
+promoted through the production `switchDistro` on the SM-G973U.

@@ -123,7 +123,8 @@ hosted yet — that path is compiled and unit-tested, not measured.
 
 Still owed on the update path: host a feed, then run one check, one download and one install on a
 unit; and decide whether the feed should be GitHub Releases (needs the repository to be public) or
-the owner's own manifest host. See [VERIFICATION.md](VERIFICATION.md) §13.
+the owner's own manifest host. See [VERIFICATION.md](VERIFICATION.md) §13. This is the only
+deployment blocker left in the README boundary list, so it heads the queue below.
 
 ## Shipping round (2026-10-31, cloud worktree — no phone attached)
 
@@ -185,9 +186,10 @@ recovered from `worktrees/926fecd3` and is now the shipped path; it had already 
 this unit. This round added a **SHA-256 `SHA256SUMS` gate** the recovered code lacked, and adopted
 its three device-found fixes (IO dispatcher, `resolv.conf` symlink, `refreshStorage`).
 
-**Still owed:** a run of the checksum-gated path end to end (a real install prunes the working
-Debian tree, so it needs the owner's go-ahead), the debloat hide walkthrough, and the Start-menu
-view modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
+**Since measured:** the checksum-gated path has run end to end on the unit for four targets —
+[VERIFICATION.md](VERIFICATION.md) §25 (Ubuntu, alpine→debian), §27 (Kali and Debian, re-run from
+the recovered tree) and §28 (Arch, which this page had recorded as failing). Still owed: the
+debloat hide walkthrough and the Start-menu view modes, which need a pointer on the DeX display.
 
 ## B4 glass round (2026-10-30, S10)
 
@@ -228,7 +230,7 @@ view modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
   1.5, and [VERIFICATION.md](VERIFICATION.md) records them. This supersedes the
   `ce94f4b`/1.2 description kept in the rest of this page. It builds and tests green:
   `assembleDebug` plus `testDebugUnitTest` pass, re-run from scratch with `--rerun-tasks` on
-  2026-10-31, **47 tests, 0 failures**. `tools/verify-shipping.sh` then installed 1.5 over the
+  2026-10-31, **47 tests, 0 failures** at that point; the recovered round since then carries **69** in 11 suites (§27), all green on 2026-11-02. `tools/verify-shipping.sh` then installed 1.5 over the
   device-owner build on the SM-G973U (`adb install -r`, Success, `versionCode 6`): version, crash
   buffer, bundled Alpine rescue tree and device owner all passed. The active guest is the Debian
   tree from the earlier round; the distro-install, debloat-hide and Start-menu checks still need
@@ -407,51 +409,38 @@ both gesture fixes are unverified on hardware.
 The earlier P0 removal of the painted Phone Screen and the “Cyberdeck AI” label is history, not
 current behaviour. The mock must not return; the current window shows real frames or says OFF.
 
-## Next work, in order
+## Next work, in order (rewritten 2026-11-02)
 
-0. **DONE: the 1.2 candidate builds, tests green, and installs.** On the S10 bench unit
-   (`SM-G973U`, Android 12/API 31) `:app:assembleDebug` produced versionCode 3 / versionName 1.2 and
-   `adb install -r` updated the existing 1.1 install in place, keeping the shared `debug.keystore`
-   identity. `:app:testDebugUnitTest` is green: 20 tests, 0 failures, 0 errors
-   (`DeviceCompatibilityTest` 4, `ExampleRobolectricTest` 10, `ExampleUnitTest` 6).
-   Post-update launch is crash-free and the new consent defaults held: `phonix_os_prefs.xml` saved
-   `DAILY_DRIVER` with every `device_*` flag false, `dumpsys activity services` showed no
-   `LinuxServerService`, and there was no `proot` process, so the wallpaper, wakelock service,
-   boot start and display watcher stayed off until chosen. The first launch after the update does
-   auto-open the wizard on the new Step 6, which is how those defaults got saved.
-   Still owed: the non-destructive Pixel 9 Pro Fold matrix in [COMPATIBILITY.md](COMPATIBILITY.md)
-   (fold simulation is not a substitute for physical display routing). Note that this S10's front
-   panel has a failing digitizer that emits phantom taps, so it keeps opening the desktop's App
-   Store shortcut on its own; drive UI checks with a keyboard/mouse or expect to fight it.
+The previous list opened with window geometry, desktop persistence, the landscape grid and the
+broken updater endpoint. All four shipped — §19–§21 and the 2026-10-31 update round — so a session
+following it in order would have rebuilt finished work, which is the failure this repo has already
+had once. This list matches the tree as it stands.
 
-1. **Window geometry and normalisation (B4).** This blocks the deck. Drag currently clamps at
-   about 850x750 px, there is no resize grip, and an open window keeps stale coordinates when the
-   display changes, leaving its close button off-screen. Unify units, clamp to the container,
-   add a resize affordance, and normalise every window on a size/density change.
-   *Done when:* a window can be dragged and resized to every edge at 1920x1080 in both 160 dpi
-   and 640 dpi, and survives a live metric change with its caption reachable.
-2. **Persist the desktop (B6).** Shortcut positions and window layout are not saved, so a reboot
-   or dock cycle loses the setup. Persist per size class so one deck layout can be restored.
-   *Done when:* set a layout, force-stop/reopen, and get the same layout back.
-3. **Landscape icon grid (B5).** The grid is sized for a tall phone; at 2280x1080 the third row is
-   clipped by the taskbar. Compute rows/columns from the container.
-4. **Real DeX pass.** With a monitor: capture, window placement, caption bar, dock/undock, and a
-   24 h plugged-in soak. Do not claim DeX is verified until this is done.
-5. **Updater (B8/B13).** About is reachable, but the check still targets the wrong repository,
-   compares versions as strings, and returns 404. Fix the repository, use an integer version
-   compare, and require a signed manifest before offering an install.
-6. **Decide Phone Screen input.** The picture is real; tapping is not. If the owner wants control,
-   add it through an explicit AccessibilityService opt-in with its own disclosure. Do not bring
-   back app-UID `input` injection — Android rejects it.
-7. **Local-model quality and thermals.** Run a 30-minute plugged-in generation soak and record
-   tok/s, temperature and `/health` stability. The 1.5B model is useful but conflated a one-minute
-   boil with SODIS once; the curated notes remain the safety reference. Evaluate a larger model
-   only after measuring RAM and heat.
-8. **Module registry and three deck layouts (cyberdeck parity).** Declare module capabilities,
-   save layouts per deck, add a keyboard command palette, and delete the dead `PhonixStartMenu`
-   in the same pass.
-9. **Untested paths.** OOBE (the unit is past it and a reset is destructive), game install URLs,
-   VS Code's success path, and Phone Screen on a real monitor. Use a spare unit for OOBE.
+1. **Host a feed and run one real update.** The only deployment blocker left. `UpdateFeed` and
+   `UpdateInstaller` are written, unit-tested and never executed: `BuildConfig.UPDATE_FEED_URL`
+   defaults to empty and nothing hosts a document. Publish one `update.json`, build with
+   `-PphonixUpdateFeed=…`, then run check → download → verify → install on the unit. **Blocked on
+   Open question 2.** Note what the feed is: digest-checked but unsigned, so whoever controls the
+   host can push an APK; the signer comparison confines that to this key.
+2. **The three walks that need a pointer on the DeX display.** The debloat hide/restore
+   walkthrough (§22 fixed the tri-state mapping and never re-opened the screen), the Start-menu
+   view modes, and the Phone Screen consent dialog, whose stock window does not accept injected
+   taps.
+3. **Dock/undock and the 24-hour soak.** Real DeX is measured (§13, §25, §27); missing is a
+   dock → undock cycle with the watcher consent enabled, a window surviving the display change,
+   and a plugged-in soak. Do not call DeX verified until then.
+4. **VS Code experiment** (`code serve-web` on Alpine's CLI, [ROADMAP](ROADMAP.md) §2). The badge
+   is probe-gated and honest; there has never been an editor behind it.
+5. **Decide Phone Screen input** (Open question 1). Control means an explicit
+   `AccessibilityService` opt-in with its own disclosure — never app-UID `input` injection.
+6. **Local-model quality and thermals** (Open question 4). A 30-minute plugged-in generation soak
+   recording tok/s, temperature and `/health` stability, then decide whether 3B earns its RAM.
+7. **Module registry and three deck layouts.** Declare module capabilities, save layouts per deck,
+   add a keyboard command palette, and delete the dead `PhonixStartMenu` in the same pass.
+8. **Pixel 9 Pro Fold matrix** (Open question 3). The APK exists and the unit is pre-flighted, not
+   verified; fold simulation is not display routing. Do not enroll device owner on the Pixel.
+9. **OOBE on a spare unit, and the game install URLs.** The bench unit is past setup and a reset
+   is destructive, so these two paths have no way to be measured here.
 
 ## Do not
 
