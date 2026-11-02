@@ -75,7 +75,12 @@ data class ModuleManifest(
     val source: String,
     val module: PhonixModule,
     val packages: List<String> = emptyList(),
-    val service: ManifestService? = null
+    val service: ManifestService? = null,
+    /**
+     * A pack id from [PackTrust]. The module this manifest describes stays blocked until that pack's
+     * pinned digest has verified, so a declaration can require content without vouching for it.
+     */
+    val pack: String? = null
 )
 
 /** A rejection with the file it came from, so the user can fix the file rather than guess. */
@@ -105,6 +110,12 @@ data class ManifestSet(
             .filterValues { it.isNotEmpty() }
 
     fun service(id: String): ManifestService? = services.firstOrNull { it.id == id }
+
+    /** Every pack any accepted manifest names, in file order, without repeats. */
+    fun packs(): List<String> = manifests.mapNotNull { it.pack }.distinct()
+
+    fun packsFor(moduleId: String): List<String> =
+        manifests.filter { it.module.id == moduleId }.mapNotNull { it.pack }.distinct()
 }
 
 object ModuleManifestFormat {
@@ -125,7 +136,12 @@ object ModuleManifestFormat {
 
     private val SERVICE_ID = Regex("[a-z0-9][a-z0-9_-]{0,$MAX_TOKEN}")
 
-    private val KEYS = setOf("module", "window", "packages", "service", "name", "port", "process", "probe", "launch", "stop")
+    /** Pack ids name a row of [PackTrust]; they are never a path or a URL. */
+    private val PACK_ID = Regex("[a-z0-9][a-z0-9._-]{0,$MAX_TOKEN}")
+
+    private val KEYS = setOf(
+        "module", "window", "pack", "packages", "service", "name", "port", "process", "probe", "launch", "stop"
+    )
 
     private val SERVICE_KEYS = setOf("service", "name", "port", "process", "probe", "launch", "stop")
 
@@ -207,9 +223,15 @@ object ModuleManifestFormat {
             fail("\"$bad\" is not a package name; use lowercase letters, digits, dot, dash, plus or underscore.")
         }
 
+        val pack = values["pack"]?.lowercase(Locale.ROOT)?.also { declared ->
+            if (!PACK_ID.matches(declared)) {
+                fail("\"$declared\" is not a pack id; use lowercase letters, digits, dot, dash or underscore.")
+            }
+        }
+
         val declaresService = SERVICE_KEYS.any { values.containsKey(it) }
         if (!declaresService) {
-            return ModuleManifest(source = source, module = module, packages = packages)
+            return ModuleManifest(source = source, module = module, packages = packages, pack = pack)
         }
 
         val serviceId = values["service"]
@@ -262,6 +284,7 @@ object ModuleManifestFormat {
             source = source,
             module = module,
             packages = packages,
+            pack = pack,
             service = ManifestService(
                 id = serviceId,
                 name = name,
@@ -287,7 +310,14 @@ object ModuleManifests {
      * Parses every `source -> text` entry. A file is accepted or refused as a whole: half a manifest
      * applied (the packages but not the service) would be a state nobody declared.
      */
-    fun resolve(entries: List<Pair<String, String>>): ManifestSet {
+    fun resolve(
+        entries: List<Pair<String, String>>,
+        /**
+         * The ids this build has a pinned digest for. A manifest naming anything else is reported,
+         * because a pack with no digest can never be installed and must not look merely unpinned.
+         */
+        knownPacks: Set<String> = PackTrust.shipped.map { it.id }.toSet()
+    ): ManifestSet {
         val accepted = mutableListOf<ModuleManifest>()
         val issues = mutableListOf<ManifestIssue>()
         val claimedServices = mutableSetOf<String>()
@@ -298,6 +328,15 @@ object ModuleManifests {
             } catch (error: ModuleManifestException) {
                 issues += ManifestIssue(source, error.message ?: "could not be read.")
                 return@forEach
+            }
+            manifest.pack?.let { declared ->
+                if (declared !in knownPacks) {
+                    issues += ManifestIssue(
+                        source,
+                        "names pack \"$declared\", which has no pinned digest in this build; it cannot be installed."
+                    )
+                    return@forEach
+                }
             }
             val service = manifest.service
             if (service != null && !claimedServices.add(service.id)) {
@@ -321,7 +360,13 @@ object ModuleManifests {
  */
 class ModuleManifestStore(private val directory: File) {
 
-    fun load(): ManifestSet {
+    fun load(
+        /**
+         * Ids this build can verify. The default is the shipped table; a debug build passes the
+         * catalogue with its bench controls, so a negative control can be exercised on hardware.
+         */
+        knownPacks: Set<String> = PackTrust.shipped.map { it.id }.toSet()
+    ): ManifestSet {
         val files = runCatching { directory.listFiles() }
             .getOrNull()
             ?.filter { it.isFile }
@@ -346,7 +391,7 @@ class ModuleManifestStore(private val directory: File) {
             entries += file.name to text
         }
 
-        val resolved = ModuleManifests.resolve(entries)
+        val resolved = ModuleManifests.resolve(entries, knownPacks)
         return ManifestSet(resolved.manifests, issues + resolved.issues)
     }
 }

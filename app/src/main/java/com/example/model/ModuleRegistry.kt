@@ -11,7 +11,9 @@ import java.util.Locale
  */
 data class ModuleFacts(
     val guestInstalled: Boolean = false,
-    val isDeviceOwner: Boolean = false
+    val isDeviceOwner: Boolean = false,
+    /** Packs whose pinned digest verified and whose bytes are installed. Measured, never declared. */
+    val verifiedPacks: Set<String> = emptySet()
 )
 
 /**
@@ -99,10 +101,13 @@ object ModuleRegistry {
      */
     fun resolved(facts: ModuleFacts, manifests: ManifestSet = ManifestSet()): List<ResolvedModule> =
         modules.map { module ->
+            val unverifiedPack = manifests.packsFor(module.id).firstOrNull { it !in facts.verifiedPacks }
             ResolvedModule(
                 module = module,
                 packages = manifests.packagesFor(module.id),
+                // The module's own refusal wins: a verified pack is a prerequisite, not a capability.
                 blockedReason = module.blockedReason(facts)
+                    ?: unverifiedPack?.let { "Needs pack \"$it\", which is not downloaded and verified." }
             )
         }
 

@@ -2030,3 +2030,65 @@ file take effect without a reinstall - there is no file observer. Supervision st
 app-process death (see 34). `WindowType` remains a closed enum: a manifest may assert the window its
 module owns but cannot add a new one.
 
+
+## 36. Verified pack download (2026-11-02) [measured]
+
+A manifest can now name content the app has not been given at build time, and the app fetches it only
+if it matches a digest compiled into the app:
+
+    #!phonix-module 1
+    module = terminal
+    pack = phonix-license
+
+**The digest table is the root of trust, not the server.** `PackTrust` holds the bytes' SHA-256, the
+exact byte count, the URL and the guest path. Adding a pack is a reviewable act with a documented
+order: publish the exact bytes somewhere stable (this repository is the channel the roadmap chose),
+run `sha256sum` and `stat -c%s` on the file being shipped, add one `PackRelease` with those values,
+then point a manifest at its id. No digest ever arrives over the network, because a digest delivered
+with the bytes protects against corruption, not against a hostile server.
+
+**Refusals are the default.** `PackTrust.validate` rejects a missing or non-64-hex digest, a zero byte
+count, a non-HTTPS URL (loopback http is allowed only so the fetcher is testable), and a guest path
+that escapes the guest. `PackTrust.judge` then refuses an unknown id, any non-2xx status, a short body
+("truncated"), a body larger than the pin, and a digest mismatch - each with a reason the UI shows.
+
+**Nothing unverified touches the guest tree.** `PackDownloader` streams into app-private `packs/tmp`,
+hashing as it writes, and stops early if the body exceeds the pin. Only after the digest matches is the
+file copied through a `.part` name inside the guest and renamed; the temporary file is deleted in
+`finally` on every path, so a half download can neither execute nor linger. A verified install writes
+a marker holding the pinned digest, and `verified()` still requires the guest file to exist at the
+pinned length, so a later truncation stops counting as verified.
+
+**A pack is a prerequisite, never a capability.** A module whose manifest names an unverified pack is
+blocked with `Needs pack "<id>", which is not downloaded and verified.`; the module's own measured
+refusal still wins, so a verified pack cannot make a guest-less phone open a guest window.
+
+[measured] `gradle --no-daemon assembleDebug assembleDebugAndroidTest testDebugUnitTest` -
+**BUILD SUCCESSFUL**, **178 unit tests, 24 suites, 0 failures** (150 in 21 suites before: 28 new -
+`PackTrustTest` 14, `PackDownloaderTest` 7 over a real local HTTP server, `PackGateTest` 7).
+
+**Measured on the bench unit** (SM-G973U, wireless adb, Debian 12 guest, monitor attached, DeX display 2):
+
+- Real fetch: the manifest named `phonix-license`, pinned to 11 358 bytes and
+  `cfc7749b96f6...`, served from the repository's own `LICENSE`. Pressing **Download** in the Servers
+  window produced `Verified: 11358 bytes installed`; the guest file
+  `files/linux/debian/root/packs/phonix-license.txt` exists at 11 358 bytes, the marker
+  `files/packs/verified/phonix-license.sha256` exists, and `files/packs/tmp` is empty.
+- Refusal: the debug-only negative control pins `0000...` against those same bytes. Pressing its
+  **Download** produced `Refused: SHA-256 mismatch: got cfc7749b96f6..., pinned 000000000000...;
+  nothing was installed.` The guest tree still held only the licence file, `find files -name '*.part'`
+  returned nothing, and `packs/tmp` stayed empty.
+- Manifest reporting stayed honest: `Module manifests: 3 accepted, 0 rejected`, `Packs (1 verified)`.
+- Supervision of the manifest-declared service was re-established by tapping its line: `Running and
+  healthy - tap to stop supervising`, pid **12513**, unchanged 20 s later. `logcat -b crash`: **0**
+  entries. `dpm list-owners`: still `DeviceOwner,Affiliated`. Display 2 `mFocusedApp`: this activity.
+
+**Not measured, and why.** The negative control exists only in debug builds (`BuildConfig.DEBUG` picks
+the catalogue), so the wrong-digest path was measured on a debug APK - a release build cannot list it
+at all, by construction rather than by test. Packs are fetched in one piece: there is no `Range`
+resume, because every pinned pack is small and a retry re-downloads; a resume would need its own
+digest arithmetic. A pack is installed as a single file - there is no archive extraction, so a future
+tarball pack would still only ever be unpacked after this same digest check. Verification of an
+already-installed pack reads the marker and the pinned length rather than re-hashing the file on every
+screen; the bytes were hashed when they were installed.
+

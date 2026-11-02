@@ -1,0 +1,6 @@
+#!phonix-module 1
+# Debug-only negative control: the pinned digest for this id is deliberately not the digest of the
+# bytes its URL serves, so a download must be refused and the guest tree left untouched. A release
+# build does not offer "bench-digest-control" at all.
+module = notepad
+pack = bench-digest-control

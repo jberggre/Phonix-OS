@@ -193,6 +193,10 @@ data class PhonixUiState(
     val supervision: Map<String, String> = emptyMap(),
     /** Manifests read at construction: accepted declarations plus every rejection, with reasons. */
     val manifests: com.example.model.ManifestSet = com.example.model.ManifestSet(),
+    /** pack id -> what the last download attempt reported, so a refusal is visible where it happened. */
+    val packStates: Map<String, String> = emptyMap(),
+    /** Packs whose pinned digest was verified and whose bytes are installed in the guest. */
+    val verifiedPacks: Set<String> = emptySet(),
     val deviceChanges: DeviceChangeChoices = DeviceChangeChoices(),
     val deviceCapabilityReport: DeviceCapabilityReport? = null,
     val foldPosture: FoldPosture = FoldPosture.UNKNOWN,
@@ -395,6 +399,19 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * leaves the built-in registry behaviour untouched, and every rejection is reported.
      */
     private var manifests = com.example.model.ManifestSet()
+
+    /**
+     * Fetches pinned packs. Its temporary directory lives under `packs/`, which is not a guest tree,
+     * so a half download is never somewhere a guest command could run it.
+     */
+    private val packDownloader = com.example.engine.PackDownloader(
+        privateRoot = java.io.File(getApplication<Application>().filesDir, "packs"),
+        guestRoot = {
+            runCatching { com.example.engine.LinuxRuntime.container(getApplication<Application>()).rootfs }
+                .getOrNull()
+                ?.takeIf { it.isDirectory }
+        }
+    )
 
     init {
         // Packs are read from private storage once, at construction, so the shelves are complete
@@ -1246,12 +1263,45 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * services keeps a reload idempotent: the catalog keeps the state the guest reported for it, and
      * a manifest that was fixed or deleted is reflected instead of lingering from the last read.
      */
+    /**
+     * Downloads and installs one pinned pack.
+     *
+     * The outcome text is the UI's evidence: "Verified: N bytes installed" appears only after the
+     * digest matched, and every failure path reports its refusal reason instead.
+     */
+    fun downloadPack(packId: String) {
+        val release = com.example.model.PackTrust.find(
+            packId,
+            includeBenchControls = com.example.BuildConfig.DEBUG
+        )
+        viewModelScope.launch {
+            _uiState.update { it.copy(packStates = it.packStates + (packId to "Downloading and verifying...")) }
+            val result = packDownloader.install(release)
+            val verified = runCatching { packDownloader.verified() }.getOrDefault(emptySet())
+            val outcome = result.fold(
+                onSuccess = { file -> "Verified: ${file.length()} bytes installed" },
+                onFailure = { error -> "Refused: " + (error.message ?: "unknown error") }
+            )
+            _uiState.update {
+                it.copy(
+                    packStates = it.packStates + (packId to outcome),
+                    verifiedPacks = verified,
+                    notificationMessage = outcome
+                )
+            }
+        }
+    }
+
     fun reloadModuleManifests() {
         viewModelScope.launch(Dispatchers.IO) {
             val loaded = runCatching {
                 com.example.model.ModuleManifestStore(
                     java.io.File(getApplication<Application>().filesDir, "modules")
-                ).load()
+                ).load(
+                    // A debug build can also name the bench controls; a release build cannot.
+                    com.example.model.PackTrust.catalogue(com.example.BuildConfig.DEBUG)
+                        .map { it.id }.toSet()
+                )
             }.getOrElse { error ->
                 com.example.model.ManifestSet(
                     issues = listOf(
@@ -1263,9 +1313,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
             manifests = loaded
+            val verifiedPacks = runCatching { packDownloader.verified() }.getOrDefault(emptySet())
             _uiState.update { state ->
                 state.copy(
                     manifests = loaded,
+                    verifiedPacks = verifiedPacks,
                     // Catalog entries are the ones no manifest declared (declaredLaunch is null), so
                     // filtering them out is what makes a second reload add nothing new.
                     serverServices = state.serverServices.filter { it.declaredLaunch == null } +
@@ -3839,7 +3891,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }.getOrDefault(false),
             isDeviceOwner = runCatching {
                 com.example.util.HostDebloat.canRemovePackages(getApplication<Application>())
-            }.getOrDefault(false)
+            }.getOrDefault(false),
+            verifiedPacks = _uiState.value.verifiedPacks
         )
         val moduleList = com.example.model.ModuleRegistry.resolved(moduleFacts, manifests)
             .joinToString("\n") { resolved ->

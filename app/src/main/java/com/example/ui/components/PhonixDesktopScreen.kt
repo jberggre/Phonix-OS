@@ -2432,6 +2432,43 @@ fun ServerManagerWindowContent(
                 }
             }
         }
+        val packIds = uiState.manifests.packs()
+        if (packIds.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Packs (${uiState.verifiedPacks.size} verified)",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+            items(packIds) { id ->
+                val state = uiState.packStates[id]
+                    ?: if (id in uiState.verifiedPacks) "Verified and installed" else "Not downloaded"
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(id, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        // The state is the last measured outcome, never a spinner that turns green.
+                        Text(
+                            text = state,
+                            color = if (id in uiState.verifiedPacks) PhonixCyan else Slate400,
+                            fontSize = 10.sp
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Button(
+                            onClick = { viewModel.downloadPack(id) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text(
+                                text = if (id in uiState.verifiedPacks) "Verify again" else "Download",
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
         items(uiState.serverServices) { service ->
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
                 Row(

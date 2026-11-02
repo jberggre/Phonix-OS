@@ -351,7 +351,8 @@ fun Windows11StartMenu(
                         guestInstalled = runCatching {
                             com.example.engine.LinuxRuntime.container(context).isInstalled
                         }.getOrDefault(false),
-                        isDeviceOwner = uiState.canRemoveHostPackages
+                        isDeviceOwner = uiState.canRemoveHostPackages,
+                        verifiedPacks = uiState.verifiedPacks
                     )
                 }
                 // One pass with manifests applied. Availability still comes from the measured facts;

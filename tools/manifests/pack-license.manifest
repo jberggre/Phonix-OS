@@ -1,0 +1,6 @@
+#!phonix-module 1
+# A module that requires content the app has not been given at build time. The module stays
+# blocked in the palette until the pack's pinned digest verifies, and the digest itself lives in
+# PackTrust, never in this file and never in the HTTP response.
+module = terminal
+pack = phonix-license
