@@ -15,6 +15,20 @@ data class ModuleFacts(
 )
 
 /**
+ * A module as the palette sees it: the built-in declaration plus what manifests add to it.
+ *
+ * Availability is copied from the module, never from a manifest, so a file on disk cannot change
+ * what the phone can do - only what the module says it needs.
+ */
+data class ResolvedModule(
+    val module: PhonixModule,
+    val packages: List<String>,
+    val blockedReason: String?
+) {
+    val isAvailable: Boolean get() = blockedReason == null
+}
+
+/**
  * The module registry: one declaration per [WindowType], carrying the capability it needs.
  *
  * This is the single list the command palette and the start menu read. Before it existed, each
@@ -78,6 +92,19 @@ object ModuleRegistry {
         modules.mapNotNull { module -> module.blockedReason(facts)?.let { module to it } }
 
     fun byWindowType(type: WindowType): PhonixModule? = modules.firstOrNull { it.windowType == type }
+
+    /**
+     * The registry with manifests applied. With no manifests this is exactly [modules] with their
+     * own [PhonixModule.blockedReason], which is what every caller saw before manifests existed.
+     */
+    fun resolved(facts: ModuleFacts, manifests: ManifestSet = ManifestSet()): List<ResolvedModule> =
+        modules.map { module ->
+            ResolvedModule(
+                module = module,
+                packages = manifests.packagesFor(module.id),
+                blockedReason = module.blockedReason(facts)
+            )
+        }
 
     /**
      * Palette matching. Every whitespace-separated term must appear somewhere in the module's

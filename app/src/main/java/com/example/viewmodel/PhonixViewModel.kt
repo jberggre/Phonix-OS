@@ -191,6 +191,8 @@ data class PhonixUiState(
     val desktopDeckPreset: String = "",
     /** service id -> one-line supervision state, derived from probes and never assumed. */
     val supervision: Map<String, String> = emptyMap(),
+    /** Manifests read at construction: accepted declarations plus every rejection, with reasons. */
+    val manifests: com.example.model.ManifestSet = com.example.model.ManifestSet(),
     val deviceChanges: DeviceChangeChoices = DeviceChangeChoices(),
     val deviceCapabilityReport: DeviceCapabilityReport? = null,
     val foldPosture: FoldPosture = FoldPosture.UNKNOWN,
@@ -388,10 +390,19 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         runner = com.example.engine.GuestServiceRunner(getApplication())
     )
 
+    /**
+     * Module manifests, read once at construction. They only ever add: a missing or rejected file
+     * leaves the built-in registry behaviour untouched, and every rejection is reported.
+     */
+    private var manifests = com.example.model.ManifestSet()
+
     init {
         // Packs are read from private storage once, at construction, so the shelves are complete
         // before the first screen asks for them.
         com.example.model.KnowledgeLibrary.attachPacks(libraryPackStore())
+        // Manifests are read at construction and again when the Server Hub opens, so a
+        // manifest dropped into private storage takes effect without reinstalling the app.
+        reloadModuleManifests()
         // Deck profiles are per screen; a corrupt or unknown entry is dropped rather than applied.
         deckProfiles = com.example.model.DeckProfiles(
             com.example.util.DesktopPrefs.loadDeckProfiles(getApplication())
@@ -1218,9 +1229,58 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
             return
         }
-        serviceSupervisor.start(com.example.engine.ServiceSupervisor.specFor(service))
+        val declared = manifests.service(serviceId)
+        serviceSupervisor.start(
+            if (declared != null) com.example.engine.ServiceSupervisor.specFor(service, declared)
+            else com.example.engine.ServiceSupervisor.specFor(service)
+        )
         _uiState.update {
             it.copy(notificationMessage = "Supervising ${service.name}: restarts and health come from the guest")
+        }
+    }
+
+    /**
+     * Reads module manifests from private storage.
+     *
+     * Called at construction and again when the Server Hub opens. Rebuilding only the declared
+     * services keeps a reload idempotent: the catalog keeps the state the guest reported for it, and
+     * a manifest that was fixed or deleted is reflected instead of lingering from the last read.
+     */
+    fun reloadModuleManifests() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching {
+                com.example.model.ModuleManifestStore(
+                    java.io.File(getApplication<Application>().filesDir, "modules")
+                ).load()
+            }.getOrElse { error ->
+                com.example.model.ManifestSet(
+                    issues = listOf(
+                        com.example.model.ManifestIssue(
+                            "modules",
+                            "could not be read: " + (error.message ?: "unknown error")
+                        )
+                    )
+                )
+            }
+            manifests = loaded
+            _uiState.update { state ->
+                state.copy(
+                    manifests = loaded,
+                    // Catalog entries are the ones no manifest declared (declaredLaunch is null), so
+                    // filtering them out is what makes a second reload add nothing new.
+                    serverServices = state.serverServices.filter { it.declaredLaunch == null } +
+                        loaded.manifests
+                            .mapNotNull { manifest -> manifest.service?.let { it to manifest.packages } }
+                            .map { (service, packages) -> service.toServerServiceItem(packages) }
+                )
+            }
+            if (loaded.issues.isNotEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        notificationMessage = "${loaded.issues.size} module manifest(s) rejected - see Servers"
+                    )
+                }
+            }
         }
     }
 
@@ -1252,7 +1312,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val services = _uiState.value.serverServices
             if (!LinuxRuntime.isRunning || services.isEmpty()) return@launch
             val script = services.joinToString("; ") { s ->
-                "${activeGuestDistro().installedQuery(s.apkPackage)} && echo pkg:${s.id}=1 || echo pkg:${s.id}=0; " +
+                // A manifest service may declare no package: there is nothing to install and nothing
+                // to query, so it stays installed and only its process is asked.
+                val packageCheck = if (s.apkPackage.isBlank()) "true"
+                    else activeGuestDistro().installedQuery(s.apkPackage)
+                "$packageCheck && echo pkg:${s.id}=1 || echo pkg:${s.id}=0; " +
                     "pidof ${s.processName} >/dev/null 2>&1 && echo run:${s.id}=1 || echo run:${s.id}=0"
             }
             val out = LinuxRuntime.run(script, 20_000) ?: return@launch
@@ -3777,11 +3841,16 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 com.example.util.HostDebloat.canRemovePackages(getApplication<Application>())
             }.getOrDefault(false)
         )
-        val moduleList = com.example.model.ModuleRegistry.modules.joinToString("\n") { module ->
-            val blocked = module.blockedReason(moduleFacts)
-            if (blocked == null) "  ${module.title}: ${module.subtitle}"
-            else "  ${module.title}: BLOCKED - $blocked"
-        }
+        val moduleList = com.example.model.ModuleRegistry.resolved(moduleFacts, manifests)
+            .joinToString("\n") { resolved ->
+                val module = resolved.module
+                // Empty when no manifest mentions the module, so the prompt is byte-identical to the
+                // one this agent read before manifests existed.
+                val needs = if (resolved.packages.isEmpty()) ""
+                    else " (declared packages: ${resolved.packages.joinToString(", ")})"
+                if (resolved.isAvailable) "  ${module.title}: ${module.subtitle}$needs"
+                else "  ${module.title}: BLOCKED - ${resolved.blockedReason}$needs"
+            }
         return """
         You are Phonix Shell, a command-line agent working inside a ${guest.name} guest on this phone.
         Packages come from ${guest.packageManager}; do not suggest another distro's package manager.

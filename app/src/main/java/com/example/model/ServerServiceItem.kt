@@ -21,11 +21,16 @@ data class ServerServiceItem(
     /** Where the service keeps its files inside the guest. */
     val internalPath: String,
     val isInstalled: Boolean = false,
-    val isRunning: Boolean = false
+    val isRunning: Boolean = false,
+    /**
+     * Set when a module manifest declares this service, so the Hub shows the command that will
+     * actually run. Null for the built-in catalog, whose hints are unchanged.
+     */
+    val declaredLaunch: String? = null
 ) {
     /** Exact command to start it, shown to the user instead of silently flipping a switch. */
     val startHint: String
-        get() = when (id) {
+        get() = declaredLaunch ?: when (id) {
             "nginx_web" -> "nginx"
             "openssh" -> "ssh-keygen -A && /usr/sbin/sshd"
             else -> apkPackage

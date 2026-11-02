@@ -1958,3 +1958,75 @@ a throwing launch, probe or stop into a reported failure with the exception text
 survive it, so when the process goes, the supervision goes with it; §34 states that rather than implying
 otherwise. The Server Hub's new supervision line has not been tapped on hardware; it was driven through
 the same view-model entry point the button calls.
+
+## 35. Module manifests (2026-11-02) [measured]
+
+The registry declared one entry per window, but everything a module *needed* was compiled into it:
+guest packages, the service behind it, and how to tell that service was alive. A manifest now
+declares that as data, so a module can be described without touching app code.
+
+    #!phonix-module 1
+    module = servers
+    window = server_manager
+    packages = busybox, nginx
+    service = manifest-probe
+    name = Manifest Probe
+    port = 8099
+    process = httpd
+    probe = http
+    launch = httpd -f -p 8099 -h /tmp/phroot
+
+`module` names a built-in module id and is required. `window`, when present, must agree with the
+window that module already owns: a manifest that claims another window is refused rather than
+believed. `packages` is optional, and each token must be lowercase alphanumerics plus `. _ + -`,
+because these strings are pasted into guest shell commands. The service block is optional and needs
+`service`, `process` and `launch`. `port` must be 1-65535 inclusive - 0 is not a listening port and
+65536 does not fit on the wire, so both are refused rather than clamped. A declared `probe = http`
+without a port, or `probe = process` with one, is an error: a probe with nothing to evaluate is never
+accepted as a healthy default. An omitted `stop` is derived from the validated process name, which is
+safe precisely because that name contains nothing to interpret. Unknown keys, repeated keys, and
+oversized files are refused for the same reason: a typo that is ignored does nothing.
+
+**A manifest cannot widen what the phone can do.** Availability is still `PhonixModule.blockedReason`
+measured from `ModuleFacts`, so declaring `packages = bash, coreutils` on a phone with no guest leaves
+that module blocked with the same sentence it gave before. Manifests annotate a module; they never
+unblock one.
+
+**A bad file is reported, not ignored.** A file that cannot be parsed, names an unknown module, or
+declares an unsatisfiable probe is rejected as a whole and shown in the Servers window as
+`Module manifests: N accepted, M rejected` with the reason and the file name. The module keeps its
+built-in declaration, which is the documented behaviour - nothing is silently "fixed", and nothing
+reaches HEALTHY because a file said so.
+
+[measured] `gradle --no-daemon assembleDebug assembleDebugAndroidTest testDebugUnitTest` -
+**BUILD SUCCESSFUL**, **150 unit tests, 21 suites, 0 failures** (124 in 19 suites before this round:
+26 new tests across parsing, validation, resolution, the private-storage loader, and the seams).
+
+The existing seams are pinned rather than trusted: `ServiceSpecTest` asserts both catalog `specFor`
+results byte for byte, and `ModuleRegistryTest` asserts that an empty manifest set resolves to exactly
+the registry's own answers and that declared packages never unblock a module.
+
+**Measured on the bench unit** (SM-G973U, Debian 12 guest, monitor attached, DeX display 2):
+
+- The manifest was pushed to private storage (`files/modules/manifest-probe.manifest`); no code was
+  rebuilt for it. The Servers window then listed `Manifest Probe` and `Module manifests: 1 accepted,
+  0 rejected`.
+- The supervision line was tapped on the display itself: `input -d 2 tap 224 447` on the line bound
+  at `[54,423][394,471]`. It changed from `Not supervised - tap to keep it running` to
+  `Running and healthy - tap to stop supervising`.
+- The service was killed from the app's own terminal (`kill -9 <pid>`, the same UID as the process;
+  this build's `run-as` stays at UID 2000 and cannot signal it). pids: **6308 -> 7687 -> 8437** across
+  two kills, with `PhonixSupervisor` recording `RUNNING health=HEALTHY failures=1`, then
+  `failures=2`, and the card reading `Running and healthy - tap to stop supervising` again.
+- `logcat -b crash` for the package: **0** entries. `dpm list-owners`: still
+  `DeviceOwner,Affiliated`. `dumpsys window displays`: display 2 `mFocusedApp` is this activity.
+- Instrumented suite on the installed APK: **OK (3 tests)** in 22.9 s.
+
+**Not measured, and why.** The bench manifest uses `probe = process` because this Debian tree carries
+no `busybox`, `httpd`, `nc` or `python3`, so the HTTP half of the probe language is covered by unit
+tests and not by a live server on the phone; the card therefore says `Process-only probe`, not a port
+it does not have. Manifests are re-read when the Servers window opens, which is what makes a dropped
+file take effect without a reinstall - there is no file observer. Supervision still does not survive
+app-process death (see 34). `WindowType` remains a closed enum: a manifest may assert the window its
+module owns but cannot add a new one.
+

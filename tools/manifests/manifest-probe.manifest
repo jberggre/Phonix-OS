@@ -1,0 +1,11 @@
+#!phonix-module 1
+# The bench-unit proof for module manifests: nothing here is compiled into the app.
+# `sleep` exists in both the Alpine rescue image and the Debian guest, and copying it to a
+# fresh name gives pidof an unambiguous process to watch.
+module = servers
+window = server_manager
+service = manifest-probe
+name = Manifest Probe
+process = phonixprobe
+probe = process
+launch = cp /bin/sleep /root/phonixprobe && /root/phonixprobe 100000

@@ -354,15 +354,14 @@ fun Windows11StartMenu(
                         isDeviceOwner = uiState.canRemoveHostPackages
                     )
                 }
-                val hits = remember(searchQuery, facts) {
-                    com.example.model.ModuleRegistry.search(searchQuery, facts)
+                // One pass with manifests applied. Availability still comes from the measured facts;
+                // a manifest can only add the packages a module says it needs.
+                val resolved = remember(searchQuery, facts, uiState.manifests) {
+                    com.example.model.ModuleRegistry.resolved(facts, uiState.manifests)
+                        .filter { com.example.model.ModuleRegistry.matches(searchQuery, it.module) }
                 }
-                val blockedHits = remember(searchQuery, facts) {
-                    com.example.model.ModuleRegistry.modules.filter { module ->
-                        com.example.model.ModuleRegistry.matches(searchQuery, module) &&
-                            !module.isAvailable(facts)
-                    }
-                }
+                val hits = resolved.filter { it.isAvailable }.map { it.module }
+                val blockedHits = resolved.filter { !it.isAvailable }.map { it.module }
                 if (hits.isNotEmpty() || blockedHits.isNotEmpty()) {
                     Text(
                         text = "Commands (${hits.size})",
@@ -397,8 +396,10 @@ fun Windows11StartMenu(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                val needs = uiState.manifests.packagesFor(module.id)
                                 Text(
-                                    text = module.caveat ?: module.subtitle,
+                                    text = (module.caveat ?: module.subtitle) +
+                                        if (needs.isEmpty()) "" else " - needs " + needs.joinToString(", "),
                                     color = Slate400,
                                     fontSize = 9.sp,
                                     maxLines = 1,

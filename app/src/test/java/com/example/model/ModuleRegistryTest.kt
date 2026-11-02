@@ -89,4 +89,60 @@ class ModuleRegistryTest {
         assertFalse(withoutGuest.contains("terminal"))
         assertTrue(ModuleRegistry.search("settings", barePhone).map { it.id }.contains("settings"))
     }
+
+    // Pinned before manifests lean on the registry: with no manifests, resolution must reproduce
+    // exactly the availability the registry already reports, module for module.
+    @Test
+    fun anEmptyManifestSetResolvesToTheRegistryAsItWas() {
+        val resolved = ModuleRegistry.resolved(fullDeck)
+        assertEquals(ModuleRegistry.modules.map { it.id }, resolved.map { it.module.id })
+        assertTrue(resolved.all { it.isAvailable && it.packages.isEmpty() })
+        assertEquals(
+            ModuleRegistry.blocked(barePhone).map { it.first.id },
+            ModuleRegistry.resolved(barePhone).filter { !it.isAvailable }.map { it.module.id }
+        )
+    }
+
+    @Test
+    fun manifestsAnnotateAModuleButCanNeverUnblockIt() {
+        val manifest = ModuleManifestFormat.parse(
+            "test.manifest",
+            """
+            #!phonix-module 1
+            module = terminal
+            packages = bash, coreutils
+            """.trimIndent()
+        )
+        val set = ManifestSet(manifests = listOf(manifest))
+        val terminal = ModuleRegistry.resolved(barePhone, set).first { it.module == PhonixModule.TERMINAL }
+        assertEquals(listOf("bash", "coreutils"), terminal.packages)
+        // Declared packages are not a guest: the refusal is still the measured one.
+        assertEquals("Needs an installed Linux guest.", terminal.blockedReason)
+        assertFalse(terminal.isAvailable)
+        assertFalse(
+            ModuleRegistry.resolved(barePhone, set).any {
+                it.isAvailable && it.module == PhonixModule.TERMINAL
+            }
+        )
+        // The same phone with a guest opens it, with the packages still attached.
+        val withGuest = ModuleRegistry.resolved(fullDeck, set).first { it.module == PhonixModule.TERMINAL }
+        assertTrue(withGuest.isAvailable)
+        assertEquals(listOf("bash", "coreutils"), withGuest.packages)
+    }
+
+    @Test
+    fun aManifestCannotChangeWhichModuleOwnsAWindow() {
+        val set = ModuleManifests.resolve(
+            listOf(
+                "bad.manifest" to """
+                    #!phonix-module 1
+                    module = servers
+                    window = browser
+                """.trimIndent()
+            )
+        )
+        assertEquals(1, set.issues.size)
+        assertEquals(0, set.manifests.size)
+        assertEquals(PhonixModule.SERVER_MANAGER, ModuleRegistry.byWindowType(WindowType.SERVER_MANAGER))
+    }
 }

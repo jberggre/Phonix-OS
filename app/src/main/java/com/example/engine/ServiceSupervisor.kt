@@ -1,6 +1,7 @@
 package com.example.engine
 
 import android.content.Context
+import com.example.model.ManifestService
 import com.example.model.ServiceHealth
 import com.example.model.ServiceObservation
 import com.example.model.ServiceProbe
@@ -224,6 +225,26 @@ class ServiceSupervisor(
                 stopCommand = stop,
                 probe = probe,
                 processCommand = "pidof ${item.processName} >/dev/null 2>&1 && echo ph-alive || echo ph-dead"
+            )
+        }
+
+        /**
+         * The same contract as the catalog [specFor], built from a manifest declaration: launch, stop
+         * and probe come from the file, and the identity comes from the Hub item. The launch shape is
+         * deliberately identical so a manifest service behaves like a catalog one on this PRoot.
+         */
+        fun specFor(item: ServerServiceItem, service: ManifestService): ServiceSpec {
+            val log = "/tmp/phonix-${service.id}.log"
+            val launch = "cd /root 2>/dev/null || cd /; " +
+                "nohup sh -c '${service.launchCommand.replace("'", "'\\''")}' > $log 2>&1 & " +
+                "sleep 2; pidof ${service.processName} >/dev/null 2>&1 && echo ph-launched || echo ph-missing"
+            return ServiceSpec(
+                id = service.id,
+                name = service.name,
+                launchCommand = launch,
+                stopCommand = service.stopCommand,
+                probe = service.probe,
+                processCommand = "pidof ${service.processName} >/dev/null 2>&1 && echo ph-alive || echo ph-dead"
             )
         }
     }

@@ -65,7 +65,11 @@ fun ServerCenterScreen(
     viewModel: PhonixViewModel,
     modifier: Modifier = Modifier
 ) {
-    LaunchedEffect(Unit) { viewModel.refreshServerStates() }
+    LaunchedEffect(Unit) {
+        viewModel.refreshServerStates()
+        // Declarations can change while the app runs; the Hub is where they are visible.
+        viewModel.reloadModuleManifests()
+    }
     val ip = uiState.localIpAddress
     val uptimeHours = uiState.uptimeSeconds / 3600
     val uptimeMins = (uiState.uptimeSeconds % 3600) / 60
@@ -95,6 +99,30 @@ fun ServerCenterScreen(
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Refresh", fontSize = 11.sp)
+            }
+        }
+
+        // Manifests are data, so their failures have to be visible where the services they declare
+        // live. A rejected file that only reached logcat would look like a manifest that did nothing.
+        if (uiState.manifests.manifests.isNotEmpty() || uiState.manifests.issues.isNotEmpty()) {
+            Card(colors = CardDefaults.cardColors(containerColor = Slate900), shape = RoundedCornerShape(10.dp)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Module manifests: ${uiState.manifests.manifests.size} accepted, " +
+                            "${uiState.manifests.issues.size} rejected",
+                        color = if (uiState.manifests.issues.isEmpty()) PhonixCyan else PhonixAmber,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    uiState.manifests.issues.forEach { issue ->
+                        Text(
+                            text = issue.toString(),
+                            color = Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
             }
         }
 
@@ -190,7 +218,13 @@ fun ServerCenterScreen(
                     }
 
                     Text(
-                        text = "port ${service.port} · ${service.category} · apk package: ${service.apkPackage}",
+                        text = when {
+                            service.apkPackage.isBlank() && service.port > 0 ->
+                                "port ${service.port} · ${service.category} · no apk package"
+                            service.port > 0 ->
+                                "port ${service.port} · ${service.category} · apk package: ${service.apkPackage}"
+                            else -> "no port · ${service.category} · process-only probe"
+                        },
                         color = Slate400,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace

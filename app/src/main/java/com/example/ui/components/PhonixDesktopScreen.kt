@@ -2403,7 +2403,35 @@ fun ServerManagerWindowContent(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
+    LaunchedEffect(Unit) {
+        // This window is what DeX actually draws, so it asks the guest and re-reads the manifests
+        // itself: a declaration dropped in while the app runs still appears here.
+        viewModel.refreshServerStates()
+        viewModel.reloadModuleManifests()
+    }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (uiState.manifests.manifests.isNotEmpty() || uiState.manifests.issues.isNotEmpty()) {
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    Text(
+                        text = "Module manifests: ${uiState.manifests.manifests.size} accepted, " +
+                            "${uiState.manifests.issues.size} rejected",
+                        color = if (uiState.manifests.issues.isEmpty()) PhonixCyan
+                        else androidx.compose.ui.graphics.Color(0xFFF59E0B),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    uiState.manifests.issues.forEach { issue ->
+                        Text(
+                            text = issue.toString(),
+                            color = Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
         items(uiState.serverServices) { service ->
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
                 Row(
@@ -2417,10 +2445,30 @@ fun ServerManagerWindowContent(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(service.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
-                        Text("Port :${service.port} • ${service.category}", color = Slate400, fontSize = 10.sp)
+                        Text(
+                            text = if (service.port > 0) "Port :${service.port} • ${service.category}"
+                            else "Process-only probe • ${service.category}",
+                            color = Slate400,
+                            fontSize = 10.sp
+                        )
                     }
                     Switch(checked = service.isRunning, onCheckedChange = { viewModel.toggleServerService(service.id) })
                 }
+                // Probe-derived, never assumed. The state the supervisor observed is shown next to
+                // the service, and tapping this line is what starts or stops supervising it.
+                val supervisionLine = uiState.supervision[service.id]
+                Text(
+                    text = supervisionLine?.let { "$it - tap to stop supervising" }
+                        ?: "Not supervised - tap to keep it running",
+                    color = if (supervisionLine == null) Slate400 else PhonixCyan,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.toggleServiceSupervision(service.id) }
+                        .padding(horizontal = 10.dp)
+                        .padding(bottom = 10.dp)
+                )
             }
         }
     }
