@@ -3657,11 +3657,70 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                         }
                     }
                     Text(
-                        "Everything here works with no model, no network and no second device. ${KnowledgeLibrary.docsFor(null, selectedTier).size} active documents on ${KnowledgeCategory.entries.size} shelves.",
+                        "Everything here works with no model, no network and no second device. ${KnowledgeLibrary.docsFor(null, selectedTier).size} active documents on ${KnowledgeCategory.entries.size} shelves. Imported packs are saved on the phone, never fetched from a server.",
                         color = Slate400,
                         fontSize = 9.sp,
                         lineHeight = 13.sp
                     )
+                    val packImporter = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocument()
+                    ) { picked: android.net.Uri? ->
+                        if (picked != null) viewModel.importLibraryPack(picked)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "Packs (${uiState.libraryPacks.size})",
+                            color = PhonixAmber,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Slate900)
+                                .border(1.dp, Slate800, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    // Any text file: the picker's MIME filter is unreliable on
+                                    // Android 12 for .pack, so the format check happens on parse.
+                                    packImporter.launch(
+                                        arrayOf("text/plain", "text/markdown", "application/octet-stream")
+                                    )
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Import .pack", color = PhonixCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (uiState.libraryPackBusy) {
+                        Text("Reading the pack...", color = Slate400, fontSize = 9.sp)
+                    }
+                    uiState.libraryPacks.forEach { pack ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "${pack.title} - ${pack.docCount} docs - ${com.example.model.KnowledgeLibrary.bytesLabel(pack.bytes)}",
+                                color = Slate200,
+                                fontSize = 9.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "Delete",
+                                color = PhonixAmber,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { viewModel.deleteLibraryPack(pack.id) }
+                                    .padding(start = 8.dp)
+                            )
+                        }
+                    }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         KnowledgeCategory.entries.forEach { category ->
                             val shelfDocs = KnowledgeLibrary.docsFor(category, selectedTier)

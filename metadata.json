@@ -1,6 +1,0 @@
-{
-  "name": "Phonix OS",
-  "description": "Transform older smartphones into high-performance Mini PCs and 24/7 Linux servers with hardware acceleration, motherboard cooling profiles, and gaming emulation.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

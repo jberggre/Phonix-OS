@@ -230,7 +230,7 @@ debloat hide walkthrough and the Start-menu view modes, which need a pointer on 
   1.5, and [VERIFICATION.md](VERIFICATION.md) records them. This supersedes the
   `ce94f4b`/1.2 description kept in the rest of this page. It builds and tests green:
   `assembleDebug` plus `testDebugUnitTest` pass, re-run from scratch with `--rerun-tasks` on
-  2026-10-31, **47 tests, 0 failures** at that point; the recovered round since then carries **69** in 11 suites (§27), all green on 2026-11-02. `tools/verify-shipping.sh` then installed 1.5 over the
+  2026-10-31, **47 tests, 0 failures** at that point; the recovered round since then carries **77** in 12 suites (§27, §29), all green on 2026-11-02. `tools/verify-shipping.sh` then installed 1.5 over the
   device-owner build on the SM-G973U (`adb install -r`, Success, `versionCode 6`): version, crash
   buffer, bundled Alpine rescue tree and device owner all passed. The active guest is the Debian
   tree from the earlier round; the distro-install, debloat-hide and Start-menu checks still need
@@ -425,10 +425,15 @@ already had once. This list matches the tree as it stands.
    owner's install path is `gradle assembleDebug` + `adb install -r`. What carries over to item 2 is
    `UpdateInstaller.download()` - digest-checked, progress-reporting - because a pack download is the
    same job on a bigger file.
-2. **Offline library in three sizes.** Ship a downloader that fetches a measured content pack and a
-   UI that removes it again, with Light (~2 GB, basic skills), Medium (~16 GB, reference) and Heavy
-   (~85 GB, books and papers) tiers. Contents, licences and the storage rules are in
-   [ROADMAP.md](ROADMAP.md) section "Offline library"; the reader route is the unresolved part.
+2. **Offline library packs.** The import half shipped on 2026-11-02 (VERIFICATION §29): a
+   `#!phonix-pack 1` text file goes through the document picker, is parsed onto a shelf, stored in
+   private storage, listed with its measured bytes and deleted again. Eight tests cover the parser
+   and the store; the picker round trip is not measured on hardware. Still missing is the **download**
+   half - fetching a pack from a mirror - which needs a published pack with a pinned digest before it
+   is anything but a guess, plus a decision on what the reader does with a multi-gigabyte archive.
+   The Light/Medium/Heavy tiers in [ROADMAP.md](ROADMAP.md) section "Offline library" are content
+   rather than code: the tier selector already gates the authored corpus, and imported packs ignore
+   it by design so the owner's own material is never hidden.
 3. **The three walks that need a pointer on the DeX display.** The debloat hide/restore walkthrough
    (section 22 fixed the tri-state mapping and never re-opened the screen), the Start-menu view
    modes, and the Phone Screen consent dialog, whose stock window does not accept injected taps.

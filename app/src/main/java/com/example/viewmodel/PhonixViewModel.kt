@@ -180,6 +180,10 @@ data class PhonixUiState(
     val isTopNotchExpanded: Boolean = false,
     val activeContextMenu: DesktopContextMenuData? = null,
     val isOobeCompleted: Boolean = false,
+    /** Packs installed in private storage, as the library dialog lists them. */
+    val libraryPacks: List<com.example.model.InstalledPack> = emptyList(),
+    /** True while an import is being read off the main thread. */
+    val libraryPackBusy: Boolean = false,
     val deviceChanges: DeviceChangeChoices = DeviceChangeChoices(),
     val deviceCapabilityReport: DeviceCapabilityReport? = null,
     val foldPosture: FoldPosture = FoldPosture.UNKNOWN,
@@ -359,6 +363,9 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     private var aiStreamingMessageId: String? = null
 
     init {
+        // Packs are read from private storage once, at construction, so the shelves are complete
+        // before the first screen asks for them.
+        com.example.model.KnowledgeLibrary.attachPacks(libraryPackStore())
         val prefs = application.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
         val oobeDone = prefs.getBoolean("oobe_completed", false)
         val savedChanges = DeviceSetupPreferences.choices(application)
@@ -3438,12 +3445,92 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleKnowledgeLibrary() {
-        _uiState.update { it.copy(showKnowledgeLibrary = !it.showKnowledgeLibrary, openKnowledgeDocId = null) }
+        _uiState.update {
+            it.copy(
+                showKnowledgeLibrary = !it.showKnowledgeLibrary,
+                openKnowledgeDocId = null,
+                // Opening the dialog is the only moment the pack list has to be current.
+                libraryPacks = com.example.model.KnowledgeLibrary.installedPacks()
+            )
+        }
     }
 
     fun openKnowledgeDoc(id: String?) {
         _uiState.update { it.copy(openKnowledgeDocId = id) }
     }
+
+    /**
+     * Installs a pack the user picked through the document picker. The bytes are read and parsed
+     * on an IO thread and only written once the whole file has parsed, so a bad pack leaves the
+     * existing library untouched.
+     */
+    fun importLibraryPack(uri: android.net.Uri) {
+        _uiState.update { it.copy(libraryPackBusy = true) }
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val name = packDisplayName(uri) ?: "imported-pack"
+                    val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("That file could not be opened.")
+                    if (bytes.size > com.example.model.LibraryPackFormat.MAX_CHARS * 2) {
+                        throw com.example.model.LibraryPackException(
+                            "That pack is ${bytes.size / 1024} KB; the limit is " +
+                                "${com.example.model.LibraryPackFormat.MAX_CHARS / 1024} KB."
+                        )
+                    }
+                    val installed = libraryPackStore().install(name, String(bytes, Charsets.UTF_8))
+                    com.example.model.KnowledgeLibrary.reloadPacks()
+                    installed
+                }
+            }
+            outcome.fold(
+                onSuccess = { pack ->
+                    _uiState.update {
+                        it.copy(
+                            libraryPackBusy = false,
+                            libraryPacks = com.example.model.KnowledgeLibrary.installedPacks(),
+                            notificationMessage = "Imported ${pack.title}: ${pack.docCount} documents, " +
+                                com.example.model.KnowledgeLibrary.bytesLabel(pack.bytes)
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _uiState.update {
+                        it.copy(
+                            libraryPackBusy = false,
+                            notificationMessage = error.message ?: "The pack could not be imported."
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun deleteLibraryPack(id: String) {
+        val removed = libraryPackStore().delete(id)
+        com.example.model.KnowledgeLibrary.reloadPacks()
+        _uiState.update {
+            it.copy(
+                libraryPacks = com.example.model.KnowledgeLibrary.installedPacks(),
+                notificationMessage = if (removed) {
+                    "Deleted pack $id and returned its space"
+                } else {
+                    "No pack named $id"
+                }
+            )
+        }
+    }
+
+    private fun libraryPackStore(): com.example.model.LibraryPackStore =
+        com.example.model.LibraryPackStore(java.io.File(getApplication<Application>().filesDir, "library/packs"))
+
+    /** The file name the picker reports, so the pack keeps a name the owner recognises. */
+    private fun packDisplayName(uri: android.net.Uri): String? = runCatching {
+        getApplication<Application>().contentResolver
+            .query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    }.getOrNull()
 
     fun copyText(text: String, label: String) {
         val copied = try {

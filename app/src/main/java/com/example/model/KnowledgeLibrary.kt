@@ -798,6 +798,30 @@ object KnowledgeLibrary {
         activeTier = tier
     }
 
+    /**
+     * Packs imported from the phone. Empty until [attachPacks] runs, which the view model does on
+     * construction so the shelves are complete before anything reads them.
+     */
+    private var packStore: LibraryPackStore? = null
+    private var packDocs: List<KnowledgeDoc> = emptyList()
+
+    fun attachPacks(store: LibraryPackStore) {
+        packStore = store
+        reloadPacks()
+    }
+
+    /** Re-reads the installed packs. Called after an import or a delete, never on a timer. */
+    fun reloadPacks() {
+        packDocs = runCatching { packStore?.docs()?.map { doc -> doc.toKnowledgeDoc() } ?: emptyList() }
+            .getOrDefault(emptyList())
+    }
+
+    fun installedPacks(): List<InstalledPack> =
+        runCatching { packStore?.packs() ?: emptyList() }.getOrDefault(emptyList())
+
+    /** Built-in documents plus whatever packs are installed; the order keeps built-ins first. */
+    private fun allDocs(): List<KnowledgeDoc> = if (packDocs.isEmpty()) docs else docs + packDocs
+
     private fun isDocInTier(doc: KnowledgeDoc, tier: KnowledgeTier): Boolean = when (tier) {
         KnowledgeTier.LIGHTWEIGHT -> doc.tier == KnowledgeTier.LIGHTWEIGHT
         KnowledgeTier.MEDIUM -> doc.tier in setOf(KnowledgeTier.LIGHTWEIGHT, KnowledgeTier.MEDIUM)
@@ -805,11 +829,11 @@ object KnowledgeLibrary {
     }
 
     fun docsFor(category: KnowledgeCategory?, tier: KnowledgeTier = activeTier): List<KnowledgeDoc> =
-        docs.filter { doc ->
+        allDocs().filter { doc ->
             isDocInTier(doc, tier) && (category == null || doc.category == category)
         }
 
-    fun document(id: String): KnowledgeDoc? = docs.firstOrNull { it.id == id }
+    fun document(id: String): KnowledgeDoc? = allDocs().firstOrNull { it.id == id }
 
     /** How many documents a tier actually carries, counting the lower tiers it includes. */
     fun docCount(tier: KnowledgeTier): Int = docsFor(null, tier).size
@@ -824,7 +848,7 @@ object KnowledgeLibrary {
     fun sizeLabel(tier: KnowledgeTier): String =
         "${docCount(tier)} docs · ${bytesLabel(approxBytes(tier))}"
 
-    private fun bytesLabel(bytes: Long): String = when {
+    fun bytesLabel(bytes: Long): String = when {
         bytes >= 1024L * 1024L -> String.format(java.util.Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0))
         bytes >= 1024L -> String.format(java.util.Locale.ROOT, "%.0f KB", bytes / 1024.0)
         else -> "$bytes B"

@@ -574,8 +574,8 @@ quick start), `ROADMAP.md` (verdicts and work order), `PROVISIONING.md` (toolcha
 install and Samsung traps), and current-status notes in `LINUX.md`, `PRIVACY.md` and
 `COMPATIBILITY.md`; plus `tools/deck-check.sh` (Samsung density restore, local adb fallback,
 Git Bash path conversion, device-owner death note) and `.gitignore` (`.tools/`, `artifacts/`).
-The tracked AI Studio plan under `.aistudio/` now carries a historical-plan banner so it is not
-mistaken for current behaviour. The round is committed and pushed to `main`; see
+The tracked AI Studio plan under `.aistudio/` carried a historical-plan banner until 2026-11-02,
+when that scaffolding was removed from the tree (SS29). The round is committed and pushed to `main`; see
 [HANDOFF.md](HANDOFF.md) for the queue that starts after it.
 
 ---
@@ -1746,3 +1746,38 @@ the exec-bit fix. It had not been re-run on hardware since.
 Matrix status across the record: Kali and Debian re-run from the recovered tree (§27), Arch now
 (§28), Ubuntu and alpine→debian by the 2026-11-01 session (§25). Every target in the catalogue has
 promoted through the production `switchDistro` on the SM-G973U.
+
+## 29. Library packs, and the AI Studio scaffolding removal - 2026-11-02 [static]
+
+The channel hosts nothing, so an offline pack cannot be a download from a project server. The import
+path is local instead: the owner picks a `#!phonix-pack 1` text file with the document picker, the app
+parses it, writes it under `files/library/packs/`, and the library lists it with its measured byte
+count and a Delete that returns the space.
+
+- `LibraryPackFormat` is a pure-Kotlin parser: `@shelf` (a `KnowledgeCategory` name), `@title`,
+  optional `@pack`, then body lines. A missing header, an unknown shelf, a document without a title,
+  an empty body and anything over 8 MiB are refusals, each with its own message - a typo that
+  silently discarded an imported document would be worse than a refusal.
+- `LibraryPackStore` writes a `.part` file and renames it only after the whole pack has parsed, so a
+  bad import cannot evict a working pack. `delete` is a single file delete and `bytes()` sums the
+  files on disk, which is the number the dialog prints.
+- Pack documents are tagged `LIGHTWEIGHT`, so no size selection hides the owner's own material, and
+  `KnowledgeLibrary.docsFor` / `document` merge them with the authored corpus.
+- Measured: `gradle --no-daemon assembleDebug testDebugUnitTest` - **BUILD SUCCESSFUL in 2m39s**,
+  **77 unit tests, 0 failures, 12 suites** (69 in 11 suites before this round; `LibraryPackTest`
+  contributes 8).
+
+**Not measured:** the picker round trip and the dialog on hardware. No adb endpoint was reachable
+from this session (`adb` is not on PATH and no device was attached), so the eight tests above are the
+entire evidence for the pack path and the UI itself is `[static]`.
+
+The same commit removes the AI Studio scaffolding the open-source build does not use:
+`metadata.json` (it declared a server-side Gemini capability the app never had), `.aistudio/` (the
+original plan artefact), the Gemini `.env.example`, the `secrets` and `google-services` Gradle plugins
+with their version-catalogue entries, the unused Firebase, credentials and Play Services catalogue
+entries, and `public/assets/aistudio/` (four template screenshots referenced from nowhere). The
+application ID `com.aistudio.phonix.vpxmkr` deliberately stays: it is the installed device owner's
+package name, and renaming it would orphan the provisioning on the bench unit.
+
+Note: SS above stands for the section sign used elsewhere in this file; the heading numbering is
+what matters. Library packs are the only place content can enter the library without a rebuild.
