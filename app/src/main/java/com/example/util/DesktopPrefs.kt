@@ -33,6 +33,7 @@ object DesktopPrefs {
     private const val KEY_STATE = "desktop_state_v1"
     private const val KEY_WINDOWS = "window_layouts_v1"
     private const val MAX_RESTORED_WINDOWS = 16
+    private const val KEY_DECK_PROFILES = "deck_profiles_v1"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -136,8 +137,45 @@ object DesktopPrefs {
         }
     }
 
+    /**
+     * Remembers which deck arrangement belongs to which screen. The key is a display identity, not
+     * a display id: Samsung renumbers its DeX workspace between sessions, so an id-keyed map would
+     * apply a monitor's arrangement somewhere else or nowhere.
+     */
+    @Synchronized
+    fun saveDeckProfiles(context: Context, profiles: Map<String, String>) {
+        try {
+            val json = JSONObject()
+            profiles.forEach { (displayKey, preset) -> if (preset.isNotBlank()) json.put(displayKey, preset) }
+            prefs(context).edit().putString(KEY_DECK_PROFILES, json.toString()).apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "could not save deck profiles", e)
+        }
+    }
+
+    @Synchronized
+    fun loadDeckProfiles(context: Context): Map<String, String> {
+        val raw = prefs(context).getString(KEY_DECK_PROFILES, null) ?: return emptyMap()
+        return try {
+            val json = JSONObject(raw)
+            val out = LinkedHashMap<String, String>()
+            json.keys().forEach { displayKey ->
+                val preset = json.optString(displayKey)
+                if (preset.isNotBlank()) out[displayKey] = preset
+            }
+            out
+        } catch (e: Exception) {
+            Log.w(TAG, "deck profiles unreadable", e)
+            emptyMap()
+        }
+    }
+
     fun clear(context: Context) {
-        prefs(context).edit().remove(KEY_STATE).remove(KEY_WINDOWS).apply()
+        prefs(context).edit()
+            .remove(KEY_STATE)
+            .remove(KEY_WINDOWS)
+            .remove(KEY_DECK_PROFILES)
+            .apply()
     }
 
     private fun windowsToJson(list: List<DesktopWindow>): JSONArray = JSONArray().apply {

@@ -1831,3 +1831,43 @@ adds 5).
 
 **Not measured:** on hardware. The presets are unit-tested against both viewports and `[static]`
 everywhere else; nobody has pressed one on the DeX display.
+
+## 32. Deck profiles bound to a display — 2026-11-02 [measured on device, auto-apply static]
+
+A preset was something you applied; the desk never remembered it. Each screen now has its own
+profile, so arriving at the monitor can restore the arrangement that screen had.
+
+- `DisplayIdentity` keys a screen by name and size, not by display id: Samsung renumbers its DeX
+  workspace between sessions (it has been display 2 and display 9 on this phone), so an id-keyed map
+  would apply a monitor's deck somewhere else or nowhere. Orientation and density are excluded, so
+  turning the screen or changing the monitor's mode does not lose the profile.
+- `DeckProfiles` holds the map and the gate: only a non-built-in screen may take the desktop over
+  when it appears, because the phone panel appears on every launch and applying a preset there would
+  overwrite the arrangement the user just made on the screen they can always see.
+- `MainActivity.reportDesktopDisplay()` reports the display it is actually on, with that display's
+  own size in dp, on resume and on every display event. The view model's own bounds are the phone's
+  until the window has been measured, which is too late at dock time: arranging 1920x1080 windows
+  against a 411 dp viewport squashes every one of them.
+- `applyDeckPreset` now also remembers the preset for the current screen and persists it
+  (`deck_profiles_v1`). The start-menu deck section shows which arrangement is remembered for the
+  display in front of you, with a Forget action that clears it.
+
+**Measured on the bench unit (SM-G973U, wireless adb `192.168.0.3:34171`, monitor attached):**
+
+- `adb install -r` over the device-owner package: `Success`, `versionCode=6`, `lastUpdateTime=2026-11-02 01:00:07`.
+- Display inventory at the time: built-in `1440x3040`; DeX workspace `Desktop` `1920x1080` on display 2
+  (`FLAG_DESKTOP_DISPLAY`); HDMI `ES-G34C5` `1920x1080` on display 9 (`FLAG_PRESENTATION`).
+- `am start --display 2` → `mFocusedApp=…com.aistudio.phonix.vpxmkr/com.example.MainActivity`,
+  `mResumedActivity` the same, task `mode=freeform`. The desktop still takes the workspace after the
+  change.
+- `logcat -b crash`: 0 entries for the package. `dpm list-owners` still reports
+  `admin=…PhonixDeviceAdminReceiver,DeviceOwner,Affiliated`.
+- `gradle --no-daemon assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, **100 unit tests,
+  0 failures, 16 suites** (91 in 14 before this round: `DeckProfileTest` adds 5,
+  `DeckProfilePersistenceTest` adds 4).
+
+**Not measured:** the automatic apply itself. It fires on a display *event*, and provoking one needs
+a physical dock/undock or a process restart that reads the seeded preference; `am start` on the
+already-running instance produced no display event, and force-stopping a device owner is not an
+option on this unit. The map is round-trip tested under Robolectric, the identity rules are unit
+tested, and the on-device evidence above is that the desktop still renders on the workspace.

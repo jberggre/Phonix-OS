@@ -476,6 +476,37 @@ fun Windows11StartMenu(
                         }
                     }
                 }
+                val rememberedPreset = com.example.model.DeckPreset.entries
+                    .firstOrNull { it.name == uiState.desktopDeckPreset }
+                if (uiState.desktopDisplayLabel.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (rememberedPreset == null) {
+                                "No deck remembered for ${uiState.desktopDisplayLabel}"
+                            } else {
+                                "${rememberedPreset.title} is remembered for ${uiState.desktopDisplayLabel}"
+                            },
+                            color = Slate400,
+                            fontSize = 9.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (rememberedPreset != null) {
+                            Text(
+                                text = "Forget",
+                                color = Color(0xFFF59E0B),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { viewModel.forgetDeckForCurrentDisplay() }
+                                    .padding(start = 8.dp)
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
             }
 

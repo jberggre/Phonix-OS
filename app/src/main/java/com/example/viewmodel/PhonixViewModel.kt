@@ -184,6 +184,11 @@ data class PhonixUiState(
     val libraryPacks: List<com.example.model.InstalledPack> = emptyList(),
     /** True while an import is being read off the main thread. */
     val libraryPackBusy: Boolean = false,
+    /** The screen the desktop is currently on, as measured by the activity. */
+    val desktopDisplayKey: String = "",
+    val desktopDisplayLabel: String = "",
+    /** The deck arrangement remembered for that screen, if any. */
+    val desktopDeckPreset: String = "",
     val deviceChanges: DeviceChangeChoices = DeviceChangeChoices(),
     val deviceCapabilityReport: DeviceCapabilityReport? = null,
     val foldPosture: FoldPosture = FoldPosture.UNKNOWN,
@@ -362,10 +367,27 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     private var aiChatJob: Job? = null
     private var aiStreamingMessageId: String? = null
 
+    /** The screen the desktop is on, as last reported by the activity. */
+    private var currentDisplay: com.example.model.DisplayIdentity? = null
+
+    /** Display key -> arrangement, loaded once at construction. */
+    private var deckProfiles = com.example.model.DeckProfiles()
+
+    /** Screens already taken over in this process, so a display event cannot re-apply forever. */
+    private val deckAppliedTo = mutableSetOf<String>()
+
     init {
         // Packs are read from private storage once, at construction, so the shelves are complete
         // before the first screen asks for them.
         com.example.model.KnowledgeLibrary.attachPacks(libraryPackStore())
+        // Deck profiles are per screen; a corrupt or unknown entry is dropped rather than applied.
+        deckProfiles = com.example.model.DeckProfiles(
+            com.example.util.DesktopPrefs.loadDeckProfiles(getApplication())
+                .mapNotNull { (displayKey, name) ->
+                    runCatching { displayKey to com.example.model.DeckPreset.valueOf(name) }.getOrNull()
+                }
+                .toMap()
+        )
         val prefs = application.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
         val oobeDone = prefs.getBoolean("oobe_completed", false)
         val savedChanges = DeviceSetupPreferences.choices(application)
@@ -437,9 +459,44 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * windows the user has now instead of swapping in an old layout.
      */
     /**
-     * Replaces the desktop with one of the three deck arrangements, sized to the display in front of
-     * the phone. The windows it creates are ordinary windows: the existing per-size layout saver
-     * persists them, so a preset is not a second, competing kind of state.
+     * The activity reports the display it is actually on, with that display's own size in dp.
+     *
+     * The view model's own bounds are the phone's until the window has been measured, which is too
+     * late for a preset applied at dock time: arranging 1920x1080 windows against a 411 dp viewport
+     * squashes all of them. So the caller supplies the size it is arranged for.
+     */
+    fun onDesktopDisplayChanged(
+        identity: com.example.model.DisplayIdentity,
+        bounds: com.example.model.WindowBounds,
+        isExternal: Boolean
+    ) {
+        currentDisplay = identity
+        val remembered = if (isExternal) deckProfiles.presetFor(identity) else null
+        _uiState.update {
+            it.copy(
+                desktopDisplayKey = identity.key,
+                desktopDisplayLabel = identity.label,
+                desktopDeckPreset = remembered?.name.orEmpty()
+            )
+        }
+        if (!isExternal) return
+        if (!com.example.model.DeckProfiles.mayTakeOverOnAppear(identity)) return
+        if (!deckAppliedTo.add(identity.key)) return
+        val preset = remembered ?: return
+        applyDeckPresetInternal(
+            preset = preset,
+            bounds = bounds,
+            message = "Deck ${preset.title} restored for ${identity.label}"
+        )
+        android.util.Log.i(
+            "PhonixDeck",
+            "applied ${preset.name} for ${identity.key} at ${bounds.widthDp}x${bounds.heightDp} dp"
+        )
+    }
+
+    /**
+     * Applies one of the three deck arrangements to the display currently in front of the phone, and
+     * remembers it for that display so a replug restores it.
      */
     fun applyDeckPreset(preset: com.example.model.DeckPreset) {
         val bounds = windowBounds.value
@@ -449,6 +506,34 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
             return
         }
+        currentDisplay?.let { identity ->
+            if (com.example.model.DeckProfiles.mayTakeOverOnAppear(identity) &&
+                deckProfiles.remember(identity, preset)
+            ) {
+                persistDeckProfiles()
+            }
+            _uiState.update { it.copy(desktopDeckPreset = preset.name) }
+        }
+        applyDeckPresetInternal(preset, bounds, "Deck layout: ${preset.title}")
+    }
+
+    fun forgetDeckForCurrentDisplay() {
+        val identity = currentDisplay ?: return
+        if (deckProfiles.forget(identity)) persistDeckProfiles()
+        deckAppliedTo.remove(identity.key)
+        _uiState.update {
+            it.copy(
+                desktopDeckPreset = "",
+                notificationMessage = "No deck remembered for ${identity.label}"
+            )
+        }
+    }
+
+    private fun applyDeckPresetInternal(
+        preset: com.example.model.DeckPreset,
+        bounds: com.example.model.WindowBounds,
+        message: String
+    ) {
         val windows = preset.windows(bounds)
         maxZIndex = (windows.maxOfOrNull { it.zIndex } ?: 0f) + 1f
         _uiState.update {
@@ -456,9 +541,16 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 windows = windows,
                 activeWindowId = windows.lastOrNull()?.id,
                 isStartMenuOpen = false,
-                notificationMessage = "Deck layout: ${preset.title}"
+                notificationMessage = message
             )
         }
+    }
+
+    private fun persistDeckProfiles() {
+        com.example.util.DesktopPrefs.saveDeckProfiles(
+            getApplication(),
+            deckProfiles.asMap().mapValues { (_, preset) -> preset.name }
+        )
     }
 
     private fun persistWindowLayout() {

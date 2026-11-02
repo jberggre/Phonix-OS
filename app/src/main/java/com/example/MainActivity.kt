@@ -262,6 +262,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         refreshCapabilitySnapshot()
         setImmersiveDesktopMode(isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this))
         moveToDesktopDisplayIfNeeded()
+        reportDesktopDisplay()
         // Returning from the Play Store or Android's Wi-Fi settings must change what the UI
         // shows, so re-read the package list rather than trusting where the customer was.
         viewModel.loadInstalledApps(this)
@@ -270,11 +271,13 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     override fun onDisplayAdded(displayId: Int) {
         refreshCapabilitySnapshot()
         setImmersiveDesktopMode(isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this))
+        reportDesktopDisplay()
     }
 
     override fun onDisplayChanged(displayId: Int) {
         refreshCapabilitySnapshot()
         setImmersiveDesktopMode(isOnExternalDisplay() && DeviceSetupPreferences.shouldUseImmersiveExternalDisplay(this))
+        reportDesktopDisplay()
     }
 
     override fun onDisplayRemoved(displayId: Int) {
@@ -285,6 +288,39 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     override fun onDestroy() {
         displayManager.unregisterDisplayListener(this)
         super.onDestroy()
+    }
+
+    /**
+     * Tells the view model which screen the desktop is on, with that screen's size in dp.
+     *
+     * Reported from resume and from every display event rather than only at first measure: on DeX the
+     * activity is moved to the workspace after it starts, so the display it began on is not the one
+     * it ends up on.
+     */
+    private fun reportDesktopDisplay() {
+        val window = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display
+            else @Suppress("DEPRECATION") windowManager.defaultDisplay
+        } catch (_: Exception) {
+            null
+        } ?: return
+        val metrics = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        window.getRealMetrics(metrics)
+        if (metrics.widthPixels <= 0 || metrics.heightPixels <= 0) return
+        val density = if (metrics.densityDpi > 0) metrics.densityDpi / 160f else 1f
+        viewModel.onDesktopDisplayChanged(
+            identity = com.example.model.DisplayIdentity.of(
+                window.name,
+                metrics.widthPixels,
+                metrics.heightPixels
+            ),
+            bounds = com.example.model.WindowBounds(
+                metrics.widthPixels / density,
+                metrics.heightPixels / density
+            ),
+            isExternal = window.displayId != android.view.Display.DEFAULT_DISPLAY
+        )
     }
 
     private fun refreshCapabilitySnapshot() {

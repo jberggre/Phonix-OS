@@ -437,9 +437,11 @@ already had once. This list matches the tree as it stands.
 3. **The three walks that need a pointer on the DeX display.** The debloat hide/restore walkthrough
    (section 22 fixed the tri-state mapping and never re-opened the screen), the Start-menu view
    modes, and the Phone Screen consent dialog, whose stock window does not accept injected taps.
-4. **Dock/undock and the 24-hour soak.** Real DeX is measured (sections 13, 25, 27); missing is a
-   dock -> undock cycle with the watcher consent enabled, a window surviving the display change, and
-   a plugged-in soak. Do not call DeX verified until then.
+4. **Dock/undock and the 24-hour soak.** Display-bound deck profiles shipped on 2026-11-02
+   (VERIFICATION §32): a screen remembers its arrangement and may restore it when it appears, keyed on
+   a display identity rather than the id Samsung renumbers. Still missing, and still the bar for
+   calling DeX verified: a physical dock -> undock cycle with the watcher consent enabled, proof the
+   automatic apply actually fired, a window surviving the display change, and a plugged-in soak.
 5. **VS Code experiment** (`code serve-web` on the guest, [ROADMAP](ROADMAP.md) section on VS Code).
    The badge is probe-gated and honest; there has never been an editor behind it.
 6. **Phone Screen input - only if a touch-less display appears.** Decided read-only on 2026-11-02.
