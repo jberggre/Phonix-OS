@@ -124,7 +124,7 @@ hosted yet — that path is compiled and unit-tested, not measured.
 Still owed on the update path: host a feed, then run one check, one download and one install on a
 unit; and decide whether the feed should be GitHub Releases (needs the repository to be public) or
 the owner's own manifest host. See [VERIFICATION.md](VERIFICATION.md) §13. This is the only
-deployment blocker left in the README boundary list, so it heads the queue below.
+deployment blocker left in the README boundary list, so it heads the queue below, where the hosting half is now cancelled (item 1).
 
 ## Shipping round (2026-10-31, cloud worktree — no phone attached)
 
