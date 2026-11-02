@@ -59,22 +59,31 @@ class LinuxContainer(
 
     /** Release string read from the active rootfs, e.g. `3.24.3` or `12.7`. */
     fun version(): String = try {
-        when {
-            File(rootfs, "etc/alpine-release").isFile -> File(rootfs, "etc/alpine-release").readText().trim()
-            // Bare versions only: the hub prints "<distro name> <version>", and the distro name
-            // already carries its release ("Debian 12 (Bookworm)"), so a PRETTY_NAME-style
-            // string here rendered as "Debian 12 (Bookworm) Debian 12.15".
-            File(rootfs, "etc/debian_version").isFile -> File(rootfs, "etc/debian_version").readText().trim()
-            File(rootfs, "etc/os-release").isFile -> {
-                val lines = File(rootfs, "etc/os-release").readLines()
-                val versionId = lines.firstOrNull { it.startsWith("VERSION_ID=") }
-                    ?.substringAfter("=")?.trim('"', '\'')
-                versionId?.takeIf { it.isNotBlank() }
-                    ?: lines.firstOrNull { it.startsWith("PRETTY_NAME=") }
-                        ?.substringAfter("=")?.trim('"', '\'') ?: activeDistro().version
-            }
-            else -> activeDistro().version
-        }
+        // Bare versions only: the hub prints "<distro name> <version>", and the distro name
+        // already carries its release ("Debian 12 (Bookworm)"), so a PRETTY_NAME-style string
+        // here rendered as "Debian 12 (Bookworm) Debian 12.15".
+        //
+        // `/etc/debian_version` is trusted only when it really is a Debian release number. Ubuntu
+        // puts "trixie/sid" there and Kali puts "kali-rolling", and preferring the file blindly
+        // made the hub announce "Ubuntu 24.04 LTS trixie/sid" and "Kali Linux Minimal
+        // kali-rolling" instead of the point release the guest actually reports.
+        val debianVersion = File(rootfs, "etc/debian_version")
+            .takeIf { it.isFile }
+            ?.readText()
+            ?.trim()
+            ?.takeIf { it.firstOrNull()?.isDigit() == true }
+        val osRelease = File(rootfs, "etc/os-release").takeIf { it.isFile }?.readLines().orEmpty()
+        fun field(name: String): String? = osRelease.firstOrNull { it.startsWith("$name=") }
+            ?.substringAfter("=")
+            ?.trim('"', '\'')
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
+        debianVersion
+            ?: field("VERSION_ID")
+            ?: File(rootfs, "etc/alpine-release").takeIf { it.isFile }?.readText()?.trim()
+            ?: field("PRETTY_NAME")
+            ?: activeDistro().version
     } catch (_: Throwable) {
         activeDistro().version
     }
@@ -259,6 +268,16 @@ class LinuxContainer(
         // manager ran `pacman -S ...` inside Debian and failed with "pacman: not found", which is
         // how the first arch attempt aborted.
         val guest = activeDistro()
+
+        // A freshly streamed image has no usable package index - Ubuntu died with "Unable to
+        // fetch some archives, maybe run apt-get update" and pacman refuses to install from
+        // unsynced databases. Refresh best-effort: the install below is what decides whether the
+        // switch can continue, so a mirror hiccup during the refresh still gets a clear message.
+        guest.indexSyncCommand?.let { sync ->
+            onProgress("Refreshing the ${guest.name} package index...")
+            execOnce(sync, timeoutSeconds = 600) { line -> if (line.isNotBlank()) onProgress(line) }
+        }
+
         val command = guest.installCommand(guest.unpackToolPackages)
         onProgress("${guest.name} has no xz decoder; installing ${guest.unpackToolPackages}...")
         val lastLines = ArrayDeque<String>()

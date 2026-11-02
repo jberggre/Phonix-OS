@@ -1582,7 +1582,11 @@ are worth recording (all [measured] on this unit):
 - Ubuntu 24.04, Arch and the VNC desktop after a switch. Only Kali and Debian were switched, and
   the new guests were checked with `cat /etc/os-release` and `id -u`, not by opening a desktop.
 - A switch with no network: it fails at the download and leaves the previous guest in place by
-  design, but that branch was not exercised this round.
+  design, but that branch was not exercised this round, and it **cannot** be exercised on this
+  unit as the bench is wired: `adb devices` lists only wireless transports
+  (`192.168.0.3:34171` and the `_adb-tls-connect._tcp` mDNS entry), so airplane mode or
+  `svc wifi disable` would cut the console off from the phone mid-test with no USB fallback.
+  Test it over USB adb, or block the mirror from inside the guest instead of on the radio.
 
 ### Second round: three more defects sat between the download and a bootable guest
 
@@ -1627,3 +1631,69 @@ it is the bundled rescue image.
 That run also caught a mistake in the test itself: it asserted that the replaced guest is always
 pruned, which fails on a *correct* switch away from the bundled guest. The assertion now excludes
 bundled images.
+
+**Run 4, `debian -> ubuntu`** [measured]: 122 MB downloaded and verified, unpacked in 54 s,
+promoted, `debian` pruned, `PRETTY_NAME="Ubuntu 24.04.5 LTS"`, `VERSION_ID="24.04"`.
+
+## §26 — The hub announced Ubuntu as "trixie/sid" (2026-11-01, measured, S10)
+
+`LinuxContainer.version()` read `/etc/debian_version` before `/etc/os-release`, on the reasoning
+that Debian's point release (`12.15`) is more use to the user than os-release's `VERSION_ID="12"`.
+That holds for Debian and for nothing else: Ubuntu's image ships `trixie/sid` in that file and
+Kali's ships `kali-rolling`, so the switch log for Ubuntu ended with
+
+```
+switch OK: ubuntu trixie/sid, 49 progress lines
+```
+
+and the hub's active-environment card - which renders `"${distro.name} ${version()}"` - would have
+shown **"Ubuntu 24.04 LTS trixie/sid"**, and **"Kali Linux Minimal kali-rolling"** for the run
+before it. Both are wrong in the way that matters: they report another distribution's codename
+instead of the release the guest actually is.
+
+Fix: `/etc/debian_version` is used only when its content starts with a digit, then os-release's
+`VERSION_ID`, then `/etc/alpine-release`, then `PRETTY_NAME`. Debian still reports `12.15`, Ubuntu
+`24.04`, Kali `2026.3`, Alpine `3.24.3`.
+
+### What the switch matrix now says
+
+| From → to | Download | Result |
+|---|---|---|
+| debian → kali | 74 MB | promoted, `Kali GNU/Linux Rolling` 2026.3 |
+| kali → debian | 91 MB | promoted, `Debian 12 (bookworm)` |
+| debian → arch | 170 MB | promoted, then unusable before the exec-bit fix |
+| alpine → debian | 91 MB | promoted via `apk add xz tar`, `Debian 12 (bookworm)` |
+| debian → ubuntu | 122 MB | promoted, `Ubuntu 24.04.5 LTS` |
+
+Every run was driven through the production `switchDistro`, asserted the persisted id, the marker,
+`/bin/sh`, `/etc/os-release`, a shell command inside the new guest, absent staging and cache, and
+the survival of the bundled Alpine rescue image. `connectedDebugAndroidTest` reported **BUILD
+SUCCESSFUL** for the kali, the second debian, the alpine→debian, the ubuntu and the final re-run.
+
+The `debian → arch` entry is the one that was promoted and still unusable; its tree was removed by
+hand afterwards, so the shipped code (`moveTree` with mode preservation) has been exercised on
+Debian, Kali and Ubuntu but has **not** re-run on Arch.
+
+**Not claimed:** the VNC desktop after the Ubuntu switch, and a switch with the radio enabled but
+the mirror unreachable (see the note above on why the bench cannot drop its own adb link).
+
+### One more, found by switching back *out of* Ubuntu
+
+The Ubuntu guest refused to install the unpack tools at all:
+
+```
+E: Failed to fetch http://ports.ubuntu.com/ubuntu-ports/pool/main/x/xz-utils/
+   xz-utils_5.6.1%2breally5.4.5-1ubuntu0.3_arm64.deb  404  Not Found [IP: 2620:2d:4002:1::10c 80]
+E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
+```
+
+A freshly streamed image ships apt lists that name a package version the mirror has since rotated
+away, so the install 404s; pacman will not install from unsynced databases at all. `LinuxDistro`
+now carries `indexSyncCommand` (`apt-get update -q`, `pacman -Sy --noconfirm`, and nothing for
+Alpine, whose `apk add --no-cache` refreshes itself) and `ensureGuestUnpacker` runs it before the
+install, best effort.
+
+Measured after the fix, `ubuntu -> debian` [measured]: index refreshed, tools installed, 91 MB
+downloaded and verified, unpacked, promoted, `ubuntu` pruned, and the run finished with
+`switch OK: debian 12.15, 97 progress lines` - which also confirms the release fix in §26, since
+this line read `trixie/sid` for Ubuntu and now reads Debian's real point release.

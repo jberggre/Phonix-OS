@@ -56,6 +56,20 @@ data class LinuxDistro(
         else -> "xz tar"
     }
 
+    /**
+     * Command that makes this guest's package index usable, or null when it needs none.
+     *
+     * A freshly streamed image carries no usable index. Ubuntu's `apt-get install xz-utils tar`
+     * failed with `E: Unable to fetch some archives, maybe run apt-get update or try with
+     * --fix-missing?`, and pacman will not install from unsynced databases at all. `apk add
+     * --no-cache` refreshes on its own, so Alpine needs nothing here.
+     */
+    val indexSyncCommand: String? get() = when (packageManager) {
+        "apt" -> "apt-get update -q"
+        "pacman" -> "pacman -Sy --noconfirm"
+        else -> null
+    }
+
     /** Approximate until the download starts, then replaced by the server's Content-Length. */
     val downloadSizeEstimate: String get() = "~${downloadSizeMb} MB"
     val installedDiskFootprint: String get() = "~${installedSizeMb} MB"

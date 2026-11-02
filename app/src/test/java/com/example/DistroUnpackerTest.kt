@@ -40,6 +40,15 @@ class DistroUnpackerTest {
     }
 
     @Test
+    fun `apt and pacman guests refresh their index before installing`() {
+        assertEquals("apt-get update -q", DistroCatalog.debian.indexSyncCommand)
+        assertEquals("apt-get update -q", DistroCatalog.ubuntu.indexSyncCommand)
+        assertEquals("pacman -Sy --noconfirm", DistroCatalog.arch.indexSyncCommand)
+        // `apk add --no-cache` refreshes by itself, so Alpine needs no separate sync.
+        assertEquals(null, DistroCatalog.alpine.indexSyncCommand)
+    }
+
+    @Test
     fun `the install command matches the guest package manager`() {
         assertEquals(
             "apt-get install -y -q xz-utils tar",
