@@ -1697,3 +1697,30 @@ Measured after the fix, `ubuntu -> debian` [measured]: index refreshed, tools in
 downloaded and verified, unpacked, promoted, `ubuntu` pruned, and the run finished with
 `switch OK: debian 12.15, 97 progress lines` - which also confirms the release fix in §26, since
 this line read `trixie/sid` for Ubuntu and now reads Debian's real point release.
+
+## 27. Recovered switch test re-run — 2026-11-02 [measured]
+
+The 2026-11-01 `DistroSwitchInstrumentedTest` was recovered from `worktrees/93aba3ca`, whose git
+metadata pointed at a repository that no longer exists, so its evidence existed only as files and
+a stale APK. It was re-run on the bench unit over wireless debugging
+(`adb connect 192.168.0.3:34171`) to re-establish the claim from a clean tree.
+
+- `:app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.distro=kali` —
+  **BUILD SUCCESSFUL**, 1 test, 0 failed. Logcat: `switching debian -> kali; alpine rescue
+  present=true`, `PRETTY_NAME="Kali GNU/Linux Rolling"`, `VERSION_ID="2026.3"`, then
+  `switch OK: kali 2026.3, 57 progress lines`.
+- Out-and-back with `distro=debian`: `switching kali -> debian`, `PRETTY_NAME="Debian GNU/Linux 12
+  (bookworm)"`, `switch OK: debian 12.15, 58 progress lines`.
+- After both runs `files/linux` reads `alpine debian tmp`: Kali was pruned, and the bundled Alpine
+  rescue image was **not** pruned.
+- `dpm list-owners` → `admin=com.aistudio.phonix.vpxmkr/…PhonixDeviceAdminReceiver,
+  DeviceOwner,Affiliated`. `logcat -b crash` holds 0 package entries. `/data` has 99 GB free.
+- The restored guest reports `debian 12.15`, which is the §26 fix measured again — the hub reports
+  the guest's real point release, not another distribution's codename.
+
+Gradle prints `failed to uninstall test APK … DELETE_FAILED_INTERNAL_ERROR` after each run. That is
+the device-owner install refusing removal, not a test failure: the tests had already passed and the
+app version is unchanged at `1.5 (versionCode 6)`.
+
+**Not run:** the `arch` target — §25 records its promotion as the one still unusable before the
+exec-bit fix — and the VNC desktop after a switch.
