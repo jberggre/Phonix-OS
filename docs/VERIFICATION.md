@@ -575,7 +575,7 @@ install and Samsung traps), and current-status notes in `LINUX.md`, `PRIVACY.md`
 `COMPATIBILITY.md`; plus `tools/deck-check.sh` (Samsung density restore, local adb fallback,
 Git Bash path conversion, device-owner death note) and `.gitignore` (`.tools/`, `artifacts/`).
 The tracked AI Studio plan under `.aistudio/` carried a historical-plan banner until 2026-11-02,
-when that scaffolding was removed from the tree (SS29). The round is committed and pushed to `main`; see
+when that scaffolding was removed from the tree (§29). The round is committed and pushed to `main`; see
 [HANDOFF.md](HANDOFF.md) for the queue that starts after it.
 
 ---
@@ -1747,7 +1747,7 @@ Matrix status across the record: Kali and Debian re-run from the recovered tree 
 (§28), Ubuntu and alpine→debian by the 2026-11-01 session (§25). Every target in the catalogue has
 promoted through the production `switchDistro` on the SM-G973U.
 
-## 29. Library packs, and the AI Studio scaffolding removal - 2026-11-02 [static]
+## 29. Library packs, and the AI Studio scaffolding removal — 2026-11-02 [static]
 
 The channel hosts nothing, so an offline pack cannot be a download from a project server. The import
 path is local instead: the owner picks a `#!phonix-pack 1` text file with the document picker, the app
@@ -1778,6 +1778,3 @@ with their version-catalogue entries, the unused Firebase, credentials and Play 
 entries, and `public/assets/aistudio/` (four template screenshots referenced from nowhere). The
 application ID `com.aistudio.phonix.vpxmkr` deliberately stays: it is the installed device owner's
 package name, and renaming it would orphan the provisioning on the bench unit.
-
-Note: SS above stands for the section sign used elsewhere in this file; the heading numbering is
-what matters. Library packs are the only place content can enter the library without a rebuild.
