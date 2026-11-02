@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.model.CoolingMode
 import com.example.model.DesktopCustomization
+import com.example.model.DesktopIconGrid
 import com.example.model.WindowType
 import com.example.model.DeviceChangeChoices
 import com.example.model.SetupPersona
@@ -117,12 +118,50 @@ class ExampleRobolectricTest {
             updatedBrowser.posX == updatedFiles.posX && updatedBrowser.posY == updatedFiles.posY
         )
 
+        // Dropped at the top-left of the icon area, so it takes the left column of the top row and
+        // the icon it was dropped on is pushed into a free slot.
         assertEquals(0, updatedBrowser.gridCol)
-        assertEquals(0, updatedBrowser.gridRow)
+        assertTrue(
+            "The browser was dropped above the File Explorer row",
+            updatedBrowser.posY < updatedFiles.posY
+        )
 
         // Ensure ALL shortcuts on the desktop have completely unique grid coordinates
         val allSlots = updatedShortcuts.map { Pair(it.gridCol, it.gridRow) }
         assertEquals("All shortcuts must have unique grid slots without any duplicates", allSlots.size, allSlots.toSet().size)
+    }
+
+    @Test
+    fun `locking the grid snaps every icon without moving the ones already on it`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = PhonixViewModel(app)
+        viewModel.setIconGrid(columns = 18, areaHeightDp = 1018f)
+
+        viewModel.toggleLockIconsToGrid(true)
+
+        val locked = viewModel.uiState.value.customization.shortcuts
+        locked.forEachIndexed { index, sc ->
+            val expected = DesktopIconGrid.autoPosition(index, locked.size, 18, 1018f)
+            assertEquals("${sc.title} column", expected.first, sc.posX, 0.01f)
+            assertEquals("${sc.title} row", expected.second, sc.posY, 0.01f)
+            assertTrue("${sc.title} must be pinned to its slot", sc.hasCustomPosition)
+        }
+
+        // An icon dragged off the grid snaps to the nearest slot. It used to be sent to the middle
+        // of the screen, because the snap origin was the top corner instead of the bottom row.
+        viewModel.toggleLockIconsToGrid(false)
+        viewModel.dropShortcut("sc_browser", 300f, 500f)
+        viewModel.toggleLockIconsToGrid(true)
+
+        val browser = viewModel.uiState.value.customization.shortcuts.first { it.id == "sc_browser" }
+        val (slotX, slotY) = DesktopIconGrid.snap(browser.gridCol, browser.gridRow, 1018f)
+        assertEquals(slotX, browser.posX, 0.01f)
+        assertEquals(slotY, browser.posY, 0.01f)
+        assertEquals("300 dp is column 3 of the 90 dp pitch", 3, browser.gridCol)
+        assertTrue(
+            "A snapped icon must stay inside the icon area",
+            browser.posY <= 1018f - DesktopIconGrid.ROW_PITCH_DP
+        )
     }
 
     @Test

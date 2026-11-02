@@ -1056,3 +1056,644 @@ A one-time backfill of desktop shortcuts was written on that wrong premise and t
   only sees the phone display, and taps on the bar's start button did not open the menu, so the
   layout is `[static]` verified, not photographed.
 
+## 13. Verifiable update path — 2026-10-31
+
+### The defect this replaces
+
+- `checkAppUpdates()` requested `api.github.com/repos/jberggre/Phonix-OS/releases/latest`. That
+  repository is private, so the only observable result was a 404 (measured earlier for both the
+  wrong and the real repository). A build that never receives a document must not render "up to
+  date"; with no feed configured it now says so.
+- Ordering ran on `versionName` text, so a future "1.10" would sort below "1.9". [static]
+- `downloadAndInstallUpdate()` opened the release page in a browser: no digest, no signer check, no
+  installer session, so the "update" was whatever the page served.
+
+### What the tree does now [static]
+
+| Gate | Code | Failure behaviour |
+|---|---|---|
+| Feed shape | `model/UpdateFeed.parse` | null on a missing digest, non-https `apkUrl`, zero `versionCode`, non-JSON |
+| Ordering | `UpdateFeed.isNewer(manifest, currentVersionCode)` | offers only a strictly newer `versionCode` |
+| Transfer | `engine/UpdateInstaller.download` | writes `.part`; a truncated download is rejected |
+| Integrity | SHA-256 of the file vs the feed's published digest | aborts, deletes the partial file, names both prefixes |
+| Signer | archive certificate vs installed certificate | refuses before the installer opens |
+| Consent | `PackageInstaller` session, default user action | Android's own dialog; no silent install |
+
+`BuildConfig.UPDATE_FEED_URL` comes from `-PphonixUpdateFeed=…` or `PHONIX_UPDATE_FEED` and defaults
+to empty, which About reports as "not configured in this build". It never prints a claim that the
+unit is current unless the feed actually said so.
+
+### Checks
+
+- `:app:assembleDebug` — **BUILD SUCCESSFUL** (JDK 21 / Gradle 9.3.1 / SDK 36).
+- `:app:testDebugUnitTest` — **54 tests, 0 failures**, including the new `UpdateFeedTest` (7 tests).
+- [measured] `tools/verify-shipping.sh --apk app/build/outputs/apk/debug/app-debug.apk --serial
+  R38M200YNRA`: `Success`, `1.5 (versionCode 6)`, crash buffer 0 entries, `DeviceOwner` intact,
+  `rootfs trees: alpine debian tmp`, Alpine rescue present. Exit 0.
+- [measured] post-install launch: `pidof` 3387, no `FATAL`/`AndroidRuntime` error for the package.
+- **Not run:** a live feed check, download and install. No feed is hosted, so those [static] paths
+  have not been measured on the device. The signer comparison and the installer hand-off are the
+  parts worth exercising first.
+
+### Known limits
+
+- The feed is JSON over HTTPS with a published digest. It is **not** a signed manifest: whoever can
+  serve the feed can offer any APK — but that APK still has to carry this app's signing certificate,
+  which `signersMatch` checks and Android enforces. Signing the feed itself would remove the
+  trust-the-host property and is the next step if the owner wants it.
+- A download needs a connection and about 30 MB free while the old build is still installed. Nothing
+  prunes the cache except a successful install.
+
+## 14. Phone Screen targets the phone panel — 2026-11-01 (measured, S10 + DeX)
+
+### The defect
+
+With Phonix running fullscreen on the 1920x1080 HDMI desktop (display 2) and the phone panel on
+display 0:
+
+- The capture service measured `WindowManager.defaultDisplay` from its own context and got the
+  **desktop**: 1920x1080 at 160 dpi.
+- It built a **540x303 (16:9)** virtual display — `dumpsys display` showed
+  `phonix-phone-screen ... 540 x 303` — and logged `capturing at 540x303`.
+- The frames were the desktop: the window showed Phonix's own network-onboarding card while a
+  simultaneous `screencap -d 0` showed the phone's Gemini dialog on a black panel.
+
+So the one surface that exists to show the cracked phone screen showed the monitor instead.
+
+### What changed
+
+| Change | File |
+|---|---|
+| Panel metrics come from `DisplayManager.getDisplay(Display.DEFAULT_DISPLAY)`; the surface keeps the panel's aspect ratio | `service/ScreenMirror.kt` |
+| The projection is requested from a **display-0 context** (`Context.createDisplayContext(panel)`) | `service/ScreenMirror.kt` |
+| API 34+ asks the system for `MediaProjectionConfig.createConfigForDefaultDisplay()` | `ui/components/PhoneMirrorWindow.kt` |
+| Copy says it captures the panel, not this desktop; the display-0 recursion card is unchanged | `ui/components/PhoneMirrorWindow.kt` |
+| `ScreenMirror.captureSize()` is pure and unit-tested | `ScreenMirrorGeometryTest` |
+
+One UI 4.1 binds a MediaProjection capture to the display of the requesting context, so the
+display-0 context is the only app-level lever on API 31; `MediaProjectionConfig`, which states the
+target display directly, exists only from API 34.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL, 58 tests, 0 failures**. New
+  `ScreenMirrorGeometryTest` (4): 1080x2280 → 540x1140, 1920x1080 → 540x303 and deliberately *not*
+  equal to the panel size, landscape 2280x1080 → 540x255, and degenerate input cannot produce a
+  zero-height surface.
+- [measured] `adb install -r` over the device-owner build: `Success`; device owner intact.
+- [measured] log after consent: `panel 1080x2280 @420dpi -> capturing 540x1140`, then
+  `first captured frame 540x1140`; `dumpsys display` reports the virtual display at 540x1140.
+- [measured] the window frame shows the phone panel (Gemini dialog, status bar 58%), matching a
+  simultaneous `screencap -d 0`; no part of the desktop is in the picture.
+- [measured] closing the window stopped the session: `dumpsys media_projection` → `null`, no
+  `ScreenMirrorService`, crash buffer empty.
+
+### Not run, and why it matters
+
+- **The stock consent window ignored injected taps** on this DeX display in most attempts, while the
+  same `input -d 2 tap` works on Phonix's own windows. The run above was granted with
+  `appops set … PROJECT_MEDIA allow`, which was then reset to `default`, so the shipped gate is
+  still Android's per-session dialog and a real pointer is needed to answer it.
+- Not run: capture after moving the desktop onto display 0 (the recursion guard is unchanged),
+  rotation during a live capture, and the API 34 config path (the unit is API 31).
+- Start → All apps laid out only 11 of the catalog's entries on the same display; fixed in §15.
+
+## 15. Start menu: every app reachable (2026-11-01, S10 over wireless adb + HDMI monitor)
+
+[measured] With Phonix fullscreen on the HDMI desktop, Start → All apps laid out **11 of 21** Phonix
+cells: the "Phonix OS apps" grid was a `LazyVerticalGrid` capped at 132 dp with
+`userScrollEnabled = false`. The Pinned view had the same shape at 240 dp (`GridCells.Adaptive`) and
+its third row was cut through the icons. Both sit inside a `Column` that already scrolls vertically,
+so the caps hid entries without giving anything else room.
+
+Fixed in `ui/components/Windows11StartMenu.kt`: both surfaces are plain `Row`s of
+`START_GRID_COLUMNS = 5` weighted cells (`chunked`, with a trailing `Spacer(weight(1f))` so a short
+row keeps its columns) inside the menu's own scroller. The pinned tile moved into `StartTile`, so the
+row layout has one definition of a pin. The All-apps lists for Android apps (compact, storage weight,
+categories) were left alone: they scroll by themselves and carry no fixed cap.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, 58 tests, 0 failures. The change is
+  layout-only and no test covers Compose geometry, so the evidence below is the measurement.
+- [measured] `adb install -r` → `Success`; `versionCode=6`; crash buffer empty after the taps and
+  the drag.
+- [measured] All apps on the desktop: all **21** Phonix cells are drawn (App Store … "Photos &
+  Media" as the fifth row), against 11 before. `artifacts/session/start-fix-allapps.png`.
+- [measured] Pinned view: four whole rows, no tile sliced (row 3 was cut before), and one drag
+  (`input -d 2 swipe 960 950 960 560 400`) brings the 21st pin and the footer into view.
+  `artifacts/session/start-fix-pinned2.png`, `artifacts/session/start-fix-scrolled.png`.
+- [measured] Same build, same session: Phone Screen showed the phone's own home screen (status bar
+  1:19 / 58%, phone wallpaper and dock) while Phonix owned the desktop.
+
+Not run: the Android-app tabs (compact / storage weight / categories) were not clicked through after
+the change, and there was no rotation or 320 dp narrow-width check of the new rows.
+
+## 16. Taskbar docking: bottom, left, right, top (2026-11-01, S10 + HDMI monitor)
+
+The bar could only sit at the bottom. `TaskbarPosition` had two values (`BOTTOM`, `TOP`), nothing
+called `updateTaskbarPosition`, and `PhonixDesktopScreen` hard-placed the bar at
+`Alignment.BottomCenter` with a fixed 50 dp inset, so on a monitor the bar permanently cost 50 dp of
+height and there was no way to move it.
+
+### What changed
+
+| Change | File |
+|---|---|
+| `TaskbarPosition` gains `LEFT`/`RIGHT`, a `title`, `isVertical`; new `TaskbarMenu` menu data | `model/DesktopCustomization.kt` |
+| `openTaskbarContextMenu(position)` | `viewmodel/PhonixViewModel.kt` |
+| Vertical bar layout (56 dp column: start, search, scrolling app strip, stacked tray, show-desktop) and the dock gesture on the bar | `ui/components/Windows11Taskbar.kt` |
+| Dock menu with Bottom / Left / Right / Top and a tick on the current edge | `ui/components/DesktopContextMenu.kt` |
+| Work area, icon grid, window layer and Start menu follow the bar's edge | `ui/components/PhonixDesktopScreen.kt` |
+
+The menu is placed by alignment, on the opposite side of the bar's edge, rather than at the pointer
+offset, so it can never open underneath the bar or off-screen. The gesture is a secondary-button
+press with a mouse and a long press in the empty bar area for touch. The bar's own dimensions
+(`TASKBAR_HEIGHT_DP`, `TASKBAR_WIDTH_DP`) are single constants that the work-area inset reads, so a
+window can never be dragged under the bar or lose its resize grip to it.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, 58 tests, 0 failures.
+- [measured] Long-press on the bar opens the dock menu on the DeX display, at the bar's bottom edge
+  (`artifacts/session/dock-1-menu.png`) and, after docking to the top, just below the top bar
+  (`dock-6-menu-top.png`, tick on "Top").
+- [measured] All four edges applied in one session on 1920x1080: bottom, **left** (`dock-2-left.png`
+  — vertical bar, desktop icons shifted right of it), **top** (`dock-4-top.png` — bar across the
+  top, icons and widgets below it), **right** (`dock-7-right.png` — vertical bar, Vitals widget
+  pulled left of it).
+- [measured] Start opens beside the right-docked bar instead of under it (`dock-8-start-right.png`).
+- [measured] A Terminal window opened inside the inset work area, clear of the right bar, and the
+  guest answered `root@debian:~#` (`dock-9-window-right.png`).
+- [measured] The choice persists: `shared_prefs/phonix_desktop_prefs.xml` holds
+  `"taskbarPosition":"RIGHT"` in `desktop_state_v1` after the change.
+- [measured] Crash buffer empty (`logcat -b crash` → 0 entries for the package).
+
+### Not run
+
+- **Mouse right-click is unmeasured.** `adb shell input` only injects the primary button, so the
+  secondary-button path (`PointerType.Mouse && buttons.isSecondaryPressed`, the same mechanism the
+  desktop icons use) was exercised only by long-press. It needs a real mouse on the DeX display.
+- Not run: dragging/resizing a window against a left or top bar, and the phone-panel portrait layout
+  with a vertical bar (a 56 dp bar on a 360 dp-wide phone leaves 300 dp of desktop).
+
+## 17. Start menu height follows the screen (2026-11-01, S10 + HDMI monitor)
+
+The panel was capped at 560 dp on every display. On the 1080p monitor that left the Android-app list
+with a single clipped row under the 21-cell Phonix grid, even though the desktop is about 940 dp
+tall. `Windows11StartMenu` now caps at `min(720 dp, 82% of the screen height)`: a phone still gets a
+floating card, a monitor gets the height it actually has.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, 58 tests, 0 failures.
+- [measured] Pinned view on the desktop draws five whole rows of pins and the store banner
+  (`artifacts/session/start-h-1.png`), where the third row used to be sliced.
+- [measured] All apps draws all 21 Phonix cells, the "Android apps" header, the three view-mode chips
+  and the category chips, with real Android rows beneath them — Category Tabs selected, Air Zone and
+  Browser listed (`artifacts/session/start-h-2.png`).
+- [measured] Crash buffer empty.
+
+Not run: the phone-panel (portrait, non-DeX) layout at the new cap, and a 320 dp-wide window.
+
+## 18. The top notch clears a top-docked taskbar (2026-11-01, S10 + HDMI monitor)
+
+`AutoHidingTopBar` (the centred "Phonix Mini PC / AC / WIFI ONLINE" pill, and the full telemetry
+panel it expands into) is drawn over the desktop as an overlay at `Alignment.TopCenter`, and the
+taskbar is drawn after it. While the bar could only sit at the bottom this never mattered; once it
+docks to the top edge it covered the pill outright.
+
+`AutoHidingTopBar` now takes a `topInset: Dp`, and `MainActivity` passes the taskbar height when
+`customization.taskbarPosition == TaskbarPosition.TOP` and `0.dp` otherwise. The inset is applied
+after `statusBarsPadding()` in both states, so the collapsed pill hangs off the bar's bottom edge and
+the expanded panel opens underneath it.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, 58 tests, 0 failures.
+- [measured] With the bar docked to the top on the 1920x1080 desktop, the pill sits directly under
+  the bar and is fully readable — emblem, "Phonix Mini PC", AC badge, WIFI ONLINE chip and the
+  chevron all visible (`artifacts/session/topbar-docked-top.png`), where it was previously hidden
+  behind the bar.
+- [measured] Tapping the pill with the bar on top expands the full bar below the taskbar instead of
+  under it (`artifacts/session/topbar-expanded-top.png`).
+- [measured] Crash buffer empty.
+
+Not run: the compact phone-panel form with a top bar (the pill shortens to "Phonix" below 600 dp).
+
+## 19. Audit fixes: lost settings, rescue guest, updater threading (2026-11-01)
+
+An audit pass over every feature found six defects that either lost user state or broke a promise
+made in these documents. All six are fixed here.
+
+| Defect | Fix | File |
+|---|---|---|
+| The icon-frame toggle never came back: the saver wrote `showIconFramesV3`, the reader asked for `showIconFramesV2` | reader follows the writer; V2 is still read for layouts written before the rename | `util/DesktopPrefs.kt` |
+| `areAllWindowsHidden` was set in the view model and never written to disk | saved and restored, so "Show Desktop" survives a relaunch | `util/DesktopPrefs.kt` |
+| The prune deleted the bundled Alpine tree, so "the rescue image is never pruned" was not true | a bundled distro is excluded from the prune | `engine/LinuxContainer.kt` |
+| Bundled extraction deleted the working tree *before* unpacking, so a failure left no userspace | unpack into `.alpine-staging`, promote only after a complete extraction | `engine/LinuxContainer.kt` |
+| `UpdateInstaller.install()` did PackageManager queries and the APK copy on the caller's (main) thread, and kept one static receiver slot | work moved to a single-thread executor, results posted back to main, one receiver per session | `engine/UpdateInstaller.kt` |
+| `readFeed()` accepted a plain-http feed URL although the class documents HTTPS | `require(url.startsWith("https://"))` | `engine/UpdateInstaller.kt` |
+
+`DesktopPrefsRoundTripTest` is new and pins the two prefs fixes: a save/load round trip of
+`showIconFrames`, `areAllWindowsHidden`, `iconSize`, `taskbarPosition` and `lockIconsToGrid`, plus a
+legacy layout written with `showIconFramesV2` still being honoured.
+
+### Checks
+
+- `assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL, 60 tests, 0 failures** (58 + the 2 new
+  prefs tests).
+- [measured] `tools/verify-shipping.sh --apk … --serial …` — **PASS**: install `Success`,
+  `1.5 (versionCode 6)`, crash buffer clean, device owner intact, `rootfs trees: alpine debian tmp`,
+  bundled Alpine rescue present.
+- [measured] The saved layout on the unit now carries both repaired keys
+  (`"showIconFramesV3":false`, `"areAllWindowsHidden":false`) inside `desktop_state_v1`.
+- [measured] After this reinstall the desktop came back with the taskbar still on the **top** edge it
+  had been left on, i.e. the stored position is applied at launch (`artifacts/session/fix-1-top.png`);
+  docking it to the right from the bar's own menu still works (`fix-2-dock.png`).
+- [measured] Crash buffer empty after install, launch and a re-dock.
+
+### Not exercised on device
+
+The three container/updater repairs are code- and unit-level only:
+
+- bundled re-extraction into staging (needs the Alpine tree deleted first — destructive, and the
+  project rule is not to remove a working userspace),
+- the prune exclusion (needs a real distro switch, ~90 MB download),
+- the HTTPS feed guard (no feed is hosted; the update path still has no end-to-end run).
+
+### Remaining audit findings, knowingly left
+
+`Windows11StartMenu` counts Android apps under an "App Collection (N)" label above a mixed list;
+`ScreenMirror` allocates a frame per 300 ms without recycling the previous bitmap; `HostDebloat`
+sizes only the base APK so the storage-weight view under-reports split apps; the dock menu's
+`onDismiss` is unused and the hint line is not clickable; the vertical bar drops the IP readout; the
+distro download/installed sizes in `LinuxDistro` are stale (measured today: 90.6 / 121.8 / 170.0 /
+74.1 MB, and the Debian tree on the unit is 1.3 GB, not ~300 MB); `PhoneMirrorWindow` still suggests
+`adb shell input tap` for consent, which VERIFICATION §14 measured as not working; `HANDOFF` §12
+credits an xz dependency this build does not have.
+
+## §20 — Content keeps clear of the bar only on the edge the bar is on (2026-11-01)
+
+`DesktopWindowFrame` drew a maximized window as `fillMaxSize().padding(bottom = 50.dp)` while the
+window layer around it was *already* inset by the docked bar on whichever edge it sat on. A bottom bar
+therefore reserved 100 dp — 50 dp of dead space between the window and the bar — and a bar on the
+right, left or top still reserved 50 dp at the bottom, so a maximized Phonix Browser hung off the
+bottom edge with nothing under it.
+
+The maximized branch is `Modifier.fillMaxSize()` now; the layer's own inset is the only reserve.
+
+- [measured] Bar **right**, Phonix Browser maximized on the 1920x1080 DeX display: the window's accent
+  border occupies rows 1078-1079, i.e. the window reaches the bottom edge of the screen
+  (`artifacts/session/max-right2.png`).
+- [measured] Bar **bottom**, the same maximized window: border at 1028-1029, bar at 1030-1079 —
+  exactly the 50 dp the bar needs and no gap (`artifacts/session/max-bottom.png`).
+- [measured] `assembleDebug testDebugUnitTest` green, 60 tests, 0 failures; crash buffer empty after
+  install, launch, maximize/restore and two dock changes.
+- Not measured: left and top bars with a maximized window (same branch, same single expression), and
+  non-maximized windows, which were never affected — their size comes from `WindowBounds`.
+
+The same edge change moved the bar's bottom reserve from 54 dp to 12 dp under a *dragged* desktop
+icon, which stores its offset inside the icon area. `sc_browser` held `hasCustomPosition:true,
+posY:918.7`; measured with the bar docked bottom the Browser tile and its caption sat on the bar
+(`artifacts/session/icons-bottom.png`). Custom positions are now clamped into the current icon area,
+so the icon is lifted clear of a bottom bar and returns to its stored spot when the bar leaves that
+edge. Fixed render-side only: the stored value is unchanged, so nothing drifts across dock changes.
+
+## §21 — "Lock Icons to Grid" snapped a second, imaginary grid (2026-11-01)
+
+`toggleLockIconsToGrid` kept its own grid: an 88 x 94 dp pitch measured from a 16,16 origin in the
+top-left corner, columns clamped at 5 and rows at 7, and it only visited shortcuts that already had
+a custom position. The renderer meanwhile laid un-dragged icons out bottom-left on a 90 x 88 dp
+pitch. So locking the grid moved the one dragged icon (the Phonix Browser) to row 7 — the middle of
+the screen — and left every other icon exactly where it was.
+
+- [measured] Before: `"sc_browser":{"gridCol":2,"gridRow":7,"posX":192,"posY":674}` in
+  `phonix_desktop_prefs.xml`, with File Explorer, Terminal and Settings still on the bottom row.
+- Fix: `model/DesktopIconGrid` is the one grid (90 x 88 dp pitch, rows counted from the **bottom**
+  row). The desktop reports its live column count and area height (`setIconGrid`), and locking snaps
+  *every* icon to its nearest free slot, marking each as explicitly positioned.
+- [measured] After the fix, on the DeX display: Disable Grid Snap → Align Shortcuts to Bottom-Left →
+  Enable Grid Snap leaves all four icons (File Explorer, Terminal, Phonix Browser, Settings) in one
+  row at the bottom-left, stored as `(0,0) (1,0) (2,0) (3,0)` with `posX` 0/90/180/270 and `posY` 880
+  (`artifacts/session/lock2.png`). Nothing jumps to the middle of the screen.
+- [measured] `assembleDebug testDebugUnitTest` green — 61 tests, 0 failures; the new test pins both
+  halves (every icon snapped to its auto slot; an icon dropped at 300,500 dp lands on column 3, its
+  nearest slot, not mid-screen).
+- Not measured on device: dropping an icon onto an occupied slot while locked (unit tests cover the
+  displacement).
+
+### Follow-ups from §20
+
+- **Maximized window, bar docked top** — [measured] the window starts below the 50 dp bar and its
+  accent border sits on the last row (1078), so a top bar reserves height only at the top
+  (`artifacts/session/maxtop.jpg`). **Left is still unmeasured**; it shares the same branch.
+- **Dragged icons follow the work area** — `PhonixViewModel.reanchorShortcuts` shifts every freeform
+  icon by the delta of the icon area's height, so an icon on the bottom row stays on the bottom row
+  when the bar changes edge. [static]: the render-side clamp from §20 remains as the outer guard.
+  Not re-measured across a dock change.
+- **Re-audit of every `taskbarPosition` reader** — one more unconditional reserve turned up: the
+  toast host in `MainActivity` was pinned 56 dp above the bottom edge whatever edge the bar was on;
+  it now clears the bar only when the bar is docked bottom (12 dp otherwise). The windows layer, the
+  icon paddings, the Start menu anchor, the top notch and the dock menu were already conditional.
+
+## §22 — The debloater could not tell a hidden package from an installed one (2026-11-01)
+
+Audit of every surface that acts on the host device. Four defects, all of them visible to the user:
+
+| Defect | Why it happened | Fix |
+| --- | --- | --- |
+| A hidden package kept reading **INSTALLED** | nothing called `DevicePolicyManager.isApplicationHidden`; `getPackageInfo` answers for hidden packages | `HostDebloat.packageState` / `stateOf` return INSTALLED / HIDDEN / ABSENT, and the view model publishes `debloatHidden` beside `debloatInstalled` |
+| Hiding was **not reversible** although the KDoc promised it | the UI only ever offered Hide | `HostDebloat.unhidePackage` + `PhonixViewModel.unhideHostPackage`; the Hide button becomes **Restore** for a hidden package |
+| "Screenless Mini PC debloat" ticked **nothing** | it matched categories `Telephony & Carrier`, `Biometrics & Sensors`, `OEM Bloat`, none of which exist in `DebloatCatalog` | `DebloatCatalog.applianceCategories` names real categories, and a test asserts every name exists and selects a non-empty set |
+| Storage per package **under-reported** | `HostDebloat.getPackageApkSize` counted `sourceDir` (base APK only) | it delegates to `PackageFacts.apkBytes`, which sums the splits |
+
+Also fixed: the debloater list now reads `uiState.debloatPackages` instead of re-reading the
+catalogue, so a tick in the wizard and the tri-state here cannot disagree; "Rescan" refreshes
+through `refreshSetupFacts` instead of bumping a local key before the async hide has finished; and
+`WallpaperProvisioner` logged its success line twice.
+
+Checks: [measured] `assembleDebug testDebugUnitTest` — BUILD SUCCESSFUL, **64 tests, 0 failures**
+(three new: tri-state mapping, preset categories exist, preset selects packages).
+**Not run on the device:** this round's debloater UI was not re-opened on the unit — the RDX taps in
+this session were going to the phone panel until `input -d 2` was used, so a screenshot of the new
+HIDDEN/Restore states is still owed. The device-owner hide path itself is unchanged from §19.
+
+
+## §23 — Distro switching: not exercised end to end (2026-11-01)
+
+The request was to prove a real switch. It was **not** run, and this is what blocked it: the
+Distro Hub window could be opened (`Linux System` tile → hub showed `Debian 12 (Bookworm) 12.15`),
+but a switch needs a 78–178 MB download plus extraction, and the session ran out of budget while
+still locating the hub's controls under synthetic taps. Nothing was left half-installed — the
+install path stages into `files/linux/tmp` and only promotes after extraction succeeds.
+
+What was verified on the unit, non-destructively:
+
+- [measured] `files/linux` holds `alpine`, `debian`, `tmp`; the bundled rescue image is intact
+  (`files/linux/alpine/etc/os-release` resolves).
+- [measured] The active guest is Debian 12; the terminal reports
+  `PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"`.
+- [measured] Crash buffer 0 lines after every step.
+
+Owed next session: install Arch or Kali from the hub, capture the progress text and the staged
+tree, then confirm (a) the new tree is promoted only after extraction, (b) `alpine` and `debian`
+both survive, (c) `cat /etc/os-release` in the terminal shows the new distro.
+
+**Operational note for the next session:** relaunching the desktop by hand needs the *namespace*
+class name, not the package name: `am start --display 2 -n
+com.aistudio.phonix.vpxmkr/com.example.MainActivity`. Using
+`com.aistudio.phonix.vpxmkr.MainActivity` fails with "Activity class does not exist" and leaves
+DeX on Samsung's launcher. UI automation also needs `uiautomator dump --display 2` (the default
+dump reads the phone panel) and `input -d 2` for every tap.
+
+## §24 — Stale hidden records, and a debloat entry that named a package that does not exist (2026-11-01)
+
+**Two defects, both found on the unit.**
+
+1. **A hidden package name outlived its package.** `DevicePolicyManager.isApplicationHidden` keeps
+   answering `true` for a name it was once asked to hide, even when nothing is installed under it.
+   The tri-state added in §22 therefore classified those names HIDDEN and the debloater drew a
+   **Restore** button that could not change anything — tapping it four times left the row identical.
+   Fixed in `refreshDebloatPresence`: presence now also asks
+   `PackageFacts.isInstalledIncludingHidden` (`MATCH_UNINSTALLED_PACKAGES`, because
+   `setApplicationHidden` makes a package look uninstalled for this user), and any hidden name with
+   nothing on disk is un-hidden once through `HostDebloat.unhidePackage` so the platform forgets it.
+   The row then reports ABSENT instead of offering a dead Restore.
+2. **The catalogue named a package this phone does not ship.** `DebloatItem.kt` listed Samsung Free
+   as `com.samsung.android.spage`. [measured] `pm list packages | grep spage` on the S10 returns
+   `com.samsung.android.app.spage`; the names differ, so that trim target could never match and the
+   removal was silently a no-op. The entry now carries the real name.
+
+Checks: [measured] `assembleDebug testDebugUnitTest` — BUILD SUCCESSFUL, **65 tests, 0 failures**
+(one new: `a hidden name with nothing installed under it is a stale record`). The debug APK was
+installed over the running unit (`adb install -r -d`, Success) and the desktop relaunched on the
+monitor; crash buffer untouched by the install.
+
+**Distro switching is still not exercised end to end,** and this round established why the
+synthetic-tap route does not work for that window. With the hub maximised on the monitor and
+`Install & Switch` visible on screen, `uiautomator dump --display 2` and `--display 9` return the
+**same 1080×1080 hierarchy**, the window chrome sits at the top-left of it instead of the
+monitor's right edge, and every `Install & Switch` and `CURRENT` node reports
+`bounds="[0,0][0,0]"` — Compose keeps those labels inside a merged parent, so there is no
+coordinate to tap. Taps computed from the monitor screenshot (1831,762 — the Ubuntu pill), from
+hub coordinates, and keyboard traversal (six `KEYCODE_TAB`) all left `files/linux` at
+`alpine debian tmp` with no download started. The button is unreachable without an
+instrumentation harness; §25 is that harness, and it found the switch was not merely untested —
+it was broken on every streamed install.
+Nothing is half-installed: `files/linux` was `alpine debian tmp` before and after every attempt.
+
+## §25 — Every streamed distro install died after its download: nobody could unpack xz (2026-11-01, measured, S10)
+
+### What was wrong
+
+`LinuxContainer.installStreamed` unpacks the archive **inside the running guest**, because Android
+has no xz decoder and this build takes no dependency for one. The KDoc asserted the guest could do
+it: "busybox already provides `unxz` and `tar`". Neither half of that held on this unit.
+
+First instrumented run, `debian -> kali`, measured end to end:
+
+```
+17:18:31  Resolved Kali Linux Minimal build 20261029_17:14.
+17:18:31  Downloading rootfs.tar.xz (74 MB)...
+17:18:36  Verified the official SHA-256.
+17:18:36  Unpacking Kali Linux Minimal in the guest...
+17:18:36  /bin/sh: 1: unxz: not found
+17:18:36  tar: This does not look like a tar archive
+17:18:36  java.lang.IllegalStateException: tar exited with status 2 while unpacking Kali Linux Minimal
+```
+
+So the download, the resume, the SHA-256 check and the index resolution all worked, and the install
+then failed on its first useful byte of work — after the user had already paid for the download.
+
+Where `unxz` actually is, read from the two trees on the phone rather than assumed:
+
+- `files/linux/debian/bin` + `usr/bin`: `tar` (GNU, 539896 bytes) present; `xz`, `unxz`, `xzcat`
+  count **0**. Debian 12's minimal image does not ship `xz-utils`.
+- `files/linux/alpine/bin`: symlinks for `tar`, `gunzip`, `gzip`, `zcat`, `lzop` — and **no `xz`
+  or `unxz` applet**. The bundled busybox was built without XZ_SUPPORT.
+
+So there was no guest in the product that could unpack the archives the hub offers: every streamed
+switch (Debian, Ubuntu, Arch, Kali) was broken on both the Alpine default and the Debian default.
+
+### The fix [measured]
+
+- `LinuxDistro.unpackToolPackages` names the package per manager: `xz-utils tar` on apt,
+  `xz tar` on apk/pacman.
+- `LinuxContainer.ensureGuestUnpacker` probes `command -v unxz && command -v tar` and, when either
+  is missing, installs the pair through the guest's own package manager **before the download
+  starts**, then re-probes and throws with the command and its last output line if the tool still
+  is not there. It keys on a printed marker rather than the exit status, because `execOnce` returns
+  the status of the guest's `sh` and a failing `command -v` inside an `&&` chain is
+  indistinguishable from a broken shell.
+
+### How it was measured
+
+An instrumented test, `app/src/androidTest/.../DistroSwitchInstrumentedTest.kt`, calls the same
+`LinuxContainer.switchDistro()` the hub's "Install & Switch" button calls. The target comes from the
+instrumentation argument `distro`, so one binary switches out and back:
+
+```
+gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.distro=kali
+gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.distro=debian
+```
+
+It asserts the persisted id, the `.phonix-installed` marker, `/bin/sh` and `/etc/os-release`, a
+command run inside the new guest, that staging and the download cache are gone, that the replaced
+guest was pruned, and that the bundled Alpine rescue image survived.
+
+**Run 1, `debian -> kali`** [measured]: xz-utils installed into the guest, 74 MB downloaded and
+SHA-256-verified, unpacked in the guest in **32 s**, rootfs verified, `debian` pruned, `alpine`
+kept. Inside the new guest: `PRETTY_NAME="Kali GNU/Linux Rolling"`, `VERSION_ID="2026.3"`,
+`ID=kali`, `id -u` = 0, `uname -m` = aarch64.
+
+**Run 2, `kali -> debian`** [measured]: the reverse direction, from the guest the first run had just
+created. `apt-get install -y -q xz-utils tar` reported `Unpacking xz-utils (5.8.4-1)` and the
+re-probe passed; 91 MB downloaded and verified, unpacked in **30 s**, promoted, `kali` pruned,
+`alpine` kept. Inside: `PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"`, `VERSION_ID="12"`,
+`debian_version` = `12.15`, `id -u` = 0.
+
+After both runs `files/linux` = `alpine debian tmp`, `active_distro_id` = `debian`, `/data` 99 GB
+free. Both `connectedDebugAndroidTest` runs: **BUILD SUCCESSFUL**, 2 tests per run.
+
+One detail worth keeping: on run 1 the guest's `apt-get` printed
+`E: Sub-process /usr/bin/dpkg returned an error code (1)` while installing, and `unxz` was present
+anyway. That is why `ensureGuestUnpacker` re-probes instead of trusting the install's exit status.
+
+### Why the hub's button was not used
+
+The instrumented test exists because the window cannot be driven by synthetic taps, and the reasons
+are worth recording (all [measured] on this unit):
+
+- `uiautomator dump --display 2` and `--display 9` return the **same 1080×1080 hierarchy** — the
+  phone display's — so the monitor's window tree is never dumped. Every `Install & Switch` node in
+  it reports `bounds="[0,0][0,0]"` because Compose keeps the label in a merged parent.
+- `screencap -d 2` returns a real 1920×1080 frame, but the first captures this round were **three
+  hours stale** (framebuffer identical four seconds apart, clock reading 2:13 PM while the shell
+  said 17:13); `input keyevent KEYCODE_WAKEUP` plus `svc power stayon true` made it live.
+- Injection to display 2 works — `input -d 2 keyevent KEYCODE_BACK` closed the hub window — but
+  `input -d 2 tap` at coordinates read off a fresh screenshot did nothing, because the hub is a
+  **floating window stacked over other windows** (My Files and Settings were open behind it). The
+  kill shot is `b1-small.png`: BACK closed the hub and revealed them.
+
+### Not claimed
+
+- Tapping "Install & Switch" in the hub UI. The code path is measured; the button is not.
+- Ubuntu 24.04, Arch and the VNC desktop after a switch. Only Kali and Debian were switched, and
+  the new guests were checked with `cat /etc/os-release` and `id -u`, not by opening a desktop.
+- A switch with no network: it fails at the download and leaves the previous guest in place by
+  design, but that branch was not exercised this round, and it **cannot** be exercised on this
+  unit as the bench is wired: `adb devices` lists only wireless transports
+  (`192.168.0.3:34171` and the `_adb-tls-connect._tcp` mDNS entry), so airplane mode or
+  `svc wifi disable` would cut the console off from the phone mid-test with no USB fallback.
+  Test it over USB adb, or block the mirror from inside the guest instead of on the radio.
+
+### Second round: three more defects sat between the download and a bootable guest
+
+Kali and Debian both have an apt userland, so they exercise the same branch. Arch does not, and
+driving the switch at Arch exposed three further faults - two of them in the first fix above.
+
+**1. The tool probe asked the wrong guest.** `ensureGuestUnpacker` installed via the *target*
+`distro`'s package manager while `execOnce` shells into the *running* guest. `debian -> arch` ran
+`pacman -S --noconfirm --needed xz tar` inside Debian and got
+`/bin/sh: 1: pacman: not found`. It failed before the download and left Debian intact, so the
+safety property held, but the switch could never have worked. The probe now uses `activeDistro()`.
+
+**2. Promotion followed symlinks and threw the install away.** `staging.renameTo(target)` returned
+false on this unit, and the fallback was `copyRecursively`, which *follows* links. Every rootfs
+ships dangling ones; Arch's install died with
+`NoSuchFileException: .../root/.phonix-stage/usr/share/licenses/xz/COPYING: The source file doesn't
+exist` after 103 s of unpacking, and `if (!wasInstalled) target.deleteRecursively()` then discarded
+the verified tree. `moveTree` now walks the tree itself and recreates links with `Os.symlink`
+instead of following them.
+
+**3. The tree move dropped every exec bit.** `copyTo` copies bytes, not modes, so the promoted
+Arch guest produced `proot error: '/usr/bin/env' is not executable` and every command in it exited
+1 - a tree that looks complete on disk and cannot run a single binary. `moveTree` now reapplies the
+source's exec and read-only bits.
+
+**4. Two deletes silently did nothing.** Guest trees keep the archive's modes (`usr`, `bin` are
+`0555`), and an app cannot unlink entries from a directory it may not write, so `deleteRecursively`
+returned without error having freed little. A failed Arch attempt left a **560 MB** staging tree
+that the in-guest `rm -rf` could not clear either (`rm: bin: Permission denied`, and dozens more),
+and the pruned `debian` left its `root` directory behind. `deleteTree` opens the directories up
+before deleting, and is used for staging, the download cache, the replaced guest and the abandoned
+target.
+
+**Run 3, `alpine -> debian`** [measured]: after the arch tree was removed by hand (it had no exec
+bits, so it could not repair itself), the active guest fell back to the bundled Alpine rescue and
+the switch ran from there. That is the one path with an `apk` userland: the probe found no `unxz`,
+the guest ran `apk add --no-cache xz tar`, the decoder was ready, 91 MB downloaded and verified,
+unpacked, promoted, `Debian GNU/Linux 12 (bookworm)` reported from inside, `active_distro_id`
+`debian`, `files/linux` = `alpine debian tmp`, 99 GB free. `alpine` was correctly **not** pruned -
+it is the bundled rescue image.
+
+That run also caught a mistake in the test itself: it asserted that the replaced guest is always
+pruned, which fails on a *correct* switch away from the bundled guest. The assertion now excludes
+bundled images.
+
+**Run 4, `debian -> ubuntu`** [measured]: 122 MB downloaded and verified, unpacked in 54 s,
+promoted, `debian` pruned, `PRETTY_NAME="Ubuntu 24.04.5 LTS"`, `VERSION_ID="24.04"`.
+
+## §26 — The hub announced Ubuntu as "trixie/sid" (2026-11-01, measured, S10)
+
+`LinuxContainer.version()` read `/etc/debian_version` before `/etc/os-release`, on the reasoning
+that Debian's point release (`12.15`) is more use to the user than os-release's `VERSION_ID="12"`.
+That holds for Debian and for nothing else: Ubuntu's image ships `trixie/sid` in that file and
+Kali's ships `kali-rolling`, so the switch log for Ubuntu ended with
+
+```
+switch OK: ubuntu trixie/sid, 49 progress lines
+```
+
+and the hub's active-environment card - which renders `"${distro.name} ${version()}"` - would have
+shown **"Ubuntu 24.04 LTS trixie/sid"**, and **"Kali Linux Minimal kali-rolling"** for the run
+before it. Both are wrong in the way that matters: they report another distribution's codename
+instead of the release the guest actually is.
+
+Fix: `/etc/debian_version` is used only when its content starts with a digit, then os-release's
+`VERSION_ID`, then `/etc/alpine-release`, then `PRETTY_NAME`. Debian still reports `12.15`, Ubuntu
+`24.04`, Kali `2026.3`, Alpine `3.24.3`.
+
+### What the switch matrix now says
+
+| From → to | Download | Result |
+|---|---|---|
+| debian → kali | 74 MB | promoted, `Kali GNU/Linux Rolling` 2026.3 |
+| kali → debian | 91 MB | promoted, `Debian 12 (bookworm)` |
+| debian → arch | 170 MB | promoted, then unusable before the exec-bit fix |
+| alpine → debian | 91 MB | promoted via `apk add xz tar`, `Debian 12 (bookworm)` |
+| debian → ubuntu | 122 MB | promoted, `Ubuntu 24.04.5 LTS` |
+
+Every run was driven through the production `switchDistro`, asserted the persisted id, the marker,
+`/bin/sh`, `/etc/os-release`, a shell command inside the new guest, absent staging and cache, and
+the survival of the bundled Alpine rescue image. `connectedDebugAndroidTest` reported **BUILD
+SUCCESSFUL** for the kali, the second debian, the alpine→debian, the ubuntu and the final re-run.
+
+The `debian → arch` entry is the one that was promoted and still unusable; its tree was removed by
+hand afterwards, so the shipped code (`moveTree` with mode preservation) has been exercised on
+Debian, Kali and Ubuntu but has **not** re-run on Arch.
+
+**Not claimed:** the VNC desktop after the Ubuntu switch, and a switch with the radio enabled but
+the mirror unreachable (see the note above on why the bench cannot drop its own adb link).
+
+### One more, found by switching back *out of* Ubuntu
+
+The Ubuntu guest refused to install the unpack tools at all:
+
+```
+E: Failed to fetch http://ports.ubuntu.com/ubuntu-ports/pool/main/x/xz-utils/
+   xz-utils_5.6.1%2breally5.4.5-1ubuntu0.3_arm64.deb  404  Not Found [IP: 2620:2d:4002:1::10c 80]
+E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
+```
+
+A freshly streamed image ships apt lists that name a package version the mirror has since rotated
+away, so the install 404s; pacman will not install from unsynced databases at all. `LinuxDistro`
+now carries `indexSyncCommand` (`apt-get update -q`, `pacman -Sy --noconfirm`, and nothing for
+Alpine, whose `apk add --no-cache` refreshes itself) and `ensureGuestUnpacker` runs it before the
+install, best effort.
+
+Measured after the fix, `ubuntu -> debian` [measured]: index refreshed, tools installed, 91 MB
+downloaded and verified, unpacked, promoted, `ubuntu` pruned, and the run finished with
+`switch OK: debian 12.15, 97 progress lines` - which also confirms the release fix in §26, since
+this line read `trixie/sid` for Ubuntu and now reads Debian's real point release.

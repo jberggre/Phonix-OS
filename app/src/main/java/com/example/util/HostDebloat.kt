@@ -9,13 +9,27 @@ import android.provider.Settings
 import com.example.receiver.PhonixDeviceAdminReceiver
 import java.io.File
 
+/** What the device actually reports about a host package, as opposed to what the app hopes. */
+enum class HostPackageState {
+    /** On disk and visible to the launcher. */
+    INSTALLED,
+
+    /** On disk but hidden from the launcher and from resolved intents by DevicePolicyManager. */
+    HIDDEN,
+
+    /** Not on this device at all. */
+    ABSENT
+}
+
 /**
  * Removes (hides) host packages for real, but only where Android actually permits it: a
  * device-owner install. On an ordinary app install there is no API that uninstalls another
  * app silently, so [launchUninstall] and [launchAppDetails] open the native Android removal /
  * disable dialogs in 1-click so the user can easily confirm and recover storage/RAM.
  *
- * Hiding is reversible: the same package can be un-hidden with setApplicationHidden(false).
+ * Hiding is reversible: the same package can be un-hidden with setApplicationHidden(false), and
+ * [packageState] asks the platform which of the three states a package is in. Without that query
+ * a hidden package kept reading as INSTALLED, because `getPackageInfo` still answers for it.
  */
 object HostDebloat {
     private fun dpm(context: Context): DevicePolicyManager? =
@@ -30,13 +44,56 @@ object HostDebloat {
         false
     }
 
-    /** Returns APK size in bytes, or 0 if package is not found. */
-    fun getPackageApkSize(context: Context, packageName: String): Long = try {
-        val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
-        File(appInfo.sourceDir).length()
-    } catch (_: Throwable) {
-        0L
+    /** Pure mapping of the two platform answers, so the tri-state can be tested off-device. */
+    fun stateOf(installed: Boolean, hidden: Boolean): HostPackageState = when {
+        // A hidden package stops answering getPackageInfo for this app, so "hidden" has to win
+        // over "not found". Ordering it the other way rendered a hidden package ABSENT, leaving
+        // it with no Restore button and no way back.
+        hidden -> HostPackageState.HIDDEN
+        installed -> HostPackageState.INSTALLED
+        else -> HostPackageState.ABSENT
     }
+
+    /**
+     * Hidden names that are not on disk any more.
+     *
+     * DevicePolicyManager keeps answering `isApplicationHidden == true` for a package name it
+     * was once asked to hide, even after that package is gone, so the debloater offered a
+     * Restore button for `com.carrier.analytics.diag` on a phone that never had it and tapping
+     * it changed nothing. These names have to be dropped from the hidden set, and it takes a
+     * one-off `setApplicationHidden(false)` to make the platform forget them.
+     */
+    fun staleHiddenRecords(hidden: Collection<String>, onDisk: Collection<String>): Set<String> =
+        hidden.toSet() - onDisk.toSet()
+
+    /** True only while this install (as device owner) is hiding the package. */
+    fun isHidden(context: Context, packageName: String): Boolean = try {
+        dpm(context)?.isApplicationHidden(admin(context), packageName) == true
+    } catch (_: Throwable) {
+        false
+    }
+
+    /**
+     * Asks the platform for the package's real state. [hiddenSnapshot] lets a caller pass the
+     * answer it already has instead of querying DevicePolicyManager once per package per frame.
+     */
+    fun packageState(
+        context: Context,
+        packageName: String,
+        hiddenSnapshot: Boolean? = null
+    ): HostPackageState = stateOf(
+        installed = PackageFacts.isInstalled(context, packageName),
+        hidden = hiddenSnapshot ?: isHidden(context, packageName)
+    )
+
+    /**
+     * Returns the package's installed size in bytes, or 0 when it is not on this device.
+     *
+     * This used to count `sourceDir` only, which is the base APK: every split package (Chrome,
+     * Play services, most Samsung apps) was under-reported by the size of its splits.
+     */
+    fun getPackageApkSize(context: Context, packageName: String): Long =
+        PackageFacts.apkBytes(context, packageName)
 
     /** Launches 1-click native package uninstallation dialog. */
     fun launchUninstall(context: Context, packageName: String): Boolean = try {
@@ -85,5 +142,35 @@ object HostDebloat {
             if (detail.isNullOrBlank()) e.javaClass.simpleName else "${e.javaClass.simpleName}: $detail"
         }
     }
-}
 
+    /** Undoes [hidePackage]. Null on success, otherwise the platform's own refusal. */
+    fun unhidePackage(context: Context, packageName: String): String? {
+        val policy = dpm(context) ?: return "no DevicePolicyManager"
+        return try {
+            if (policy.setApplicationHidden(admin(context), packageName, false)) {
+                null
+            } else {
+                "not restored (the platform kept it hidden)"
+            }
+        } catch (e: Throwable) {
+            val detail = e.message?.take(90)
+            if (detail.isNullOrBlank()) e.javaClass.simpleName else "${e.javaClass.simpleName}: $detail"
+        }
+    }
+
+    /** True when the given package is this app or one of its own components. Never touch those. */
+    fun isOwnPackage(context: Context, packageName: String): Boolean =
+        packageName == context.packageName
+
+    /** Convenience for logs and diagnostics: the size of a package's APK files on disk. */
+    fun describeApkSize(context: Context, packageName: String): String =
+        PackageFacts.formatBytes(getPackageApkSize(context, packageName))
+
+    /** Kept for callers that only need the raw path length. */
+    fun primaryApkFile(context: Context, packageName: String): File? = try {
+        val info = context.packageManager.getApplicationInfo(packageName, 0)
+        File(info.sourceDir)
+    } catch (_: Throwable) {
+        null
+    }
+}

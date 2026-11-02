@@ -52,6 +52,7 @@ object DesktopPrefs {
                 put("showDesktopGrid", customization.showDesktopGrid)
                 put("showDesktopLabels", customization.showDesktopLabels)
                 put("showIconFramesV3", customization.showIconFrames)
+                put("areAllWindowsHidden", customization.areAllWindowsHidden)
                 put("showClockInTaskbar", customization.showClockInTaskbar)
                 put("showBatteryInTaskbar", customization.showBatteryInTaskbar)
                 put("lockIconsToGrid", customization.lockIconsToGrid)
@@ -82,10 +83,18 @@ object DesktopPrefs {
                 showSystemMonitorWidget = json.optBoolean("showSystemMonitorWidget", defaults.showSystemMonitorWidget),
                 showDesktopGrid = json.optBoolean("showDesktopGrid", defaults.showDesktopGrid),
                 showDesktopLabels = json.optBoolean("showDesktopLabels", defaults.showDesktopLabels),
-                showIconFrames = json.optBoolean("showIconFramesV2", defaults.showIconFrames),
+                // The save key was renamed to V3 but the reader still asked for V2, so the toggle
+                // never came back: the reader follows the writer now, with V2 kept as a migration
+                // path for layouts written before the rename.
+                showIconFrames = if (json.has("showIconFramesV3")) {
+                    json.optBoolean("showIconFramesV3", defaults.showIconFrames)
+                } else {
+                    json.optBoolean("showIconFramesV2", defaults.showIconFrames)
+                },
                 showClockInTaskbar = json.optBoolean("showClockInTaskbar", defaults.showClockInTaskbar),
                 showBatteryInTaskbar = json.optBoolean("showBatteryInTaskbar", defaults.showBatteryInTaskbar),
                 lockIconsToGrid = json.optBoolean("lockIconsToGrid", defaults.lockIconsToGrid),
+                areAllWindowsHidden = json.optBoolean("areAllWindowsHidden", defaults.areAllWindowsHidden),
                 shortcuts = shortcutsFromJson(json.optJSONArray("shortcuts"), defaults.shortcuts),
                 taskbarPins = shortcutsFromJson(json.optJSONArray("taskbarPins"), defaults.taskbarPins)
             )

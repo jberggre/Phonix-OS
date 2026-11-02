@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.model.ShortcutShape
 import com.example.model.ShortcutBgStyle
 import com.example.model.DesktopContextMenuData
+import com.example.model.DesktopIconGrid
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -174,6 +175,8 @@ import com.example.model.IconSizeMode
 import com.example.model.MonitorDisplayMode
 import com.example.model.TaskbarPosition
 import com.example.model.TaskbarStyle
+import com.example.ui.components.TASKBAR_HEIGHT_DP
+import com.example.ui.components.TASKBAR_WIDTH_DP
 import com.example.model.WindowType
 import com.example.ui.theme.PhonixAmber
 import com.example.ui.theme.PhonixBlue
@@ -199,6 +202,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Work-area insets that match the taskbar's own dimensions, in one place. */
+private val WINDOWS_TASKBAR_HEIGHT = TASKBAR_HEIGHT_DP.dp
+private val WINDOWS_TASKBAR_WIDTH = TASKBAR_WIDTH_DP.dp
+
 @Composable
 fun PhonixDesktopScreen(
     uiState: PhonixUiState,
@@ -220,32 +227,56 @@ fun PhonixDesktopScreen(
         val isWidescreenMonitor = isHardwareLandscape || customization.displayMode.isWidescreen
 
         val desktopWidth = screenWidth
-        // Windows live in the work area above the 50 dp taskbar. Without this the bottom
-        // edge of a full-height window (and its resize grip) disappears under the bar at
-        // high densities, where the window's 180 dp minimum is the whole desktop.
-        val taskbarHeight = 50.dp
-        val bounds = remember(screenWidth, screenHeight) {
+        // Windows live in the work area the taskbar leaves. Without this the edge of a
+        // full-height window (and its resize grip) disappears under the bar at high densities,
+        // where the window's 180 dp minimum is the whole desktop. The bar can be on any of the
+        // four edges, so the inset follows whichever side it is docked to.
+        val barPosition = customization.taskbarPosition
+        val barThickness = WINDOWS_TASKBAR_HEIGHT
+        val barWidth = WINDOWS_TASKBAR_WIDTH
+        val bounds = remember(screenWidth, screenHeight, barPosition) {
             WindowBounds(
-                widthDp = screenWidth.value,
-                heightDp = (screenHeight - taskbarHeight).coerceAtLeast(1.dp).value
+                widthDp = (screenWidth - if (barPosition.isVertical) barWidth else 0.dp)
+                    .coerceAtLeast(1.dp).value,
+                heightDp = (screenHeight - if (barPosition.isVertical) 0.dp else barThickness)
+                    .coerceAtLeast(1.dp).value
             )
         }
         LaunchedEffect(bounds) { viewModel.normalizeWindows(bounds) }
         val unfoldedLayout = uiState.foldPosture == com.example.model.FoldPosture.FLAT || screenWidth >= 600.dp
         val availableGridWidth = if (unfoldedLayout && screenWidth >= 680.dp) screenWidth - 240.dp else screenWidth - 24.dp
-        val iconColumns = (availableGridWidth / 90.dp).toInt().coerceAtLeast(1)
+        val iconColumns = DesktopIconGrid.columns(availableGridWidth.value)
         // Desktop icons are their own list. Pinning an app to the taskbar adds a separate entry
         // there; it never hides the icon or claims its slot.
         val desktopShortcuts = customization.shortcuts
-        val rowStride = 88.dp
-        val topPadding = if (customization.taskbarPosition == TaskbarPosition.TOP) 54.dp else 10.dp
-        val bottomPadding = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp
+        val rowStride = DesktopIconGrid.ROW_PITCH_DP.dp
+        val topPadding = if (barPosition == TaskbarPosition.TOP) 54.dp else 10.dp
+        val bottomPadding = if (barPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp
+        // Icons keep clear of a vertical bar too, instead of hiding under it.
+        val startPadding = if (barPosition == TaskbarPosition.LEFT) barWidth + 12.dp else 12.dp
+        val endPadding = if (barPosition == TaskbarPosition.RIGHT) barWidth + 12.dp else 12.dp
         // The default position is the BOTTOM-left quadrant, which is what the align action and
         // the label both promise. This was pinned to 0.dp, so "Align to Bottom-Left" dropped the
         // whole block in the top-left corner.
-        val gridRows = ((desktopShortcuts.size + iconColumns - 1) / iconColumns).coerceAtLeast(1)
         val iconAreaHeight = (screenHeight - topPadding - bottomPadding).coerceAtLeast(rowStride)
-        val gridTop = (iconAreaHeight - (rowStride * gridRows) - 6.dp).coerceAtLeast(0.dp)
+
+        // The view model snaps into this grid, not into a second copy of the numbers. It used to
+        // keep its own 88 x 94 dp pitch measured from the top corner, so "Lock Icons to Grid"
+        // dropped an icon in the middle of the screen and left every other icon untouched.
+        LaunchedEffect(iconColumns, iconAreaHeight) {
+            viewModel.setIconGrid(iconColumns, iconAreaHeight.value)
+        }
+
+        // The icon area grows or shrinks when the bar docks to another edge. Freeform positions are
+        // offsets inside it, so they travel with it instead of being stranded under the bar.
+        var lastIconAreaHeight by remember { mutableStateOf<Float?>(null) }
+        LaunchedEffect(iconAreaHeight) {
+            val previous = lastIconAreaHeight
+            lastIconAreaHeight = iconAreaHeight.value
+            if (previous != null && previous != iconAreaHeight.value) {
+                viewModel.reanchorShortcuts(iconAreaHeight.value - previous, iconAreaHeight.value)
+            }
+        }
 
         Box(
             modifier = Modifier.fillMaxSize()
@@ -282,8 +313,8 @@ fun PhonixDesktopScreen(
                         .padding(
                             top = topPadding,
                             bottom = bottomPadding,
-                            start = 12.dp,
-                            end = 12.dp
+                            start = startPadding,
+                            end = endPadding
                         )
                 ) {
                     // Reflow the grid from the live window width. The inner fold gets several
@@ -293,14 +324,28 @@ fun PhonixDesktopScreen(
                     val iconsByPackage = remember(uiState.installedApps) {
                         uiState.installedApps.associateBy { it.packageName }
                     }
+                    // A freeform icon stores its offset inside this area, and the area changes
+                    // size when the bar moves to another edge. Clamp instead of translating: an
+                    // icon dragged to the very bottom of a right-docked desktop is lifted clear of
+                    // a bottom bar rather than drawn on top of it, and returns to exactly where it
+                    // was when the bar leaves the bottom edge.
+                    val maxIconX = (screenWidth - startPadding - endPadding - 100.dp)
+                        .coerceAtLeast(0.dp).value
+                    val maxIconY = (iconAreaHeight - 96.dp).coerceAtLeast(0.dp).value
                     desktopShortcuts.forEachIndexed { index, shortcut ->
                         val effectiveShortcut = if (!shortcut.hasCustomPosition) {
-                            shortcut.copy(
-                                posX = (index % iconColumns) * 90f,
-                                posY = gridTop.value + ((index / iconColumns) * rowStride.value)
+                            val (autoX, autoY) = DesktopIconGrid.autoPosition(
+                                index = index,
+                                count = desktopShortcuts.size,
+                                columns = iconColumns,
+                                areaHeightDp = iconAreaHeight.value
                             )
+                            shortcut.copy(posX = autoX, posY = autoY)
                         } else {
-                            shortcut
+                            shortcut.copy(
+                                posX = shortcut.posX.coerceIn(0f, maxIconX),
+                                posY = shortcut.posY.coerceIn(0f, maxIconY)
+                            )
                         }
                         val appIcon = effectiveShortcut.launchPackage
                             ?.let { iconsByPackage[it] }
@@ -394,6 +439,18 @@ fun PhonixDesktopScreen(
                 }
 
                 // 4. Desktop Windows Layer (Toggleable on / off)
+                // Inset by the docked taskbar, so a window can never be dragged under it or
+                // lose its resize grip to it, whichever edge the bar is on.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            top = if (barPosition == TaskbarPosition.TOP) barThickness else 0.dp,
+                            bottom = if (barPosition == TaskbarPosition.BOTTOM) barThickness else 0.dp,
+                            start = if (barPosition == TaskbarPosition.LEFT) barWidth else 0.dp,
+                            end = if (barPosition == TaskbarPosition.RIGHT) barWidth else 0.dp
+                        )
+                ) {
                 uiState.windows.filter { !it.isMinimized }.forEach { window ->
                     DesktopWindowFrame(
                         window = window,
@@ -403,6 +460,8 @@ fun PhonixDesktopScreen(
                         viewModel = viewModel,
                         bounds = bounds
                     )
+                }
+
                 }
 
                 // 5. Windows 11 Desktop Context Menu (Shortcut & Wallpaper)
@@ -428,22 +487,48 @@ fun PhonixDesktopScreen(
                     RenameEntryDialog(uiState = uiState, viewModel = viewModel)
                 }
 
-                // 6. Windows 11 Fluent Acrylic Start Menu (Centered Floating Card)
+                // 6. Windows 11 Fluent Acrylic Start Menu, anchored to the bar's edge so it
+                // never opens underneath the taskbar.
                 if (uiState.isStartMenuOpen) {
+                    val menuAlignment = when (barPosition) {
+                        TaskbarPosition.TOP -> Alignment.TopCenter
+                        TaskbarPosition.LEFT -> Alignment.BottomStart
+                        TaskbarPosition.RIGHT -> Alignment.BottomEnd
+                        TaskbarPosition.BOTTOM -> Alignment.BottomCenter
+                    }
+                    val menuOffsetX = when (barPosition) {
+                        TaskbarPosition.LEFT -> barWidth
+                        TaskbarPosition.RIGHT -> -barWidth
+                        else -> 0.dp
+                    }
+                    val menuOffsetY = when (barPosition) {
+                        TaskbarPosition.TOP -> barThickness + 6.dp
+                        TaskbarPosition.BOTTOM -> -(barThickness + 6.dp)
+                        else -> (-8).dp
+                    }
                     Windows11StartMenu(
                         uiState = uiState,
                         viewModel = viewModel,
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .offset(y = (-56).dp)
+                            .align(menuAlignment)
+                            .offset(x = menuOffsetX, y = menuOffsetY)
                     )
                 }
 
-                // 7. Windows 11 Centered Taskbar (App Pointers, System Tray & Show Desktop)
+                // 7. Taskbar (App Pointers, System Tray & Show Desktop), docked to its edge.
+                // Right-click or long-press on the bar opens the dock menu.
                 Windows11Taskbar(
                     uiState = uiState,
                     viewModel = viewModel,
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    position = barPosition,
+                    modifier = Modifier.align(
+                        when (barPosition) {
+                            TaskbarPosition.BOTTOM -> Alignment.BottomCenter
+                            TaskbarPosition.TOP -> Alignment.TopCenter
+                            TaskbarPosition.LEFT -> Alignment.CenterStart
+                            TaskbarPosition.RIGHT -> Alignment.CenterEnd
+                        }
+                    )
                 )
             }
         }
@@ -1385,7 +1470,11 @@ fun DesktopWindowFrame(
                 )
             }
             .then(
-                if (window.isMaximized) Modifier.fillMaxSize().padding(bottom = 50.dp)
+                // The windows layer is already inset by the docked taskbar on every edge, so a
+                // maximized window fills exactly that area. This used to reserve a fixed 50 dp at
+                // the bottom, which double-inset a bottom bar and, with the bar on the left or
+                // right, lifted the window off the bottom edge for no reason at all.
+                if (window.isMaximized) Modifier.fillMaxSize()
                 else Modifier.size(width = window.width.dp, height = window.height.dp)
             )
             .zIndex(window.zIndex)
@@ -2685,7 +2774,10 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                     color = Slate400,
                     fontSize = 10.sp
                 )
-                AboutRow("Repository", "jberggre/Phonix-OS")
+                val feedHost = runCatching {
+                    android.net.Uri.parse(com.example.BuildConfig.UPDATE_FEED_URL).host
+                }.getOrNull()
+                AboutRow("Update feed", feedHost ?: "not configured in this build")
 
                 when (uiState.updateState) {
                     UpdateCheckState.IDLE -> {
@@ -2708,7 +2800,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PhonixCyan, strokeWidth = 2.dp)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Checking GitHub Releases...", color = Slate300, fontSize = 11.sp)
+                            Text("Checking the update feed...", color = Slate300, fontSize = 11.sp)
                         }
                     }
                     UpdateCheckState.UP_TO_DATE -> {
@@ -2753,8 +2845,32 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                             ) {
                                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Open Download Page", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Download & Install", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
+                            Text(
+                                "The APK is checked against the feed's SHA-256 and must carry this " +
+                                    "app's signing certificate. Android asks before installing.",
+                                color = Slate400,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                    UpdateCheckState.DOWNLOADING, UpdateCheckState.READY_TO_INSTALL -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().background(Slate950, RoundedCornerShape(6.dp)).padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (uiState.updateState == UpdateCheckState.DOWNLOADING) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = PhonixCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(14.dp))
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                uiState.updateInfo?.releaseNotes ?: "Preparing the update...",
+                                color = Slate200,
+                                fontSize = 10.sp
+                            )
                         }
                     }
                     else -> {
@@ -2780,7 +2896,11 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Linux guest", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                AboutRow("Distribution", if (guest != null) "Alpine " + guest else "not installed")
+                // The active guest, not a hardcoded Alpine: a switch to Debian must change this line.
+                AboutRow(
+                    "Distribution",
+                    uiState.currentDistro.name + if (guest != null) " · " + guest else " · not running"
+                )
                 AboutRow(
                     "Container",
                     if (uiState.containerStatus == com.example.viewmodel.ContainerStatus.RUNNING) "running" else "stopped"

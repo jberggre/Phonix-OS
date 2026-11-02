@@ -958,7 +958,12 @@ fun Step4DebloatOptimization(
                     Text("Host packages on this phone", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
 
-                val present = uiState.debloatPackages.filter { uiState.debloatInstalled[it.packageName] != false }
+                // Already-hidden packages are not removal targets: they are still installed, and
+                // counting them again would promise a removal that has already happened.
+                val present = uiState.debloatPackages.filter {
+                    uiState.debloatInstalled[it.packageName] != false &&
+                        it.packageName !in uiState.debloatHidden
+                }
                 val notHere = uiState.debloatPackages.size - present.size
                 Text(
                     "Selected: ${selected.size} · this phone has ${present.size} of the ${uiState.debloatPackages.size} listed" +
@@ -1284,7 +1289,10 @@ fun Step5AutomatedDeployment(
         // State what the button will actually do before it is pressed, including the case where
         // nothing can be removed. The old copy promised a debloat that could not happen.
         val selectedPackages = uiState.debloatPackages.filter { it.isEnabled }
-        val removable = selectedPackages.filter { uiState.debloatInstalled[it.packageName] != false }
+        val removable = selectedPackages.filter {
+            uiState.debloatInstalled[it.packageName] != false &&
+                it.packageName !in uiState.debloatHidden
+        }
         Card(
             colors = CardDefaults.cardColors(containerColor = Slate900),
             modifier = Modifier.fillMaxWidth()
@@ -1450,7 +1458,10 @@ fun WizardFooter(
                         if (uiState.isWizardDeploying) {
                             "Working..."
                         } else {
-                            val removable = uiState.debloatPackages.count { it.isEnabled && uiState.debloatInstalled[it.packageName] != false }
+                            val removable = uiState.debloatPackages.count {
+                                it.isEnabled && uiState.debloatInstalled[it.packageName] != false &&
+                                    it.packageName !in uiState.debloatHidden
+                            }
                             when {
                                 removable == 0 -> "Save choices & finish"
                                 uiState.canRemoveHostPackages -> "Remove $removable & finish"

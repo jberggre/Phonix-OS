@@ -5,6 +5,126 @@ Phone Screen as a real view. This page is the **work queue**. Read
 [VERIFICATION.md](VERIFICATION.md) for the evidence behind every claim, [ROADMAP.md](ROADMAP.md)
 for the research and sources, and [PROVISIONING.md](PROVISIONING.md) before touching the unit.
 
+## Phone Screen round (2026-11-01, S10 over wireless adb + HDMI monitor)
+
+The window that exists to show the cracked phone panel was showing the desktop. Measured with the
+desktop fullscreen on the HDMI display: the capture service sized its surface from its own
+`defaultDisplay` (1920x1080 at 160 dpi → **540x303, 16:9**) and the frames held Phonix's own
+network-onboarding card, while display 0 was showing the phone's Gemini dialog.
+
+Fixed in `service/ScreenMirror.kt` and `ui/components/PhoneMirrorWindow.kt`: the surface now comes
+from display 0's real metrics (`panel 1080x2280 @420dpi -> capturing 540x1140`), the projection is
+requested from a display-0 context because One UI 4.1/DeX binds the capture to the requesting
+context's display, and API 34+ asks for `MediaProjectionConfig.createConfigForDefaultDisplay()`.
+`ScreenMirror.captureSize()` is pure, with 4 new tests (58 total, green). The APK was installed over
+the device-owner build and the frame was checked against `screencap -d 0`.
+
+**Still owed on this path:** the stock consent window did not accept injected taps on this DeX
+display (a real pointer does; the run used a temporary `PROJECT_MEDIA` app-op that was reset), the
+display-0 recursion guard is unchanged, rotation during capture and the API 34 path are unmeasured.
+**Also found and fixed in the same round:** Start laid out only 11 of its 21 app cells, and
+the Pinned view sliced its third row, because both were lazy grids with hard height caps
+inside a menu that already scrolls. They are whole rows in the menu's own scroller now, and a
+drag reaches the last pin. Details in [VERIFICATION.md](VERIFICATION.md) §15.
+
+## Taskbar docking round (2026-11-01, S10 over wireless adb + HDMI monitor)
+
+The bar was hard-placed at `Alignment.BottomCenter` and `TaskbarPosition` only had `BOTTOM`/`TOP`,
+with no caller for `updateTaskbarPosition` — so a monitor permanently lost 50 dp of height to a bar
+that could not be moved. Right-click (mouse) or long-press (finger) on the bar now offers Bottom,
+Left, Right and Top; the vertical bar is a 56 dp column with the tray stacked, and the work area,
+icon grid, window layer and Start menu all read the same edge so nothing lands under the bar.
+
+Measured on the DeX display: all four edges applied on 1920x1080, the dock menu opens without
+covering the bar, Start opens beside a vertical bar, a Terminal window opens inside the inset work
+area, and the choice is stored (`"taskbarPosition":"RIGHT"` in `phonix_desktop_prefs.xml`). Build
+green, 58 tests, crash buffer empty. **Not measured:** real mouse right-click (adb only injects the
+primary button) and the portrait phone layout with a vertical bar. Details in
+[VERIFICATION.md](VERIFICATION.md) §16.
+
+Follow-up in the same round: the Start panel's 560 dp cap now follows the screen
+(min(720 dp, 82%)), so All apps shows the Android-app list on a monitor instead of one clipped
+row — [VERIFICATION.md](VERIFICATION.md) §17.
+
+Same round: a top-docked bar covered the centred top notch, which is drawn before the bar.
+`AutoHidingTopBar` takes a `topInset` now and hangs off the bar's bottom edge, collapsed and
+expanded — [VERIFICATION.md](VERIFICATION.md) §18.
+
+Audit pass, same round: six defects fixed — the icon-frame toggle and "Show Desktop" now
+persist, the bundled Alpine rescue is never pruned, bundled extraction stages before it replaces,
+and the updater no longer does package work on the main thread or share one receiver slot, and
+refuses a plain-http feed. 60 tests green, shipping check PASS. Container/updater repairs are
+code+unit evidence only — no distro switch or feed was run. Remaining findings listed at the end
+of [VERIFICATION.md](VERIFICATION.md) §19.
+
+Same round, after the audit: a maximized window carried its own 50 dp bottom reserve on top of the
+window layer's bar inset, so a bar on the right (or left, or top) still lifted every maximized window
+50 dp off the bottom edge, and a bottom bar reserved 100 dp. That reserve is gone — the layer's inset
+is the only one — measured maximized with the bar right (border in rows 1078-1079) and bottom (border
+at 1028-1029, bar 1030-1079). A dragged desktop icon also used to keep its raw offset when the bar
+changed edge, which put the Browser caption on top of a bottom bar; custom offsets are clamped into
+the current icon area now, render-side only, so nothing drifts. 60 tests green, crash buffer empty.
+[VERIFICATION.md](VERIFICATION.md) §20.
+
+"Lock Icons to Grid" then turned out to snap into a grid of its own (88 x 94 dp from the top corner,
+rows clamped at 7) and to visit only icons that had already been dragged — so it sent the Phonix
+Browser to the middle of the screen and left the other three alone. `model/DesktopIconGrid` is now
+the single grid the renderer and the view model both use (90 x 88 dp, rows counted from the bottom
+row), the desktop reports its live column count and area height, and locking snaps every icon to its
+nearest free slot. Measured: all four icons in one bottom-left row, stored as (0..3, 0). 61 tests
+green. [VERIFICATION.md](VERIFICATION.md) §21.
+
+Debloater audit, same round: a hidden package kept showing INSTALLED because nothing called
+`DevicePolicyManager.isApplicationHidden`, and there was no way to un-hide it at all; the
+"screenless Mini PC debloat" preset matched three category names that do not exist in its own
+catalogue, so it ticked nothing and copied an empty script; and per-package storage counted only
+the base APK. All four fixed — tri-state INSTALLED/HIDDEN/ABSENT, a Restore button,
+`DebloatCatalog.applianceCategories` with a test that every name exists, and `PackageFacts.apkBytes`
+for sizes. 64 tests green. The debloater UI was **not** re-opened on the unit this round.
+[VERIFICATION.md](VERIFICATION.md) §22.
+
+## Update-path round (2026-10-31, S10 over USB)
+
+The one deployment blocker left in README's boundary list was the update path: `checkAppUpdates()`
+requested the GitHub API of a **private** repository, so a unit could only ever see a 404, and it
+compared `tag_name` strings, so "1.9" sorted above "1.10". `downloadAndInstallUpdate()` then opened
+a browser. Nothing verified a download.
+
+What changed:
+
+1. **`model/UpdateFeed.kt` (new).** A feed is one JSON document — `versionCode`, `versionName`, an
+   https `apkUrl`, a 64-hex `sha256`, plus notes and publish date. Parsing is pure JVM (Moshi's
+   streaming reader) and **returns null** for a missing digest, a plain-http URL or a non-positive
+   build number: an unusable feed must never read as "up to date".
+2. **`engine/UpdateInstaller.kt` (new).** Streams the APK into the app cache as `.part`, checks the
+   byte count, requires the published SHA-256 to match, then hands the file to a
+   `PackageInstaller` session. Before that it compares the archive's signing certificate with the
+   installed one, so a mismatched key produces a message instead of a silent installer failure.
+   Nothing installs silently: the session commits with Android's own confirmation dialog.
+3. **`PhonixViewModel`** reads the feed from `BuildConfig.UPDATE_FEED_URL` (a build input:
+   `-PphonixUpdateFeed=…` or `PHONIX_UPDATE_FEED`), compares integer `versionCode`, reports byte
+   progress, and keeps every failure explicit. The old GitHub helper functions are gone.
+4. **About** names the feed host (or "not configured in this build"), renders DOWNLOADING and
+   READY_TO_INSTALL states, and says what the install button will do. Its Linux card now names the
+   **active** distro instead of a hardcoded "Alpine".
+5. `REQUEST_INSTALL_PACKAGES` is declared; without it the install session cannot reach the system
+   installer.
+
+Verification: `assembleDebug` + `testDebugUnitTest` **BUILD SUCCESSFUL, 54 tests, 0 failures**
+(`UpdateFeedTest` is new: complete-feed parse, string versionCode, rejection of a missing or
+non-64-hex digest, rejection of plain-http and empty APK URLs, rejection of zero build numbers,
+1.10 > 1.9 by build number, digest validation).
+
+[measured] on the bench S10 over USB (`R38M200YNRA`): `tools/verify-shipping.sh --apk …` reported
+`adb install -r` **Success**, `1.5 (versionCode 6)`, crash buffer clean, device owner intact,
+`rootfs trees: alpine debian tmp`, bundled Alpine rescue present. Launch afterwards: pid 3387, no
+`FATAL`/`AndroidRuntime` error. **Not run:** an actual feed download and install, because no feed is
+hosted yet — that path is compiled and unit-tested, not measured.
+
+Still owed on the update path: host a feed, then run one check, one download and one install on a
+unit; and decide whether the feed should be GitHub Releases (needs the repository to be public) or
+the owner's own manifest host. See [VERIFICATION.md](VERIFICATION.md) §13.
+
 ## Shipping round (2026-10-31, cloud worktree — no phone attached)
 
 This round started from a failed session. Its commit (`9df837b`, “support multi-distro
@@ -150,16 +270,13 @@ view modes. Details in [VERIFICATION.md](VERIFICATION.md) §12.
   open product question, not a bug.
 
 - `main` is committed and pushed at the build described here. The APK was built from this source.
-- **Version on the unit:** `1.5 (versionCode 6)`, installed 2026-10-31 over the device-owner
-  build. The measured 1.1 build (`versionCode 2`, **2026-10-29 16:58:38**, SHA-256
-  `a7516b6cef12cbbd80378d510ff031c2a04c9a3b8248c0f5e3bddba5c74a7674`) is dated history; do not
-  identify the current install by “1.1”.
+- **Version:** `1.1 (versionCode 2)`. The version was deliberately not bumped during the bench
+  round, so identify this build by its **2026-10-29 16:58:38** install time or SHA-256
+  `a7516b6cef12cbbd80378d510ff031c2a04c9a3b8248c0f5e3bddba5c74a7674`, not by “1.1” alone.
 - **Unit:** SM-G973U Galaxy S10, Android 12 / One UI 4.1 (API 31), serial `R38M200YNRA`,
   device owner, `1080x2280` override on a 1440x3040 panel at 420 dpi, rotation 0.
-- **A monitor is attached:** ES-G34C5 HDMI at 1920x1080 (`type EXTERNAL`, `FLAG_PRESENTATION`,
-  display id 7) plus Samsung's virtual `Desktop` display (id 2, 160 dpi). DeX was **measured on
-  the 1.3 build** ([VERIFICATION §12](VERIFICATION.md), monitor pass); 1.5 carries install-level
-  checks only. Dock/undock and caption-bar behaviour remain unverified.
+- **No external monitor is attached.** DeX was simulated with `wm size`/`wm density`; real DeX,
+  dock/undock and caption-bar behaviour remain unverified.
 - **Left running:** nothing. `llama-server` is stopped and Phone Screen is OFF. The desktop is
   open; the package is device owner.
 

@@ -11,6 +11,22 @@ data class DebloatPackage(
 )
 
 object DebloatCatalog {
+    /**
+     * Categories the screenless Mini PC preset ticks.
+     *
+     * These must be category names that exist below. The preset used to compare against
+     * "Telephony & Carrier", "Biometrics & Sensors" and "OEM Bloat", none of which the
+     * catalogue has, so pressing the button ticked nothing and copied an empty command list.
+     */
+    val applianceCategories: Set<String> = setOf(
+        "OEM Performance Throttler",
+        "OEM Voice Assistant",
+        "Analytics & Tracking",
+        "Carrier Telemetry",
+        "OEM Feed & News",
+        "Payment & Store Sync"
+    )
+
     fun getDefaultPackages(): List<DebloatPackage> = listOf(
         DebloatPackage(
             packageName = "com.android.chrome",
@@ -67,7 +83,10 @@ object DebloatCatalog {
             estimatedRamMb = 20
         ),
         DebloatPackage(
-            packageName = "com.samsung.android.spage",
+            // Samsung Free. The catalogue used to say com.samsung.android.spage, which is not
+            // the package name this phone ships (com.samsung.android.app.spage), so the row could
+            // never match a real install and the trim was silently a no-op.
+            packageName = "com.samsung.android.app.spage",
             displayName = "Samsung Daily / Free Content Hub",
             category = "OEM Feed & News",
             isEnabled = true,

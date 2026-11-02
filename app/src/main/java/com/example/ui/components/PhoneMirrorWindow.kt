@@ -136,7 +136,7 @@ fun PhoneMirrorWindowContent() {
                     if (desktopIsOnPhonePanel) {
                         "The phone display is running Phonix"
                     } else {
-                        "Real display capture - read-only"
+                        "Live photo of the phone panel - read-only"
                     },
                     color = Slate400,
                     fontSize = 8.sp
@@ -226,6 +226,13 @@ fun PhoneMirrorWindowContent() {
                         lineHeight = 13.sp
                     )
                     Text(
+                        "It captures the phone's own panel, not this desktop - so the picture stays the " +
+                            "cracked screen even while you work on a monitor.",
+                        color = PhonixCyan,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp
+                    )
+                    Text(
                         "It cannot tap or type on the phone. That needs an AccessibilityService, which is " +
                             "a separate opt-in; this window does not pretend to have it.",
                         color = Slate400,
@@ -234,7 +241,18 @@ fun PhoneMirrorWindowContent() {
                     )
                     Button(
                         onClick = {
-                            val intent = projectionManager?.createScreenCaptureIntent()
+                            // From API 34 the consent dialog can offer "a single app" or another
+                            // display; Phonix wants the built-in panel, so it asks the system for
+                            // exactly that. On older builds the service binds the projection to
+                            // display 0 by requesting it from that display's context.
+                            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                projectionManager?.createScreenCaptureIntent(
+                                    android.media.projection.MediaProjectionConfig
+                                        .createConfigForDefaultDisplay()
+                                )
+                            } else {
+                                projectionManager?.createScreenCaptureIntent()
+                            }
                             if (intent == null) {
                                 error = "This Android build does not expose screen capture."
                             } else {

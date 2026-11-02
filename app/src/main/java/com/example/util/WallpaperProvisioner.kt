@@ -57,7 +57,6 @@ object WallpaperProvisioner {
             // one-time manual step on the unit; this call covers the phone home screen.
             bitmap.recycle()
             Log.i(TAG, "Phonix wallpaper applied")
-            Log.i(TAG, "Phonix wallpaper applied")
             true
         } catch (e: Exception) {
             // Missing permission or a vendor restriction must never take the desktop down.

@@ -9,6 +9,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.engine.LinuxDesktop
 import com.example.engine.LinuxRuntime
 import com.example.engine.LocalAiEngine
@@ -29,6 +30,7 @@ import com.example.model.MotherboardCoolingState
 import com.example.model.DebloatCatalog
 import com.example.model.DebloatPackage
 import com.example.model.DesktopCustomization
+import com.example.model.DesktopIconGrid
 import com.example.model.DesktopShortcut
 import com.example.model.DesktopWallpaper
 import com.example.model.DesktopAccentColor
@@ -55,8 +57,10 @@ import com.example.model.DeviceCompatibilityClassifier
 import com.example.model.WindowBounds
 import com.example.model.WindowGeometry
 import com.example.model.AppUpdateInfo
-import com.example.model.VersionComparator
 import com.example.model.UpdateCheckState
+import com.example.model.UpdateFeed
+import com.example.model.UpdateManifest
+import com.example.engine.UpdateInstaller
 import com.example.model.AiChatMessage
 import com.example.model.AiEngineState
 import com.example.model.DefaultAiKnowledge
@@ -186,6 +190,8 @@ data class PhonixUiState(
     val installedBrowsers: List<com.example.util.InstalledBrowserInfo> = emptyList(),
     /** package name -> whether this device actually has it, so the trim list stops guessing. */
     val debloatInstalled: Map<String, Boolean> = emptyMap(),
+    /** Packages this install has hidden as device owner, so the list can offer an undo. */
+    val debloatHidden: Set<String> = emptySet(),
     /** The exact command text copied last, so the UI can confirm the paste really exists. */
     val debloatCopiedCommand: String? = null,
     /** Advice about the ticked packages, and whether a model or the built-in summary wrote it. */
@@ -1841,8 +1847,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val dragged = currentShortcuts.find { it.id == shortcutId } ?: return@update state
 
             if (lockGrid) {
-                val targetCol = Math.round((currentX - 16f) / 88f).coerceIn(0, 7).toInt()
-                val targetRow = Math.round((currentY - 16f) / 94f).coerceIn(0, 10).toInt()
+                val targetCol = DesktopIconGrid.nearestColumn(currentX, iconColumns)
+                val targetRow = DesktopIconGrid.nearestRow(currentY, iconAreaHeightDp)
+                val (targetX, targetY) =
+                    DesktopIconGrid.snap(targetCol, targetRow, iconAreaHeightDp)
 
                 // Check if another shortcut already occupies targetCol, targetRow
                 val occupant = currentShortcuts.find { it.id != shortcutId && it.gridCol == targetCol && it.gridRow == targetRow }
@@ -1858,7 +1866,13 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             .filter { it.id != shortcutId && it.id != occupant.id }
                             .map { Pair(it.gridCol, it.gridRow) }
                             .toSet() + Pair(targetCol, targetRow)
-                        findNearestFreeGridSlot(targetCol, targetRow, occupied)
+                        findNearestFreeGridSlot(
+                            targetCol,
+                            targetRow,
+                            occupied,
+                            maxCol = iconColumns - 1,
+                            maxRow = DesktopIconGrid.maxRow(iconAreaHeightDp)
+                        )
                     }
 
                     currentShortcuts.map { sc ->
@@ -1866,17 +1880,24 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             shortcutId -> sc.copy(
                                 gridCol = targetCol,
                                 gridRow = targetRow,
-                                posX = 16f + (targetCol * 88f),
-                                posY = 16f + (targetRow * 94f),
+                                posX = targetX,
+                                posY = targetY,
                                 hasCustomPosition = true
                             )
-                            occupant.id -> sc.copy(
-                                gridCol = occupantNewCol,
-                                gridRow = occupantNewRow,
-                                posX = 16f + (occupantNewCol * 88f),
-                                posY = 16f + (occupantNewRow * 94f),
-                                hasCustomPosition = true
-                            )
+                            occupant.id -> {
+                                val (occupantX, occupantY) = DesktopIconGrid.snap(
+                                    occupantNewCol,
+                                    occupantNewRow,
+                                    iconAreaHeightDp
+                                )
+                                sc.copy(
+                                    gridCol = occupantNewCol,
+                                    gridRow = occupantNewRow,
+                                    posX = occupantX,
+                                    posY = occupantY,
+                                    hasCustomPosition = true
+                                )
+                            }
                             else -> sc
                         }
                     }
@@ -1886,8 +1907,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             sc.copy(
                                 gridCol = targetCol,
                                 gridRow = targetRow,
-                                posX = 16f + (targetCol * 88f),
-                                posY = 16f + (targetRow * 94f),
+                                posX = targetX,
+                                posY = targetY,
                                 hasCustomPosition = true
                             )
                         } else sc
@@ -1915,26 +1936,46 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // ---- Desktop icon grid ---------------------------------------------------------------
+
+    /**
+     * The icon area the desktop is laying out into, reported by the desktop screen whenever it
+     * changes. Snapping works in this space instead of a second set of guessed numbers, which is
+     * why "Lock Icons to Grid" cannot drop an icon somewhere the desktop never draws.
+     */
+    private var iconColumns = 6
+    private var iconAreaHeightDp = 720f
+
+    fun setIconGrid(columns: Int, areaHeightDp: Float) {
+        iconColumns = columns.coerceAtLeast(1)
+        iconAreaHeightDp = areaHeightDp.coerceAtLeast(1f)
+    }
+
+    /**
+     * Moves freeform icons by [deltaDp] when the icon area changes height, which is what happens
+     * when the taskbar docks to another edge. Icon positions are offsets inside that area, so
+     * without this an icon dragged to the bottom row is left behind under the bar - or stranded
+     * above it - instead of following the work area.
+     */
+    fun reanchorShortcuts(deltaDp: Float, areaHeightDp: Float) {
+        if (deltaDp == 0f) return
+        _uiState.update { state ->
+            val lowest = DesktopIconGrid.bottomRowTop(areaHeightDp)
+            val updated = state.customization.shortcuts.map { sc ->
+                if (!sc.hasCustomPosition) {
+                    sc
+                } else {
+                    sc.copy(posY = (sc.posY + deltaDp).coerceIn(0f, lowest))
+                }
+            }
+            state.copy(customization = state.customization.copy(shortcuts = updated))
+        }
+    }
+
     fun toggleLockIconsToGrid(enabled: Boolean) {
         _uiState.update { state ->
             val shortcuts = if (enabled) {
-                val occupied = mutableSetOf<Pair<Int, Int>>()
-                state.customization.shortcuts.map { sc ->
-                    val desiredCol = if (!sc.hasCustomPosition) sc.gridCol else Math.round((sc.posX - 16f) / 88f).coerceIn(0, 5).toInt()
-                    val desiredRow = if (!sc.hasCustomPosition) sc.gridRow else Math.round((sc.posY - 16f) / 94f).coerceIn(0, 7).toInt()
-                    val (finalCol, finalRow) = if (Pair(desiredCol, desiredRow) !in occupied) {
-                        Pair(desiredCol, desiredRow)
-                    } else {
-                        findNearestFreeGridSlot(desiredCol, desiredRow, occupied)
-                    }
-                    occupied.add(Pair(finalCol, finalRow))
-                    sc.copy(
-                        gridCol = finalCol,
-                        gridRow = finalRow,
-                        posX = 16f + (finalCol * 88f),
-                        posY = 16f + (finalRow * 94f)
-                    )
-                }
+                snapShortcutsToGrid(state.customization.shortcuts)
             } else {
                 state.customization.shortcuts
             }
@@ -1944,6 +1985,51 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     shortcuts = shortcuts
                 ),
                 notificationMessage = if (enabled) "Grid Snapping: Locked to Grid" else "Freeform Mode: Move shortcuts wherever you want"
+            )
+        }
+    }
+
+    /**
+     * Pins every icon to its nearest free grid slot.
+     *
+     * All of them, not only the dragged ones: an icon that has never been moved is drawn from
+     * [DesktopIconGrid.autoPosition] and has to be pinned to the slot it is drawn on, otherwise
+     * locking the grid appears to do nothing at all. Slots are the renderer's (90 x 88 dp, bottom
+     * anchored), so an icon already on the grid keeps its position to the pixel.
+     */
+    private fun snapShortcutsToGrid(shortcuts: List<DesktopShortcut>): List<DesktopShortcut> {
+        val columns = iconColumns
+        val areaHeight = iconAreaHeightDp
+        val occupied = mutableSetOf<Pair<Int, Int>>()
+        return shortcuts.mapIndexed { index, sc ->
+            val current = if (sc.hasCustomPosition) {
+                Pair(sc.posX, sc.posY)
+            } else {
+                DesktopIconGrid.autoPosition(index, shortcuts.size, columns, areaHeight)
+            }
+            val wanted = Pair(
+                DesktopIconGrid.nearestColumn(current.first, columns),
+                DesktopIconGrid.nearestRow(current.second, areaHeight)
+            )
+            val slot = if (wanted in occupied) {
+                findNearestFreeGridSlot(
+                    wanted.first,
+                    wanted.second,
+                    occupied,
+                    maxCol = columns - 1,
+                    maxRow = DesktopIconGrid.maxRow(areaHeight)
+                )
+            } else {
+                wanted
+            }
+            occupied.add(slot)
+            val (x, y) = DesktopIconGrid.snap(slot.first, slot.second, areaHeight)
+            sc.copy(
+                gridCol = slot.first,
+                gridRow = slot.second,
+                posX = x,
+                posY = y,
+                hasCustomPosition = true
             )
         }
     }
@@ -2014,6 +2100,16 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update {
             it.copy(
                 activeContextMenu = DesktopContextMenuData.WallpaperMenu(x, y),
+                isStartMenuOpen = false
+            )
+        }
+    }
+
+    /** Right-click or long-press on the taskbar: dock it to any of the four edges. */
+    fun openTaskbarContextMenu(position: TaskbarPosition) {
+        _uiState.update {
+            it.copy(
+                activeContextMenu = DesktopContextMenuData.TaskbarMenu(position),
                 isStartMenuOpen = false
             )
         }
@@ -2189,11 +2285,37 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     .mapNotNull { it.packageName }
                     .mapNotNull { pkg -> PackageFacts.browserInfo(context, pkg) }
             }
-            val presence = withContext(Dispatchers.IO) {
-                _uiState.value.debloatPackages.associate { it.packageName to PackageFacts.isInstalled(context, it.packageName) }
-            }
-            _uiState.update { it.copy(installedBrowsers = browsers, debloatInstalled = presence) }
+            _uiState.update { it.copy(installedBrowsers = browsers) }
+            refreshDebloatPresence(context)
         }
+    }
+
+    /**
+     * Re-reads what this device really has and what this install has hidden, in one place.
+     *
+     * The two maps are always written together: a hidden package must never be offered as a
+     * removal target a second time, and the debloater needs the hidden set to offer an undo.
+     */
+    private suspend fun refreshDebloatPresence(context: Context) {
+        val packages = _uiState.value.debloatPackages.map { it.packageName }
+        val (present, hidden) = withContext(Dispatchers.IO) {
+            // "on disk" has to include packages the platform is hiding from this user, because
+            // setApplicationHidden makes getPackageInfo answer as if they were uninstalled.
+            val onDisk = packages.filter {
+                PackageFacts.isInstalled(context, it) || PackageFacts.isInstalledIncludingHidden(context, it)
+            }
+            val hiddenNow = packages.filter { HostDebloat.isHidden(context, it) }
+            // A name the platform still calls hidden but that nothing is installed under is a
+            // stale record: unhide it once so the row can go back to ABSENT instead of offering
+            // a Restore button that cannot do anything.
+            val stale = HostDebloat.staleHiddenRecords(hiddenNow, onDisk)
+            stale.forEach { HostDebloat.unhidePackage(context, it) }
+            // Presence means "on disk", not "safe to remove": a hidden package is still installed,
+            // and reporting it absent left it with no Restore button and no way back.
+            val presentMap = packages.associate { pkg -> pkg to (pkg in onDisk) }
+            presentMap to (hiddenNow.toSet() - stale)
+        }
+        _uiState.update { it.copy(debloatInstalled = present, debloatHidden = hidden) }
     }
 
     /**
@@ -2285,9 +2407,22 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     if (failure == null) TerminalLine.LineType.SUCCESS else TerminalLine.LineType.ERROR
                 )
             )
-            val presence = DebloatCatalog.getDefaultPackages()
-                .associate { it.packageName to PackageFacts.isInstalled(app, it.packageName) }
-            _uiState.update { it.copy(debloatInstalled = presence) }
+            refreshDebloatPresence(app)
+        }
+    }
+
+    /** Undoes [hideHostPackage]: puts a hidden package back on the launcher. */
+    fun unhideHostPackage(packageName: String) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val failure = withContext(Dispatchers.IO) { HostDebloat.unhidePackage(app, packageName) }
+            appendTerminalLine(
+                TerminalLine(
+                    if (failure == null) "restored $packageName" else "could not restore $packageName: $failure",
+                    if (failure == null) TerminalLine.LineType.SUCCESS else TerminalLine.LineType.ERROR
+                )
+            )
+            refreshDebloatPresence(app)
         }
     }
 
@@ -2309,12 +2444,17 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         if (removed > 0) {
+            // A hidden package still answers getPackageInfo, so presence comes from the tri-state.
+            refreshDebloatPresence(context)
             _uiState.update { state ->
                 state.copy(
                     debloatPackages = state.debloatPackages.map { pkg ->
-                        if (pkg.isEnabled && !PackageFacts.isInstalled(context, pkg.packageName)) pkg.copy(isEnabled = false) else pkg
-                    },
-                    debloatInstalled = state.debloatPackages.associate { it.packageName to PackageFacts.isInstalled(context, it.packageName) }
+                        if (pkg.isEnabled && state.debloatInstalled[pkg.packageName] == false) {
+                            pkg.copy(isEnabled = false)
+                        } else {
+                            pkg
+                        }
+                    }
                 )
             }
         }
@@ -2640,7 +2780,9 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value
         val presence = state.debloatInstalled
         return state.debloatPackages.filter { pkg ->
-            pkg.isEnabled && (presence.isEmpty() || presence[pkg.packageName] != false)
+            pkg.isEnabled &&
+                (presence.isEmpty() || presence[pkg.packageName] != false) &&
+                pkg.packageName !in state.debloatHidden
         }
     }
 
@@ -2682,14 +2824,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
         _uiState.update { state ->
             val updatedPkgs = state.debloatPackages.map { pkg ->
-                if (pkg.category.equals("Telephony & Carrier", ignoreCase = true) ||
-                    pkg.category.equals("Biometrics & Sensors", ignoreCase = true) ||
-                    pkg.category.equals("OEM Bloat", ignoreCase = true)
-                ) {
-                    pkg.copy(isEnabled = true)
-                } else {
-                    pkg
-                }
+                pkg.copy(isEnabled = pkg.category in DebloatCatalog.applianceCategories)
             }
             state.copy(debloatPackages = updatedPkgs)
         }
@@ -2725,110 +2860,184 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // -------------------------------------------------------------
-    // Manual GitHub Software Updates (User-initiated, No Backdoors)
+    // Manual software updates (user-initiated, verified, never silent)
     // -------------------------------------------------------------
     fun checkAppUpdates() {
-        _uiState.update { it.copy(updateState = UpdateCheckState.CHECKING) }
+        val app = getApplication<Application>()
         val packageInfo = runCatching {
-            getApplication<Application>().packageManager.getPackageInfo(getApplication<Application>().packageName, 0)
+            app.packageManager.getPackageInfo(app.packageName, 0)
         }.getOrNull()
-        val currentVersionName = packageInfo?.versionName ?: "1.5"
+        val currentVersionName = packageInfo?.versionName ?: BuildConfig.VERSION_NAME
         val currentVersionCode = packageInfo?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
             else @Suppress("DEPRECATION") it.versionCode
-        } ?: 4
+        } ?: BuildConfig.VERSION_CODE
+
+        fun unknownState(note: String) = AppUpdateInfo(
+            currentVersionName = currentVersionName,
+            currentVersionCode = currentVersionCode,
+            latestVersionName = currentVersionName,
+            latestVersionCode = currentVersionCode,
+            releaseNotes = note,
+            releaseUrl = "",
+            isUpdateAvailable = false
+        )
+
+        // A build with no feed has checked nothing. Say that instead of implying it is current.
+        val feedUrl = BuildConfig.UPDATE_FEED_URL.trim()
+        if (feedUrl.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    updateState = UpdateCheckState.ERROR,
+                    updateInfo = unknownState(
+                        "No update feed is configured for this build. Nothing was checked and no update status is known."
+                    )
+                )
+            }
+            return
+        }
+
+        _uiState.update { it.copy(updateState = UpdateCheckState.CHECKING) }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val url = java.net.URL("https://api.github.com/repos/jberggre/Phonix-OS/releases/latest")
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 4000
-                conn.readTimeout = 4000
-                conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
-                conn.setRequestProperty("User-Agent", "PhonixOS-Updater")
-
-                val responseCode = conn.responseCode
-                if (responseCode == 200) {
-                    val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    val tagName = extractJsonString(body, "tag_name") ?: "v1.3"
-                    val notes = extractJsonString(body, "body") ?: "Latest bug fixes and performance enhancements."
-                    val downloadUrl = extractAssetDownloadUrl(body) ?: "https://github.com/jberggre/Phonix-OS/releases"
-
-                    val isAvailable = isNewerVersion(tagName, currentVersionName)
-                    val info = AppUpdateInfo(
-                        currentVersionName = currentVersionName,
-                        currentVersionCode = currentVersionCode,
-                        latestVersionName = tagName,
-                        releaseNotes = notes,
-                        apkDownloadUrl = downloadUrl,
-                        releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
-                        isUpdateAvailable = isAvailable
-                    )
-                    _uiState.update {
-                        it.copy(
-                            updateState = if (isAvailable) UpdateCheckState.UPDATE_AVAILABLE else UpdateCheckState.UP_TO_DATE,
-                            updateInfo = info
-                        )
-                    }
-                } else {
-                    val info = AppUpdateInfo(
-                        currentVersionName = currentVersionName,
-                        currentVersionCode = currentVersionCode,
-                        latestVersionName = currentVersionName,
-                        latestVersionCode = currentVersionCode,
-                        releaseNotes = if (responseCode == 404) {
-                            "No public update feed is configured for this build. No update status is known."
-                        } else {
-                            "Update check failed (HTTP $responseCode). No update status is known."
-                        },
-                        apkDownloadUrl = "",
-                        releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
-                        isUpdateAvailable = false
-                    )
-                    _uiState.update {
-                        it.copy(updateState = UpdateCheckState.ERROR, updateInfo = info)
-                    }
-                }
-            } catch (_: Exception) {
+                val document = UpdateInstaller(app).readFeed(feedUrl)
+                val manifest = UpdateFeed.parse(document) ?: throw IllegalStateException(
+                    "The update feed is malformed: versionCode, versionName, an https apkUrl and a SHA-256 are required."
+                )
+                val available = UpdateFeed.isNewer(manifest, currentVersionCode)
                 val info = AppUpdateInfo(
                     currentVersionName = currentVersionName,
                     currentVersionCode = currentVersionCode,
-                    latestVersionName = currentVersionName,
-                    latestVersionCode = currentVersionCode,
-                    releaseNotes = "Could not reach the update feed. No update status is known.",
-                    apkDownloadUrl = "",
-                    releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
-                    isUpdateAvailable = false
+                    latestVersionName = manifest.versionName,
+                    latestVersionCode = manifest.versionCode,
+                    releaseUrl = feedUrl,
+                    apkDownloadUrl = manifest.apkUrl,
+                    sha256 = manifest.sha256,
+                    releaseNotes = if (available) {
+                        manifest.notes.ifBlank { "${manifest.versionName} is published." }
+                    } else {
+                        "This unit runs the newest published build (${manifest.versionName})."
+                    },
+                    publishedDate = manifest.published,
+                    isUpdateAvailable = available
                 )
                 _uiState.update {
-                    it.copy(updateState = UpdateCheckState.ERROR, updateInfo = info)
+                    it.copy(
+                        updateState = if (available) UpdateCheckState.UPDATE_AVAILABLE else UpdateCheckState.UP_TO_DATE,
+                        updateInfo = info
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        updateState = UpdateCheckState.ERROR,
+                        updateInfo = unknownState(
+                            "The update check failed: ${e.message ?: e.javaClass.simpleName}. No update status is known."
+                        )
+                    )
                 }
             }
         }
     }
 
+    /**
+     * Downloads the feed's APK, verifies it, and hands it to Android's installer. The user sees
+     * the system's confirmation; this method never installs anything on its own.
+     */
     fun downloadAndInstallUpdate(context: Context) {
-        val downloadUrl = _uiState.value.updateInfo?.downloadUrl ?: "https://github.com/jberggre/Phonix-OS/releases"
-        try {
-            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(downloadUrl)).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        val info = _uiState.value.updateInfo ?: return
+        if (info.apkDownloadUrl.isBlank() || info.sha256.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    updateState = UpdateCheckState.ERROR,
+                    updateInfo = info.copy(
+                        releaseNotes = "The feed published no APK with a SHA-256, so this build cannot install it itself."
+                    )
+                )
             }
-            context.startActivity(intent)
-        } catch (_: Exception) {
+            return
         }
-    }
 
-    private fun isNewerVersion(candidate: String, current: String): Boolean {
-        return VersionComparator.isNewer(candidate, current)
-    }
+        val manifest = UpdateManifest(
+            versionCode = info.latestVersionCode,
+            versionName = info.latestVersionName,
+            apkUrl = info.apkDownloadUrl,
+            sha256 = info.sha256,
+            notes = info.releaseNotes,
+            published = info.publishedDate
+        )
 
-    private fun extractJsonString(json: String, key: String): String? {
-        val pattern = "\"$key\"\\s*:\\s*\"([^\"]*)\"".toRegex()
-        return pattern.find(json)?.groups?.get(1)?.value?.replace("\\r\\n", "\n")?.replace("\\n", "\n")
-    }
+        _uiState.update {
+            it.copy(
+                updateState = UpdateCheckState.DOWNLOADING,
+                updateInfo = info.copy(releaseNotes = "Downloading ${info.latestVersionName}...")
+            )
+        }
 
-    private fun extractAssetDownloadUrl(json: String): String? {
-        val pattern = "\"browser_download_url\"\\s*:\\s*\"([^\"]*\\.apk)\"".toRegex()
-        return pattern.find(json)?.groups?.get(1)?.value
+        viewModelScope.launch {
+            try {
+                val installer = UpdateInstaller(getApplication())
+                val apk = withContext(Dispatchers.IO) {
+                    installer.download(
+                        manifest,
+                        onProgress = { line ->
+                            _uiState.update { state ->
+                                state.updateInfo?.let { current ->
+                                    state.copy(updateInfo = current.copy(releaseNotes = line))
+                                } ?: state
+                            }
+                        },
+                        onBytes = { written, total ->
+                            if (total > 0) {
+                                val percent = (written * 100 / total).toInt()
+                                val megabytes = written / (1024 * 1024)
+                                val totalMegabytes = total / (1024 * 1024)
+                                _uiState.update { state ->
+                                    state.updateInfo?.let { current ->
+                                        state.copy(
+                                            updateInfo = current.copy(
+                                                releaseNotes = "Downloading $percent% ($megabytes of $totalMegabytes MB)..."
+                                            )
+                                        )
+                                    } ?: state
+                                }
+                            }
+                        }
+                    )
+                }
+
+                _uiState.update {
+                    it.copy(
+                        updateState = UpdateCheckState.READY_TO_INSTALL,
+                        updateInfo = info.copy(
+                            releaseNotes = "Downloaded ${apk.length() / (1024 * 1024)} MB and matched the " +
+                                "published SHA-256. Android will ask you to confirm the install."
+                        )
+                    )
+                }
+
+                withContext(Dispatchers.Main) {
+                    installer.install(apk) { installed, message ->
+                        _uiState.update { state ->
+                            state.copy(
+                                updateState = if (installed) UpdateCheckState.IDLE else UpdateCheckState.ERROR,
+                                updateInfo = state.updateInfo?.copy(releaseNotes = message)
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        updateState = UpdateCheckState.ERROR,
+                        updateInfo = info.copy(
+                            releaseNotes = "The update was not installed: ${e.message ?: e.javaClass.simpleName}. " +
+                                "Nothing was changed."
+                        )
+                    )
+                }
+            }
+        }
     }
 
     // -------------------------------------------------------------

@@ -11,6 +11,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -29,8 +31,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -87,6 +87,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
@@ -129,6 +130,61 @@ private data class StartMenuItem(
     val iconTint: Color = PhonixCyan,
     val onClick: () -> Unit
 )
+
+/** Five icons per Start row; the menu scrolls, so every catalog entry is laid out. */
+private const val START_GRID_COLUMNS = 5
+
+/** One pinned tile. Kept separate so the pinned view can lay out whole rows. */
+@Composable
+private fun StartTile(item: StartMenuItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Card(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .testTag("start_item_${item.id}"),
+        colors = CardDefaults.cardColors(containerColor = Slate800.copy(alpha = 0.45f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Slate700.copy(alpha = 0.3f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
+            Box(
+                modifier = Modifier.size(36.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (art != null) {
+                    Image(
+                        painter = painterResource(id = art),
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(30.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = item.fallbackIcon ?: Icons.Default.Widgets,
+                        contentDescription = item.title,
+                        tint = item.iconTint,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = item.title,
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
 
 enum class AppViewMode(val label: String) {
     CATEGORIES("Category Tabs"),
@@ -237,10 +293,16 @@ fun Windows11StartMenu(
         }
     }
 
+    // The panel used to be capped at 560 dp on every screen, which on a 1080p monitor left the
+    // Android-app list with a single clipped row under the Phonix grid. The cap follows the screen
+    // now: a phone still gets a floating card, a monitor gets the height it actually has.
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val maxPanelHeight = minOf(720.dp, (screenHeightDp * 0.82f).dp)
+
     Surface(
         modifier = modifier
             .widthIn(min = 320.dp, max = 560.dp)
-            .heightIn(max = 560.dp)
+            .heightIn(max = maxPanelHeight)
             .shadow(24.dp, RoundedCornerShape(16.dp))
             .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             .testTag("windows_11_start_menu"),
@@ -319,51 +381,58 @@ fun Windows11StartMenu(
                 // is removed and its bar pin dropped.
                 Text("Phonix OS apps", color = Slate300, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 132.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    userScrollEnabled = false
-                ) {
-                    items(allMenuItems) { item ->
-                        val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
-                        Column(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable {
-                                    item.onClick()
-                                    viewModel.closeStartMenu()
-                                }
-                                .padding(vertical = 2.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                // Plain rows inside the menu's own scroller, not a lazy grid. The grid was
+                // capped at 132 dp with scrolling switched off, which left eight of the
+                // catalog's entries unreachable on the S10 (VERIFICATION §14). A fixed
+                // five-column grid is small enough to lay out in full.
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    allMenuItems.chunked(START_GRID_COLUMNS).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            if (art != null) {
-                                Image(
-                                    painter = painterResource(id = art),
-                                    contentDescription = item.title,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = item.fallbackIcon ?: Icons.Default.Widgets,
-                                    contentDescription = item.title,
-                                    tint = item.iconTint,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            rowItems.forEach { item ->
+                                val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            item.onClick()
+                                            viewModel.closeStartMenu()
+                                        }
+                                        .padding(vertical = 2.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    if (art != null) {
+                                        Image(
+                                            painter = painterResource(id = art),
+                                            contentDescription = item.title,
+                                            contentScale = ContentScale.Fit,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = item.fallbackIcon ?: Icons.Default.Widgets,
+                                            contentDescription = item.title,
+                                            tint = item.iconTint,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = item.title,
+                                        color = Color.White,
+                                        fontSize = 8.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
                             }
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = item.title,
-                                color = Color.White,
-                                fontSize = 8.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
+                            repeat(START_GRID_COLUMNS - rowItems.size) {
+                                Spacer(Modifier.weight(1f))
+                            }
                         }
                     }
                 }
@@ -675,66 +744,27 @@ fun Windows11StartMenu(
                         }
                     }
                 } else {
-                    // Pinned Apps Grid (Windows 11 3-column / 4-column layout)
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 90.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 240.dp),
-
-                        contentPadding = PaddingValues(2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    // Pinned apps, laid out as plain rows in the menu's own scroller. The lazy
+                    // grid was capped at 240 dp, so its third row was cut in half on the S10's
+                    // desktop and the rest of the pins could only be reached by scrolling inside
+                    // a card that gave no hint it scrolled.
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(filteredItems) { item ->
-                            Card(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable {
+                        filteredItems.chunked(START_GRID_COLUMNS).forEach { rowItems ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowItems.forEach { item ->
+                                    StartTile(item = item, modifier = Modifier.weight(1f)) {
                                         item.onClick()
                                         viewModel.closeStartMenu()
                                     }
-                                    .testTag("start_item_${item.id}"),
-                                colors = CardDefaults.cardColors(containerColor = Slate800.copy(alpha = 0.45f)),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Slate700.copy(alpha = 0.3f))
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 10.dp, horizontal = 6.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
-                                    Box(
-                                        modifier = Modifier.size(36.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (art != null) {
-                                            Image(
-                                                painter = painterResource(id = art),
-                                                contentDescription = item.title,
-                                                contentScale = ContentScale.Fit,
-                                                modifier = Modifier.size(30.dp)
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = item.fallbackIcon ?: Icons.Default.Widgets,
-                                                contentDescription = item.title,
-                                                tint = item.iconTint,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        text = item.title,
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                }
+                                repeat(START_GRID_COLUMNS - rowItems.size) {
+                                    Spacer(Modifier.weight(1f))
                                 }
                             }
                         }

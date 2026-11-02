@@ -28,6 +28,23 @@ object PackageFacts {
         false
     }
 
+    /**
+     * Presence that a hidden package still satisfies.
+     *
+     * `setApplicationHidden` makes the package look uninstalled for this user, so the plain
+     * [isInstalled] lookup answers false for a package that is very much still on disk. Without
+     * this second query, a hidden package could not be told apart from a stale hidden record
+     * left behind by a package that has since been removed.
+     */
+    fun isInstalledIncludingHidden(context: Context, packageName: String): Boolean = try {
+        context.packageManager.getPackageInfo(packageName, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
+    } catch (_: Throwable) {
+        false
+    }
+
     fun apkBytes(context: Context, packageName: String): Long = try {
         val info = context.packageManager.getApplicationInfo(packageName, 0)
         val paths = listOfNotNull(info.sourceDir) + (info.splitSourceDirs?.toList() ?: emptyList())

@@ -272,10 +272,6 @@ list.
 The live version of this list, with the evidence for each item, is in
 [docs/VERIFICATION.md](VERIFICATION.md) §3 and §4. Kept here for the record.
 
-> **Superseded 2026-10-31:** the monitor pass in §12 of VERIFICATION ran this checklist's DeX item
-> on a real 1920x1080 display, and the unit now runs 1.5 (`versionCode 6`). The state below is the
-> dated 1.1 record.
-
 State of the unit at the end of the 2026-10-29 1.1 session:
 
 - **Phonix 1.1 (`versionCode 2`) installed and device owner**, reached by `adb install -r` with
