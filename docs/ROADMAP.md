@@ -461,3 +461,37 @@ free on its system drive [measured 2026-11-02], so the Medium tier does not fit 
 tier is five times too large. Packs download from the upstream public mirror straight to the phone,
 which means the project hosts one manifest and one APK rather than 100 GB of content, and a pack
 download can be verified against a digest that does not require the build machine to hold the file.
+
+## Open-source route (decided 2026-11-02) [static]
+
+The owner's GitHub account is their own, and there is to be no hosting service, so this is the
+channel: the repository is public, a release carries the APK, and `update.json` can ride along as a
+release asset if the dormant updater is ever revived. That costs nothing, needs no new account, and
+keeps the trust boundary where decision 2 already put it - whoever can push to that repository can
+ship a build signed with `debug.keystore`.
+
+Two things work today and should not be disturbed by a publication:
+
+- **The bundled rootfs.** `app/src/main/assets/alpine-rootfs.tgz` (4.1 MB) is the only binary in the
+  tree. It is what makes the guest installable with no network, and the session record already
+  forbids pruning it once installed. F-Droid's inclusion policy requires binary dependencies to come
+  from source compilation or a listed trusted source, and permits prebuilt binaries only from named
+  mirrors; the established proot pattern is a flavour that ships no rootfs and fetches it on first
+  run, verified against a SHA-256 built into the app. That trade is explicit: a downloadable rescue
+  image means a phone that cannot bootstrap its guest in airplane mode. Publishing source is
+  unaffected.
+- **The application ID.** `com.aistudio.phonix.vpxmkr` sits in Google AI Studio's namespace, and
+  F-Droid rejects an application ID that does not belong to the developer and duplicates another
+  domain. Changing it is not cosmetic: a new ID is a new app, and this package is the device owner on
+  the bench unit, so the current owner has to relinquish ownership (or the phone is reset) before a
+  differently-named build can hold it. Sideloading a renamed build alongside is safe; transferring
+  ownership is the part that is not.
+
+There is no licence file in the tree, only [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Any
+publication needs one - Apache-2.0 or GPL-3.0 both satisfy F-Droid's FLOSS requirement - and the
+choice is the owner's, because it also decides whether someone else may fork this and sell it.
+
+The updater's permission is not a problem for this channel: `REQUEST_INSTALL_PACKAGES` is a Play
+restriction, not an Android one, and a release-hosted feed is still a sideload. An F-Droid submission
+would need the opt-in consent wording the policy demands - a notice that activating the feed bypasses
+F-Droid's checks - which decision 2's design already implies.

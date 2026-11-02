@@ -416,13 +416,15 @@ broken updater endpoint. All four shipped - section 19-21 and the 2026-10-31 upd
 session following it in order would have rebuilt finished work, which is the failure this repo has
 already had once. This list matches the tree as it stands.
 
-1. **Host a feed and run one real update.** The only deployment blocker left. `UpdateFeed` and
-   `UpdateInstaller` are written, unit-tested and never executed: `BuildConfig.UPDATE_FEED_URL`
-   defaults to empty and nothing hosts a document. The host is now decided (a Phonix HTTPS
-   manifest), so publish one `update.json`, build with `-PphonixUpdateFeed=...`, then run check ->
-   download -> verify -> install on the unit. What this feed is *not*: signed. The digest and the
-   signer comparison confine installs to this keystore, but whoever controls the host can still push
-   an APK built with it.
+1. **Drop the separate-host assumption.** The channel is settled by ownership rather than by
+   policy: the GitHub account is the owner's own, so the repository is the whole pipeline - source
+   public, APK attached to a release, and `update.json` as a release asset too if the feed is ever
+   wanted. No static host, no CDN, no store account, no new credential on a work laptop. The feed
+   stays dormant meanwhile: `BuildConfig.UPDATE_FEED_URL` is empty and `UpdateFeed`/`UpdateInstaller`
+   are written, unit-tested and never executed, which is a correct state, not an unfinished one. The
+   owner's install path is `gradle assembleDebug` + `adb install -r`. What carries over to item 2 is
+   `UpdateInstaller.download()` - digest-checked, progress-reporting - because a pack download is the
+   same job on a bigger file.
 2. **Offline library in three sizes.** Ship a downloader that fetches a measured content pack and a
    UI that removes it again, with Light (~2 GB, basic skills), Medium (~16 GB, reference) and Heavy
    (~85 GB, books and papers) tiers. Contents, licences and the storage rules are in
@@ -513,19 +515,27 @@ again; the reasoning is kept short and the evidence is linked.
    measured: 12th-gen i5-1245U, 10 cores, 15.7 GB RAM, **27.6 GB free** on the system drive
    [measured 2026-11-02]. Building is not the constraint - this machine compiles the APK and ran the
    distro switch tests - disk is. A 16 GB or 85 GB pack cannot be downloaded, generated or mirrored
-   here. Consequence: content packs stream from the upstream public mirror to the phone, the project
-   hosts a manifest and an APK only, and no multi-gigabyte staging step belongs in the build.
+   here. Consequence: content packs stream from the upstream public mirror to the phone, and no multi-gigabyte staging step
+   belongs in the build.
+
+7. **No hosting service, and open source.** "I need to host literally nothing" on a company laptop
+   with no accounts on it, and the GitHub account is the owner's own. So the distribution is the
+   owner's own repository: source, release APK, and `update.json` as a release asset if the feed is
+   ever revived. Content comes from upstream - Kiwix for packs, the distro mirrors for rootfs - so
+   the project publishes no multi-gigabyte asset and pays for no bandwidth. Publishing the source is
+   not blocked by anything sensitive: `git ls-files` holds no keystore, no `.env` and no secret, and
+   the only binary is `app/src/main/assets/alpine-rootfs.tgz` at 4.1 MB [measured]. Two things do
+   block a store-style publication, and neither is urgent: the AI Studio application ID, and the
+   bundled rootfs. Both are written up in [ROADMAP.md](ROADMAP.md) section "Open-source route".
 
 
 ## Still open
 
-1. **Distribution channel.** The updater as built cannot be published on Google Play: Device and
-   Network Abuse forbids an app updating itself outside Play, and `REQUEST_INSTALL_PACKAGES` is
-   restricted to a closed list of core purposes that excludes self-update. F-Droid allows runtime
-   downloads only as an explicit opt-in that says what is being bypassed. Direct APK distribution has
-   neither constraint. Facts and sources: [ROADMAP.md](ROADMAP.md) section "Store distribution".
-   This decides whether the updater ships, is dropped from a store flavour, or is replaced by Play's
-   own update mechanism.
+1. **Distribution channel - parked.** Sideload plus the owner's own GitHub is the channel; Play is
+   out on policy (self-update and `REQUEST_INSTALL_PACKAGES`), and F-Droid is optional and would cost
+   an application-ID change plus a flavour that ships no rootfs. Nothing here blocks a build or a
+   test, so no decision is owed. The researched constraints stay on file in
+   [ROADMAP.md](ROADMAP.md) sections "Store distribution" and "Open-source route".
 2. **Offline library contents and reader.** Tier sizes are measured; which packs belong in each tier,
    and whether the reader is embedded (GPLv3 - see ROADMAP) or handed to an installed Kiwix app, are
    not decided.
