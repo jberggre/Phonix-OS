@@ -412,35 +412,40 @@ current behaviour. The mock must not return; the current window shows real frame
 ## Next work, in order (rewritten 2026-11-02)
 
 The previous list opened with window geometry, desktop persistence, the landscape grid and the
-broken updater endpoint. All four shipped — §19–§21 and the 2026-10-31 update round — so a session
-following it in order would have rebuilt finished work, which is the failure this repo has already
-had once. This list matches the tree as it stands.
+broken updater endpoint. All four shipped - section 19-21 and the 2026-10-31 update round - so a
+session following it in order would have rebuilt finished work, which is the failure this repo has
+already had once. This list matches the tree as it stands.
 
 1. **Host a feed and run one real update.** The only deployment blocker left. `UpdateFeed` and
    `UpdateInstaller` are written, unit-tested and never executed: `BuildConfig.UPDATE_FEED_URL`
-   defaults to empty and nothing hosts a document. Publish one `update.json`, build with
-   `-PphonixUpdateFeed=…`, then run check → download → verify → install on the unit. **Blocked on
-   Open question 2.** Note what the feed is: digest-checked but unsigned, so whoever controls the
-   host can push an APK; the signer comparison confines that to this key.
-2. **The three walks that need a pointer on the DeX display.** The debloat hide/restore
-   walkthrough (§22 fixed the tri-state mapping and never re-opened the screen), the Start-menu
-   view modes, and the Phone Screen consent dialog, whose stock window does not accept injected
-   taps.
-3. **Dock/undock and the 24-hour soak.** Real DeX is measured (§13, §25, §27); missing is a
-   dock → undock cycle with the watcher consent enabled, a window surviving the display change,
-   and a plugged-in soak. Do not call DeX verified until then.
-4. **VS Code experiment** (`code serve-web` on Alpine's CLI, [ROADMAP](ROADMAP.md) §2). The badge
-   is probe-gated and honest; there has never been an editor behind it.
-5. **Decide Phone Screen input** (Open question 1). Control means an explicit
-   `AccessibilityService` opt-in with its own disclosure — never app-UID `input` injection.
-6. **Local-model quality and thermals** (Open question 4). A 30-minute plugged-in generation soak
-   recording tok/s, temperature and `/health` stability, then decide whether 3B earns its RAM.
-7. **Module registry and three deck layouts.** Declare module capabilities, save layouts per deck,
+   defaults to empty and nothing hosts a document. The host is now decided (a Phonix HTTPS
+   manifest), so publish one `update.json`, build with `-PphonixUpdateFeed=...`, then run check ->
+   download -> verify -> install on the unit. What this feed is *not*: signed. The digest and the
+   signer comparison confine installs to this keystore, but whoever controls the host can still push
+   an APK built with it.
+2. **Offline library in three sizes.** Ship a downloader that fetches a measured content pack and a
+   UI that removes it again, with Light (~2 GB, basic skills), Medium (~16 GB, reference) and Heavy
+   (~85 GB, books and papers) tiers. Contents, licences and the storage rules are in
+   [ROADMAP.md](ROADMAP.md) section "Offline library"; the reader route is the unresolved part.
+3. **The three walks that need a pointer on the DeX display.** The debloat hide/restore walkthrough
+   (section 22 fixed the tri-state mapping and never re-opened the screen), the Start-menu view
+   modes, and the Phone Screen consent dialog, whose stock window does not accept injected taps.
+4. **Dock/undock and the 24-hour soak.** Real DeX is measured (sections 13, 25, 27); missing is a
+   dock -> undock cycle with the watcher consent enabled, a window surviving the display change, and
+   a plugged-in soak. Do not call DeX verified until then.
+5. **VS Code experiment** (`code serve-web` on the guest, [ROADMAP](ROADMAP.md) section on VS Code).
+   The badge is probe-gated and honest; there has never been an editor behind it.
+6. **Phone Screen input - only if a touch-less display appears.** Decided read-only on 2026-11-02.
+   Control would mean an explicit `AccessibilityService` opt-in with its own disclosure, never
+   app-UID `input` injection.
+7. **Local-model thermals.** The model stays at 1.5B; a 30-minute plugged-in generation soak
+   recording tok/s, temperature and `/health` stability is what replaces the unmeasured claim.
+8. **Module registry and three deck layouts.** Declare module capabilities, save layouts per deck,
    add a keyboard command palette, and delete the dead `PhonixStartMenu` in the same pass.
-8. **Pixel 9 Pro Fold matrix** (Open question 3). The APK exists and the unit is pre-flighted, not
-   verified; fold simulation is not display routing. Do not enroll device owner on the Pixel.
-9. **OOBE on a spare unit, and the game install URLs.** The bench unit is past setup and a reset
-   is destructive, so these two paths have no way to be measured here.
+9. **Pixel 9 Pro Fold matrix.** The APK exists and the unit is pre-flighted, not verified; fold
+   simulation is not display routing. Do not enroll device owner on the Pixel.
+10. **OOBE on a spare unit, and the game install URLs.** The bench unit is past setup and a reset is
+    destructive, so these two paths have no way to be measured here.
 
 ## Do not
 
@@ -482,16 +487,41 @@ If `%LOCALAPPDATA%\Temp\phonix-toolchain` has been cleaned up, a stable copy of 
 `~/android-toolchain`, with `sdk.dir` written to the gitignored `local.properties`. The Gradle
 module cache in `~/.gradle/caches` already holds every dependency this build needs.
 
-## Open questions for the owner
+## Decisions taken (2026-11-02)
 
-1. **Phone Screen input:** is read-only enough, or is an accessibility opt-in wanted?
-2. **Update channel:** GitHub Releases, or a Phonix-owned signed manifest? The updater cannot be
-   finished without choosing one.
-3. **Next hardware:** this unit is API 31, so the API 36/37 large-screen restrictions do not bite
-   here. A newer unit would exercise them; decide before designing the next layout rules.
-4. **Model size:** stay at 1.5B for RAM/heat, or test 3B on this S10?
-5. **Sealing:** supervisor PIN in-app while keeping DeX, or a stricter kiosk on hardware that
-   supports it?
+The owner answered the five open questions. This section is the answer, so a session does not ask
+again; the reasoning is kept short and the evidence is linked.
+
+1. **Phone Screen input - read-only stays.** Touch works on the mirrored phone in the owner's setup,
+   so the window is usable as a viewer. An `AccessibilityService` opt-in is only worth revisiting if
+   a display arrives on which touch does not work at all. Queue item 6 is conditional, not a task.
+2. **Update channel - a Phonix-hosted HTTPS manifest.** The repository stays private; the feed is one
+   `update.json` on a static host. It is still digest-checked and unsigned, so the trust boundary is
+   unchanged: whoever controls the host can push an APK, and only builds signed with
+   `debug.keystore` will install. **This unblocks queue item 1.**
+3. **Sealing - deferred, not decided.** DeX and lock task do not combine (Samsung documents it), so
+   the choice forks the product: an in-app supervisor PIN keeps the desktop, kiosk removes it. Decide
+   before selling any unit; until then the install ships unlocked and says so.
+4. **Hardware - stay on this SM-G973U (API 31).** Every measurement in this record is on it. The
+   API 36/37 large-screen rules stay untested until a newer unit exists; do not write layout rules
+   for them from documentation alone.
+5. **Model size - stay at 1.5B.** The owner's actual want was not a larger model but an offline
+   *library* in three sizes, removable again. That is now queue item 2 and
+   [ROADMAP.md](ROADMAP.md) section "Offline library".
+
+## Still open
+
+1. **Distribution channel.** The updater as built cannot be published on Google Play: Device and
+   Network Abuse forbids an app updating itself outside Play, and `REQUEST_INSTALL_PACKAGES` is
+   restricted to a closed list of core purposes that excludes self-update. F-Droid allows runtime
+   downloads only as an explicit opt-in that says what is being bypassed. Direct APK distribution has
+   neither constraint. Facts and sources: [ROADMAP.md](ROADMAP.md) section "Store distribution".
+   This decides whether the updater ships, is dropped from a store flavour, or is replaced by Play's
+   own update mechanism.
+2. **Offline library contents and reader.** Tier sizes are measured; which packs belong in each tier,
+   and whether the reader is embedded (GPLv3 - see ROADMAP) or handed to an installed Kiwix app, are
+   not decided.
+3. **Sealing**, per item 3 above, before the first sale.
 
 ## Document map
 

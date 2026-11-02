@@ -376,3 +376,82 @@ adb shell dumpsys dropbox | grep 2026- | grep -ai crash
 - postmarketOS device/porting requirements: https://wiki.postmarketos.org/wiki/Porting_to_a_new_device
 - Qwen2.5 GGUF sizes: https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF
 - Mobile llama.cpp decode rates: https://arxiv.org/html/2410.03613v4
+
+## Store distribution (researched 2026-11-02) [static]
+
+The updater and the store question turn out to be the same question, and the answer is not the one
+the design assumes.
+
+- **Google Play forbids what `UpdateInstaller` does.** The Developer Program Policy (effective
+  2026-10-29) under *Device and Network Abuse* says an app "may not modify, replace, or update
+  itself using any method other than Google Play's update mechanism" and "may not download
+  executable code (such as dex, JAR, .so files) from a source other than Google Play". Its examples
+  name apps "that perform self-updates outside the Play Store" directly.
+- **The install permission is separately restricted.** `REQUEST_INSTALL_PACKAGES` is limited to a
+  closed list of core purposes (file transfer and management, browsers, enterprise device
+  management, backup and restore, and a few others) and "may not be used to perform self updates,
+  modifications or the bundling of other APKs". A user tapping *Install* does not make a
+  self-updater compliant; the core-purpose test is what the reviewer applies.
+- **Play's other gates.** A US$25 one-time developer account with identity verification, and, from
+  2026-08-31, new apps and updates must target Android 16 (API 36). This app targets API 31, which
+  builds and sideloads fine but does not qualify as a new Play listing.
+- **A device-owner launcher is not itself a violation.** Enterprise device management is an
+  explicitly permitted use, and Android Enterprise contemplates kiosk and launcher apps. The
+  supported route for a fleet is a *private* app on Managed Google Play, not a public listing; the
+  exception for "permanently private apps intended for internal distribution only" is written into
+  the target-API rules.
+- **F-Droid has no self-update ban, but has its own conditions.** The app must be entirely FLOSS
+  with no proprietary dependencies (no Play Services, Firebase, Crashlytics); the shipped APK must
+  not bundle non-free binaries; and runtime downloads of executables are allowed only with
+  explicit, opt-in consent that tells the user they are bypassing F-Droid's checks. The pattern
+  other proot apps use is a `fdroid` build flavour that ships no rootfs and offers to fetch it on
+  first run, verified against a SHA-256 built into the app. F-Droid signs with its own key unless
+  the build is reproducible, so moving between a Play or sideloaded install and an F-Droid one
+  needs a reinstall - and the package is the device owner here, so that uninstall is destructive.
+- **Direct APK distribution** has neither constraint, and is what the current design assumes.
+
+Consequence: the updater as built is correct for sideloaded and fleet installs and cannot be
+published as a consumer app on Play. Choosing a channel therefore decides whether the updater
+survives, and no store submission should be attempted before that choice.
+
+Sources: Play *Device and Network Abuse*
+(support.google.com/googleplay/android-developer/answer/16559646), Play *Request install packages
+permission* (answer/16909972), Play *Target API level requirements* (answer/11926878), F-Droid
+*Inclusion Policy* (f-droid.org/en/docs/Inclusion_Policy/), F-Droid *Anti-Features*
+(f-droid.org/en/docs/Anti-Features/), F-Droid *Submitting to F-Droid* guide.
+
+## Offline library (decided 2026-11-02)
+
+The owner's want is an offline library in three downloadable sizes that can be removed again, so one
+unit can be a light cyberdeck and another a heavy one. The model-size question was a proxy for this;
+the model stays at 1.5B.
+
+**Source.** Kiwix ZIM files are the only practical option: pre-parsed, compressed, one file per
+collection, with a mature reader already written. The sizes below are read from Kiwix's own
+download indexes on 2026-11-02 [static] and are the download sizes of the current builds; they move
+every build, and they shrink as often as they grow.
+
+| Tier | Contents | Size |
+|---|---|---|
+| Light - basic skills and information | Wikipedia Medicine (nopic) 1.05 GB, Wikivoyage (nopic) 260 MB, World Factbook 388 MB, LibreTexts K-12 353 MB | **about 2 GB** |
+| Medium - reference | Light, plus Wikipedia English (mini) 14.4 GB | **about 16 GB** |
+| Heavy - books and papers | Light, plus Project Gutenberg slices: fiction (LCC PZ) 18 GB, science (Q) 17 GB, technology (T) 12 GB, history (D) 37 GB | **about 85 GB** |
+
+The ceiling, not a tier: full English Wikipedia is 127 GB (52.7 GB without images, 14.4 GB mini) and
+full English Gutenberg is 206 GB.
+
+**Licensing, and the trap.** Wikipedia and its siblings are CC BY-SA: attribution and share-alike.
+Gutenberg text is US public domain, but "Project Gutenberg" is a trademark - verbatim copies, and
+royalties if the app is sold. **LibreTexts is CC BY-NC-SA**, so it cannot ship inside a paid app
+without permission: fine in a free build, must come out if pricing changes. There is no arXiv ZIM
+and no OpenStax ZIM; those need either a curated subset or a self-built pack.
+
+**Reader.** `libkiwix` is what actually parses ZIM, and it is GPLv3, as is the Kiwix Android app, so
+embedding it makes this app GPLv3. Alternatives: hand the file to an installed Kiwix app (no licence
+effect, poor integration), or write a minimal reader (title index plus blob reader - weeks). Not
+decided.
+
+**Storage.** Android 11 scoped storage means a bundled reader cannot scan external storage freely;
+Kiwix's own Play build reads only `Android/media/<pkg>`, while its sideloaded build holds
+`MANAGE_EXTERNAL_STORAGE`. Large packs belong in app-private storage or a media directory, and
+"debloat" has to delete the file, not just forget it.
