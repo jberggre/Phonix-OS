@@ -2092,3 +2092,109 @@ tarball pack would still only ever be unpacked after this same digest check. Ver
 already-installed pack reads the marker and the pinned length rather than re-hashing the file on every
 screen; the bytes were hashed when they were installed.
 
+
+## 37. Adversarial review of the pack path, and the two defects it found (2026-11-02) [measured]
+
+### What was delegated, and what stopped it
+
+The Copilot CLI (1.0.103) was asked, non-interactively, to review the five files of the pack path
+shipped in 6d98b6a against a fixed list of attacks: digest and length handling, temp file and
+`.part`/rename failures, marker-versus-rehash trust, TOCTOU between verify and install, path
+traversal, non-2xx/chunked/oversized bodies and redirects. It was run against a *copy* in `/tmp` so
+that anything it edited could not reach this tree, and it was told not to touch adb or the phone.
+
+It never reviewed anything. The captured output is two refusals:
+
+    Error: No authentication information found.
+    ... use /login, or set COPILOT_GITHUB_TOKEN, GH_TOKEN or GITHUB_TOKEN, or run 'gh auth login'
+
+    Error: Classic Personal Access Tokens (ghp_) are not supported by Copilot.
+    The GH_TOKEN environment variable contains a classic PAT.
+
+`gh auth status` explains the second: the keyring token for `jberggre` is invalid. So the delegate is
+one user action away from working - `gh auth login -h github.com` (or `copilot` then `/login`) - and
+a `ghp_` token will never do; only a fine-grained PAT. **No finding below is Copilot's.** They are
+mine, from the same checklist, and each one is either backed by a test that fails without the fix or
+dismissed with a reason, as this file's rules require.
+
+### Antigravity
+
+It is installed, and it is not a CLI. The binary is
+`%LOCALAPPDATA%/Programs/Antigravity/Antigravity.exe` (Electron; the install directory holds no
+`bin/` and no shim), and `%APPDATA%/Antigravity/bin` contains only `agy-node.cmd`. Nothing named
+`antigravity` is on `PATH`, in WinGet packages or in the npm global root. There is therefore no
+install command to give and none is invented here: launching it means opening that `.exe`. A CLI
+review from it is not available, so it was not used for anything in this round.
+
+### Defect 1 - a guest `*.part` could outlive a failed install
+
+`place()` cleaned up the private temp file in `finally`, but the staging file *inside the guest* had
+no such guard. If the replace failed after the bytes were staged - rename refused, then the copy
+fallback throwing - the `*.part` was left sitting in the guest tree, contradicting the class's own
+"a partial file never survives". The staging path is now removed in a `finally` on every exit.
+
+[measured] `PackDownloaderTest.aFailedReplaceLeavesNoPartFileInTheGuestAndKeepsWhatWasThere` puts a
+non-empty *directory* where the pack belongs, so both the rename and the copy fail after staging.
+It asserts the `*.part` is gone, the obstruction is untouched, and `packs/tmp` is empty. On the
+previous code the staging file survives that path, so this test fails without the fix.
+
+### Defect 2 - the old pack was deleted before its replacement existed
+
+`place()` called `destination.delete()` before the final rename. On POSIX a rename replaces the
+target atomically, so the delete bought nothing and opened a window where a working pack was gone and
+the new one had not arrived - the same destroy-before-replace mistake the rootfs rules forbid. The
+delete is gone; the rename does the replacement.
+
+[static] This window is not reproducible in a unit test on one filesystem: a rename of a regular file
+inside a writable directory succeeds, so the delete-then-fail ordering cannot be forced from a test.
+It is a reasoned removal, not a measured one, and is labelled as such.
+
+### Defect 3 - `verified()` could report a pack the build cannot name
+
+The default argument was `catalogue(includeBenchControls = true)`, and `downloadPack` called it with
+no argument, so a *release* build would have counted a debug control as installed if a marker ever
+existed for it. The default is now the shipped table, and the view model passes the same catalogue it
+resolved the release from.
+
+[measured] `PackDownloaderTest.theShippedCatalogueDoesNotReportADebugOnlyControlAsInstalled` plants a
+matching marker and a correctly sized guest file for the bench control: `verified()` returns empty,
+while `verified(listOf(control))` returns it.
+
+### Dismissed, with the reason each does not hold
+
+- **Marker instead of rehashing the guest file.** The guest runs as the app's own UID (proot), so a
+  hostile guest can rewrite the pack *and* the marker in the same private directory. No check inside
+  this app outranks a same-UID writer; the digest exists to refuse corrupt or hostile *downloads*, and
+  the marker still requires the pinned byte count so accidental truncation is caught.
+- **HTTPS pinned URL redirecting to plaintext.** OkHttp follows it, but the digest still gates the
+  bytes, and `validate()` already permits `http` only for loopback because the tests need it. Not
+  implemented; recorded rather than silently assumed.
+- **TOCTOU between verify and install.** The digest is computed over the bytes as they stream into
+  app-private storage and that same file is renamed into the guest; nothing is re-read from the
+  network after the check.
+- **Non-2xx, truncated, oversized, redirect.** Already covered by `PackDownloaderTest` (404, a body
+  that closes early, a body over the pin, and a 302 to a good body), and the size cap stops writing
+  before the oversized body is stored.
+
+### Re-verified on the final APK (not carried over from the previous round)
+
+[measured] `assembleDebug testDebugUnitTest`: **BUILD SUCCESSFUL**, **180 unit tests, 24 suites, 0
+failures**. `assembleDebugAndroidTest` then installed over the device owner; `ServiceSupervisor
+InstrumentedTest`: **OK (3 tests)**.
+
+- Real pack, pressed "Verify again" in the Servers window: `Verified: 11358 bytes installed`; guest
+  `root/packs/phonix-license.txt` 11 358 bytes, mtime 03:23 (this run); marker 64 bytes; `packs/tmp`
+  empty; no `*.part` anywhere under the guest packs directory.
+- Negative control, pressed "Download": `Refused: SHA-256 mismatch: got cfc7749b96f6..., pinned
+  000000000000...; nothing was installed.` Nothing installed, `packs/tmp` empty, no guest `*.part`.
+- `Packs (1 verified)`, `Module manifests: 3 accepted, 0 rejected`.
+- Supervision: the line under `Manifest Probe` reads `Running and healthy - tap to stop supervising`,
+  pid **15214**, unchanged after 18 s. `logcat -b crash`: **0** phonix entries.
+- `dpm list-owners`: still `DeviceOwner`. Display 2 `mFocusedApp`: this activity.
+
+### Still unmeasured
+
+The release-build refusal path (the control is compiled in only under `BuildConfig.DEBUG`); `Range`
+resume (packs are fetched in one piece); archive extraction (a pack is one file); and Defect 2's
+window, by the argument above.
+

@@ -1,6 +1,7 @@
 package com.example.engine
 
 import com.example.model.PackRelease
+import com.example.model.PackTrust
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.runBlocking
@@ -154,6 +155,34 @@ class PackDownloaderTest {
         assertTrue(result.exceptionOrNull()?.message, result.isSuccess)
         assertTrue(guestFile().isFile)
         assertTrue(guestFile().readBytes().contentEquals(body))
+    }
+
+    @Test
+    fun aFailedReplaceLeavesNoPartFileInTheGuestAndKeepsWhatWasThere() {
+        // A directory where the pack belongs makes both the rename and the copy fail after the
+        // bytes are already staged, which is the one path where a guest `*.part` used to survive.
+        val occupied = guestFile().also { it.mkdirs() }
+        File(occupied, "held.txt").writeText("not ours to delete")
+
+        val result = runBlocking { downloader().install(release()) }
+
+        assertTrue(result.isFailure)
+        assertFalse("a staging file must not survive a failed install", File(guestFile().path + ".part").exists())
+        assertTrue("an unrelated directory must be left alone", File(occupied, "held.txt").isFile)
+        assertTrue(tempFiles().isEmpty())
+    }
+
+    @Test
+    fun theShippedCatalogueDoesNotReportADebugOnlyControlAsInstalled() {
+        val control = PackTrust.benchControls.single()
+        File(privateRoot, "verified").also { it.mkdirs() }
+        File(privateRoot, "verified/" + control.id + ".sha256").writeText(control.sha256)
+        val planted = File(guestRoot, control.guestPath)
+        planted.parentFile!!.mkdirs()
+        planted.writeBytes(ByteArray(control.bytes.toInt()))
+
+        assertEquals(emptySet<String>(), downloader().verified())
+        assertEquals(setOf(control.id), downloader().verified(listOf(control)))
     }
 
     @Test

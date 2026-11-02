@@ -121,20 +121,28 @@ class PackDownloader(
     private fun place(release: PackRelease, verified: File, destination: File): File {
         destination.parentFile?.mkdirs()
         val staged = File(destination.parentFile, destination.name + ".part")
-        staged.delete()
-        if (!verified.renameTo(staged) && !runCatching { verified.copyTo(staged, overwrite = true) }.isSuccess) {
-            throw IllegalStateException("The verified bytes could not be staged in the guest.")
+        staged.deleteRecursively()
+        try {
+            if (!verified.renameTo(staged) &&
+                !runCatching { verified.copyTo(staged, overwrite = true) }.isSuccess
+            ) {
+                throw IllegalStateException("The verified bytes could not be staged in the guest.")
+            }
+            // Deliberately no `destination.delete()` first: a POSIX rename replaces the old file
+            // atomically, so deleting first would destroy a pack that already works for nothing.
+            if (!staged.renameTo(destination)) {
+                staged.copyTo(destination, overwrite = true)
+            }
+            if (!destination.isFile || destination.length() != release.bytes) {
+                destination.delete()
+                throw IllegalStateException("The guest file did not keep the verified byte count.")
+            }
+            return destination
+        } finally {
+            // A staging name must not outlive the attempt, whatever failed: a guest command must
+            // never find a half-written `*.part` where the pack belongs.
+            staged.deleteRecursively()
         }
-        destination.delete()
-        if (!staged.renameTo(destination)) {
-            staged.copyTo(destination, overwrite = true)
-            staged.delete()
-        }
-        if (!destination.isFile || destination.length() != release.bytes) {
-            destination.delete()
-            throw IllegalStateException("The guest file did not keep the verified byte count.")
-        }
-        return destination
     }
 
     /**
@@ -155,8 +163,14 @@ class PackDownloader(
         }
     }
 
-    /** Packs whose marker matches the pin and whose guest file is present at the pinned length. */
-    fun verified(releases: List<PackRelease> = PackTrust.catalogue(includeBenchControls = true)): Set<String> {
+    /**
+     * Packs whose marker matches the pin and whose guest file is present at the pinned length.
+     *
+     * Defaults to the shipped catalogue: a control only a debug build can even name must not be
+     * reported as installed by a build that cannot verify it. Callers that can name more pass the
+     * same catalogue they resolved the release from.
+     */
+    fun verified(releases: List<PackRelease> = PackTrust.shipped): Set<String> {
         val root = guestRoot() ?: return emptySet()
         return releases.filter { release ->
             val recorded = runCatching { File(markerDir, release.id + ".sha256").readText().trim() }.getOrNull()

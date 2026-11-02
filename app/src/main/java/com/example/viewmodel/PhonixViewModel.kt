@@ -1270,14 +1270,12 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * digest matched, and every failure path reports its refusal reason instead.
      */
     fun downloadPack(packId: String) {
-        val release = com.example.model.PackTrust.find(
-            packId,
-            includeBenchControls = com.example.BuildConfig.DEBUG
-        )
+        val catalogue = packCatalogue()
+        val release = catalogue.firstOrNull { it.id == packId.trim().lowercase(java.util.Locale.ROOT) }
         viewModelScope.launch {
             _uiState.update { it.copy(packStates = it.packStates + (packId to "Downloading and verifying...")) }
             val result = packDownloader.install(release)
-            val verified = runCatching { packDownloader.verified() }.getOrDefault(emptySet())
+            val verified = runCatching { packDownloader.verified(catalogue) }.getOrDefault(emptySet())
             val outcome = result.fold(
                 onSuccess = { file -> "Verified: ${file.length()} bytes installed" },
                 onFailure = { error -> "Refused: " + (error.message ?: "unknown error") }
@@ -1292,6 +1290,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** The packs this build can verify: the shipped table, plus the bench controls in a debug build. */
+    private fun packCatalogue(): List<com.example.model.PackRelease> =
+        com.example.model.PackTrust.catalogue(com.example.BuildConfig.DEBUG)
+
     fun reloadModuleManifests() {
         viewModelScope.launch(Dispatchers.IO) {
             val loaded = runCatching {
@@ -1299,8 +1301,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     java.io.File(getApplication<Application>().filesDir, "modules")
                 ).load(
                     // A debug build can also name the bench controls; a release build cannot.
-                    com.example.model.PackTrust.catalogue(com.example.BuildConfig.DEBUG)
-                        .map { it.id }.toSet()
+                    packCatalogue().map { it.id }.toSet()
                 )
             }.getOrElse { error ->
                 com.example.model.ManifestSet(
@@ -1313,7 +1314,9 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
             manifests = loaded
-            val verifiedPacks = runCatching { packDownloader.verified() }.getOrDefault(emptySet())
+            val verifiedPacks = runCatching {
+                packDownloader.verified(packCatalogue())
+            }.getOrDefault(emptySet())
             _uiState.update { state ->
                 state.copy(
                     manifests = loaded,
