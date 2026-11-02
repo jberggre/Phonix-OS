@@ -68,10 +68,16 @@ object VsCodeCli {
     /** Reads the installed CLI's version without fetching anything. */
     fun installedVersionProbe(): String = "cd " + INSTALL_DIR + " && ./code --version 2>/dev/null"
 
+    /** The log path for a detached `serve-web`. Kept under [INSTALL_DIR] so a guest whose
+     * /tmp is absent, read-only, or a symlink the proot will not write through cannot
+     * swallow the redirect before the server starts.
+     */
+    private const val SERVE_LOG = INSTALL_DIR + "/phonix-vscode.log"
+
     /** Starts `serve-web` detached, so the shell returns instead of holding the server open. */
     fun serveCommand(port: Int = PORT): String =
         "cd " + INSTALL_DIR + " && nohup ./code serve-web --host 127.0.0.1 --port " + port +
-            " --without-connection-token >/tmp/phonix-vscode.log 2>&1 &"
+            " --without-connection-token >" + SERVE_LOG + " 2>&1 &"
 
     /**
      * The tail of a command's output, so a refusal carries what the guest actually said.

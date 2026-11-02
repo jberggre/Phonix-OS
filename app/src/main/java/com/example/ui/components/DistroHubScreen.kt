@@ -392,6 +392,15 @@ fun DistroHubScreen(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                    Text(
+                        "Switching changes the main distro that the desktop starts, but the current " +
+                        "rootfs is held in the background, so essentials that run continuously - "
+                        + "AI, Code Studio and any other background servers - keep using Alpine even "
+                        + "while another distro is the one you log into.",
+                        color = Slate400,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
                 }
             },
             confirmButton = {

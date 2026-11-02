@@ -4252,7 +4252,7 @@ ${moduleList}
                     vsCodeServerStatus = if (listening) {
                         "Listening on 127.0.0.1:8000 - the editor is served by the guest"
                     } else {
-                        "No listener on 127.0.0.1:8000 after 20 s - see /tmp/phonix-vscode.log in the guest."
+                        "No listener on 127.0.0.1:8000 after 20 s - see \$HOME/.phonix/vscode/phonix-vscode.log in the guest."
                     }
                 )
             }
