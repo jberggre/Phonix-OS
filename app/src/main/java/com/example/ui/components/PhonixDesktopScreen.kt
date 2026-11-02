@@ -2949,6 +2949,24 @@ fun VsCodeWindowContent(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (uiState.vsCodeCliVersion == null) {
+                    Button(
+                        onClick = { viewModel.installVsCode() },
+                        enabled = !uiState.vsCodeInstalling,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PhonixGreen.copy(alpha = if (uiState.vsCodeInstalling) 0.35f else 1f)
+                        ),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text(
+                            if (uiState.vsCodeInstalling) "Installing..." else "Install VS Code",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0B1F12)
+                        )
+                    }
+                }
                 if (!uiState.vsCodeServerRunning && !uiState.vsCodeServerProbing) {
                     Button(
                         onClick = { viewModel.startVsCodeServer() },
@@ -2988,6 +3006,20 @@ fun VsCodeWindowContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color(0xFF2A1A1A))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+
+        // The install is a long download; say what it is doing rather than leave a dead button.
+        if (uiState.vsCodeInstallStatus.isNotBlank()) {
+            Text(
+                uiState.vsCodeInstallStatus,
+                color = if (uiState.vsCodeCliVersion != null) PhonixGreen else Color(0xFFE5E7EB),
+                fontSize = 9.sp,
+                lineHeight = 12.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF14251A))
                     .padding(horizontal = 10.dp, vertical = 5.dp)
             )
         }

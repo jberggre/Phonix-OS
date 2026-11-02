@@ -2198,3 +2198,72 @@ The release-build refusal path (the control is compiled in only under `BuildConf
 resume (packs are fetched in one piece); archive extraction (a pack is one file); and Defect 2's
 window, by the argument above.
 
+
+## 38. Code Studio targets the Alpine guest, because that is the only arm64 CLI (2026-11-02) [measured]
+
+The previous round's window sent `code serve-web` at a guest with no CLI installed and showed a green
+badge over `net::ERR_CONNECTION_REFUSED`. This round adds the missing half: a bootstrap that fetches
+Microsoft's CLI into the guest, refuses unless the binary prints a version, and only then starts the
+server. The target had to change with it.
+
+### The measurement that decided the design
+
+| download token | HTTP |
+|---|---|
+| `os=cli-linux-arm64` (glibc) | **404** |
+| `os=cli-alpine-arm64` (musl) | **302** -> `vscode_cli_alpine_arm64_cli.tar.gz` |
+| `os=cli-linux-x64` | **404** |
+
+[measured 2026-11-02, from the build machine with `curl -o /dev/null -w '%{http_code}'`, and on the unit
+as `curl: (22) The requested URL returned error: 404` inside the Debian guest.] Microsoft publishes no
+glibc arm64 build of this CLI at all. So "run Code Studio on Debian" was never a configuration choice:
+on arm64 the only CLI that exists is the musl one, and musl means Alpine - the image bundled in the
+APK and the one the local model already runs under.
+
+`VsCodeCli` therefore marks `GNU` as unsupported and the installer refuses a glibc guest before it
+touches the network:
+
+    Microsoft publishes no glibc build of the arm64 CLI - the download URL answers 404.
+    The musl (Alpine) build is the only one, so switch the Linux guest to Alpine.
+
+Measured on the till: pressing **Install VS Code** on the Debian guest printed exactly that, and no
+download was attempted (`Pack... cli.tar.gz` never appeared; the staging directory stayed empty).
+
+### The bundled Alpine image, measured from the APK
+
+`tar -tzf app/src/main/assets/alpine-rootfs.tgz` holds `./usr/bin/wget`, `./sbin/apk`, `./bin/tar`,
+`./bin/busybox`, `./lib/ld-musl-aarch64.so.1` and `./etc/ssl/certs/ca-certificates.crt` - and **no
+`curl`**. A first version of the installer hard-coded `curl`, which would have made Code Studio work on
+a downloaded Debian and fail on the image that actually ships. The fetch is now
+`command -v curl || wget -q -O`, with a test that pins both branches and the URL.
+
+### What the code does
+
+- `model/VsCodeCli`: the two Microsoft builds, the loader probe (`test -e /lib/ld-musl-aarch64.so.1`),
+  one-line install and serve scripts, `lastWords` so a refusal carries what the guest said, and
+  `parseVersion`, the only accepted proof that a runnable binary exists.
+- `engine/VsCodeInstaller`: probe the loader, refuse glibc before any download, run the install with a
+  15-minute budget, accept only a printed semver.
+- `PhonixViewModel`: `installVsCode()` and a reworked `startVsCodeServer()` that asks the guest for the
+  CLI's version before claiming it is missing, starts `serve-web` detached, and reports listening only
+  after a real TCP connect to `127.0.0.1:8000`.
+- `VsCodeWindowContent`: an **Install VS Code** button, an install-status strip, and the existing probe
+  badge, which no longer says "Server not running" for a CLI that is simply absent.
+- `MainActivity`: `--es phonix.window <module-id>` opens that module's window on launch
+  (`ModuleRegistry.openable`), added because a headless session cannot reliably tap the palette - the
+  palette rows came back with zero-size bounds and the typing landed in the Terminal's own field.
+
+[measured] `assembleDebug testDebugUnitTest`: **BUILD SUCCESSFUL, 194 tests, 27 suites, 0 failures**
+(180/24 before: `VsCodeCliTest` 8, `VsCodeInstallerTest` 5, `ModuleRouteTest` 2, net of rewrites).
+`ServiceSupervisorInstrumentedTest` on the installed APK: **OK (3 tests)**. Crash buffer: 0.
+
+### Not measured, and the exact next step
+
+The install, `serve-web` and the rendered editor were **not** run on Alpine this round. Reaching that
+needs the desktop guest switched from Debian to Alpine in the distro hub, which the session could not
+drive: `--es phonix.window distros` restored the previous window on top, the distro-hub card was not
+reachable, and the tap meant for the desktop widget landed on the DeX launcher. So the honest state is:
+the refusal path is measured on the phone, the Alpine path is code plus unit tests, and one manual
+switch (`Linux Systems -> Alpine -> Switch`) followed by **Install VS Code** is what turns the rest
+into evidence. Until then this file makes no claim that an editor has rendered.
+

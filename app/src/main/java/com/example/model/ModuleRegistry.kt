@@ -93,6 +93,15 @@ object ModuleRegistry {
     fun blocked(facts: ModuleFacts): List<Pair<PhonixModule, String>> =
         modules.mapNotNull { module -> module.blockedReason(facts)?.let { module to it } }
 
+    /**
+     * The window a module id opens, or null when no module uses that id.
+     *
+     * Used by the launch intent so a bench session can open a surface that the pointer cannot
+     * reach; the ids are the same ones a manifest may name, and nothing here invents authority.
+     */
+    fun openable(id: String): WindowType? =
+        modules.firstOrNull { it.id == id.trim().lowercase(java.util.Locale.ROOT) }?.windowType
+
     fun byWindowType(type: WindowType): PhonixModule? = modules.firstOrNull { it.windowType == type }
 
     /**

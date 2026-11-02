@@ -60,6 +60,9 @@ import com.example.ui.theme.Slate950
 import com.example.viewmodel.AppNavTab
 import com.example.viewmodel.PhonixViewModel
 
+/** Intent extra naming a module id whose window should open on launch (bench automation). */
+const val EXTRA_PHONIX_WINDOW = "phonix.window"
+
 class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
     private val viewModel: PhonixViewModel by viewModels()
@@ -112,6 +115,15 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         // ordinary phones. An explicit external-display choice starts the watcher.
         if (DeviceSetupPreferences.shouldWatchExternalDisplays(applicationContext)) {
             DesktopAutoLaunchService.start(applicationContext)
+        }
+
+        // `am start … --es phonix.window vscode` opens that module's window. Without the extra this
+        // changes nothing; with it, a session driving the phone over adb can reach a surface the
+        // pointer cannot, instead of guessing at palette coordinates.
+        intent?.getStringExtra(EXTRA_PHONIX_WINDOW)?.let { requested ->
+            com.example.model.ModuleRegistry.openable(requested)?.let { window ->
+                viewModel.openWindow(window)
+            }
         }
 
         setContent {

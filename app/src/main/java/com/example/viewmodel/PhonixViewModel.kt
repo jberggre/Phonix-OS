@@ -264,7 +264,11 @@ data class PhonixUiState(
     // VS Code is only "running" after a real loopback connection succeeds.
     val vsCodeServerRunning: Boolean = false,
     val vsCodeServerProbing: Boolean = false,
-    val vsCodeServerStatus: String = "Server not started"
+    val vsCodeServerStatus: String = "Server not started",
+    // The CLI counts as installed only after it printed a version from inside the guest.
+    val vsCodeCliVersion: String? = null,
+    val vsCodeInstalling: Boolean = false,
+    val vsCodeInstallStatus: String = ""
 )
 
 enum class BootTarget {
@@ -4095,6 +4099,51 @@ ${moduleList}
      * connection to loopback succeeds. The CLI is not in the base Alpine image, so a missing
      * binary now produces a visible failure instead of a green badge over a refused WebView.
      */
+    private val vsCodeInstaller = com.example.engine.VsCodeInstaller { command, timeoutMs ->
+        com.example.engine.LinuxRuntime.run(command, timeoutMs)
+    }
+
+    /**
+     * Installs Microsoft's CLI into the guest.
+     *
+     * The download runs inside the guest with the guest's own curl, and the only success accepted
+     * is the version the binary prints. Without a version line the state keeps saying that nothing
+     * is installed, even if the download looked fine.
+     */
+    fun installVsCode() {
+        if (_uiState.value.vsCodeInstalling) return
+        _uiState.update {
+            it.copy(
+                vsCodeInstalling = true,
+                vsCodeInstallStatus = "Downloading the VS Code CLI into the guest (about 40 MB)..."
+            )
+        }
+        viewModelScope.launch {
+            if (!com.example.engine.LinuxRuntime.isRunning) {
+                _uiState.update {
+                    it.copy(
+                        vsCodeInstalling = false,
+                        vsCodeInstallStatus = "The Linux guest is not running - start it, then install."
+                    )
+                }
+                return@launch
+            }
+            when (val outcome = vsCodeInstaller.install()) {
+                is com.example.engine.VsCodeInstall.Installed -> _uiState.update {
+                    it.copy(
+                        vsCodeInstalling = false,
+                        vsCodeCliVersion = outcome.version,
+                        vsCodeInstallStatus = "CLI " + outcome.version + " installed in the guest (" +
+                            outcome.libc.label + " build)."
+                    )
+                }
+                is com.example.engine.VsCodeInstall.Refused -> _uiState.update {
+                    it.copy(vsCodeInstalling = false, vsCodeInstallStatus = outcome.reason)
+                }
+            }
+        }
+    }
+
     fun startVsCodeServer() {
         if (_uiState.value.vsCodeServerProbing) return
         _uiState.update {
@@ -4126,8 +4175,28 @@ ${moduleList}
                 return@launch
             }
 
-            executeTerminalCommand("code serve-web --host 127.0.0.1 --port 8000 --without-connection-token &")
-            val deadline = System.currentTimeMillis() + 12_000L
+            if (_uiState.value.vsCodeCliVersion == null) {
+                // It may have been installed in an earlier session, so ask the guest before
+                // claiming it is missing - and never read the shell's silence as a yes.
+                val probe = com.example.engine.LinuxRuntime.run(
+                    com.example.model.VsCodeCli.installedVersionProbe(),
+                    20_000L
+                )
+                val known = com.example.model.VsCodeCli.parseVersion(probe.orEmpty())
+                if (known == null) {
+                    _uiState.update {
+                        it.copy(
+                            vsCodeServerProbing = false,
+                            vsCodeServerRunning = false,
+                            vsCodeServerStatus = "No VS Code CLI in the guest - press Install VS Code first."
+                        )
+                    }
+                    return@launch
+                }
+                _uiState.update { it.copy(vsCodeCliVersion = known) }
+            }
+            vsCodeInstaller.serve()
+            val deadline = System.currentTimeMillis() + 20_000L
             var listening = false
             while (System.currentTimeMillis() < deadline && isActive) {
                 if (loopbackAcceptsConnections(8000)) {
@@ -4141,9 +4210,9 @@ ${moduleList}
                     vsCodeServerProbing = false,
                     vsCodeServerRunning = listening,
                     vsCodeServerStatus = if (listening) {
-                        "Listening on 127.0.0.1:8000"
+                        "Listening on 127.0.0.1:8000 - the editor is served by the guest"
                     } else {
-                        "No listener on 127.0.0.1:8000 - the VS Code CLI is missing or failed. See Terminal."
+                        "No listener on 127.0.0.1:8000 after 20 s - see /tmp/phonix-vscode.log in the guest."
                     }
                 )
             }
