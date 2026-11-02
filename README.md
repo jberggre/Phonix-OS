@@ -1,6 +1,6 @@
 # Phonix OS
 
-> **Shipping candidate, 2026-10-31:** `1.5 (versionCode 6)`. It builds, its **77** unit tests pass (12 suites, 0 failures),
+> **Shipping candidate, 2026-10-31:** `1.5 (versionCode 6)`. It builds, its **86** unit tests pass (13 suites, 0 failures),
 > and it is **installed on the bench S10 over the device-owner build** (`adb install -r` → Success;
 > device owner, the bundled Alpine rescue tree and an empty crash buffer all verified by
 > `tools/verify-shipping.sh`). On that unit it renders on a real 1920x1080 HDMI monitor through DeX

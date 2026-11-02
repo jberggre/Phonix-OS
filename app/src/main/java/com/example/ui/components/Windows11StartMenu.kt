@@ -341,6 +341,92 @@ fun Windows11StartMenu(
 
             Spacer(Modifier.height(14.dp))
 
+            // Command palette. The start menu's own search field drives it: this app has no key
+            // event handling anywhere, so a DeX keyboard reaches commands by typing here. Modules
+            // that cannot open are listed with their reason rather than hidden, so a missing guest
+            // reads as a requirement instead of a broken tile.
+            if (searchQuery.isNotBlank()) {
+                val facts = remember(uiState.currentDistro.id, uiState.canRemoveHostPackages) {
+                    com.example.model.ModuleFacts(
+                        guestInstalled = runCatching {
+                            com.example.engine.LinuxRuntime.container(context).isInstalled
+                        }.getOrDefault(false),
+                        isDeviceOwner = uiState.canRemoveHostPackages
+                    )
+                }
+                val hits = remember(searchQuery, facts) {
+                    com.example.model.ModuleRegistry.search(searchQuery, facts)
+                }
+                val blockedHits = remember(searchQuery, facts) {
+                    com.example.model.ModuleRegistry.modules.filter { module ->
+                        com.example.model.ModuleRegistry.matches(searchQuery, module) &&
+                            !module.isAvailable(facts)
+                    }
+                }
+                if (hits.isNotEmpty() || blockedHits.isNotEmpty()) {
+                    Text(
+                        text = "Commands (${hits.size})",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    hits.forEach { module ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    when (module.windowType) {
+                                        WindowType.APP_STORE -> viewModel.openAppStore(context)
+                                        WindowType.SETTINGS -> AppLaunchHelper.launchSettings(context)
+                                        else -> viewModel.toggleWindow(module.windowType)
+                                    }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = ">", color = PhonixCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = module.title,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = module.caveat ?: module.subtitle,
+                                    color = Slate400,
+                                    fontSize = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    blockedHits.forEach { module ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(text = module.title, color = Slate500, fontSize = 11.sp)
+                            Text(
+                                text = module.blockedReason(facts).orEmpty(),
+                                color = Color(0xFFF59E0B),
+                                fontSize = 9.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+
             // 2. Section Header: Pinned vs All Apps Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),

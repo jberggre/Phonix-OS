@@ -447,8 +447,11 @@ already had once. This list matches the tree as it stands.
    app-UID `input` injection.
 7. **Local-model thermals.** The model stays at 1.5B; a 30-minute plugged-in generation soak
    recording tok/s, temperature and `/health` stability is what replaces the unmeasured claim.
-8. **Module registry and three deck layouts.** Declare module capabilities, save layouts per deck,
-   add a keyboard command palette, and delete the dead `PhonixStartMenu` in the same pass.
+8. **Deck layouts (registry and palette shipped 2026-11-02).** `ModuleRegistry` now declares a
+   capability per window type and the dead `PhonixStartMenu` is deleted; the command palette is the
+   start menu's search field, filtered through the registry (VERIFICATION §30, 9 tests). What remains
+   is the deck part: saving, naming and restoring three arrangements, which has no UI and no
+   persistence yet. The palette is `[static]` until someone types in it on a DeX display.
 9. **Pixel 9 Pro Fold matrix.** The APK exists and the unit is pre-flighted, not verified; fold
    simulation is not display routing. Do not enroll device owner on the Pixel.
 10. **OOBE on a spare unit, and the game install URLs.** The bench unit is past setup and a reset is

@@ -496,7 +496,7 @@ names the matrix row that closes it.
 
 Items 1–3 and the live About entry in item 4 landed on 2026-10-29 and were verified on the unit
 (§10). Item 1’s picture and item 2’s model were then replaced by real implementations in §11. The
-dead `PhonixStartMenu` is still present and should be deleted in the registry pass. The remaining
+dead `PhonixStartMenu` is deleted on 2026-11-02 in the registry pass (§30). The remaining
 order is unchanged, starting with window geometry (item 5).
 
 **Do not fix:** the DeX caption bar (no API — measured), kiosk + DeX (Samsung documents they do
@@ -603,7 +603,7 @@ version string.
   no listener appears. The WebView reloads only after success. Header states: “Not listening on
   :8000”, “Waiting for :8000...”, “Listening on 127.0.0.1:8000”.
 - **About is live.** **About Phonix OS** was added to `Windows11StartMenu` with the version/update
-  card entry point. The dead `PhonixStartMenu` was left in place this round; it still has zero call
+  card entry point. The dead `PhonixStartMenu` was left in place on 2026-11-01 and deleted on 2026-11-02 (§30); it still has zero call
   sites and should be deleted when the module registry lands.
 
 ### Checks on the unit
@@ -1778,3 +1778,30 @@ with their version-catalogue entries, the unused Firebase, credentials and Play 
 entries, and `public/assets/aistudio/` (four template screenshots referenced from nowhere). The
 application ID `com.aistudio.phonix.vpxmkr` deliberately stays: it is the installed device owner's
 package name, and renaming it would orphan the provisioning on the bench unit.
+
+## 30. Module registry, command palette, and the dead start menu — 2026-11-02 [static]
+
+`PhonixStartMenu` had one definition and zero call sites since the Windows 11 menu replaced it, so
+the menu a user could reach was never the menu the code described. It is gone: 135 lines, together
+with `StartMenuItem`, which only it consumed.
+
+- **`ModuleRegistry`** declares one `PhonixModule` per `WindowType{}` (18 of them) with the capability
+  it needs — a guest tree, device ownership — and the reason it cannot open when that is missing. A
+  test asserts the mapping is total and one-to-one, so a new window type without a declaration fails
+  the suite instead of quietly vanishing from every surface.
+- **The command palette** is driven by the start menu's own search field, because the app has no key
+  event handling at all (`onKeyEvent`/`onPreviewKeyEvent`: zero matches outside the test and docs
+  tree), and inventing a key binding nobody could press on the phone would be worse than reusing the
+  field a DeX keyboard can already reach. Typing filters available modules into clickable rows and
+  lists blocked ones under their reason, so "vscode" without a guest explains itself.
+- The facts behind availability are measured at the call site: `LinuxContainer.isInstalled` for the
+  guest, `uiState.canRemoveHostPackages` for device ownership, which is true only on a real
+  device-owner install.
+
+Measured: `gradle --no-daemon assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL in 3m03s**,
+**86 unit tests, 0 failures, 13 suites** (77 in 12 before this round; `ModuleRegistryTest`
+adds 9).
+
+**Not measured:** any of it on hardware. No device was reachable from this session, so the palette
+is `[static]` — compiled and unit-tested, never tapped. The deck-layout half of the queue item is
+still open: saving, naming and restoring three deck arrangements has no UI and no persistence yet.
