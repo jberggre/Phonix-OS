@@ -447,8 +447,11 @@ already had once. This list matches the tree as it stands.
 6. **Phone Screen input - only if a touch-less display appears.** Decided read-only on 2026-11-02.
    Control would mean an explicit `AccessibilityService` opt-in with its own disclosure, never
    app-UID `input` injection.
-7. **Local-model thermals.** The model stays at 1.5B; a 30-minute plugged-in generation soak
-   recording tok/s, temperature and `/health` stability is what replaces the unmeasured claim.
+7. **Local-model thermals.** A guard now refuses sustained work at 70 C and warns from 55 C
+   (VERIFICATION §33), but its thresholds are policy defaults, not measurements. The model stays at
+   1.5B, and the 30-minute plugged-in generation soak recording tok/s, temperature and `/health`
+   stability is still what replaces the unmeasured claim — and what would validate or move the
+   thresholds.
 8. **Deck layouts — shipped, unverified on the display.** `ModuleRegistry` declares a capability
    per window type, the dead `PhonixStartMenu` is gone, the command palette is the start menu's own
    search field, and three presets (Workstation, Build, Media) arrange the desktop for whatever

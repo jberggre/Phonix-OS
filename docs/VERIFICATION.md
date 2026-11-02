@@ -1871,3 +1871,35 @@ a physical dock/undock or a process restart that reads the seeded preference; `a
 already-running instance produced no display event, and force-stopping a device owner is not an
 option on this unit. The map is round-trip tested under Robolectric, the identity rules are unit
 tested, and the on-device evidence above is that the desktop still renders on the workspace.
+
+## 33. Thermal guard, and an agent that knows the registry — 2026-11-02 [static]
+
+A 1.5B model at 8-17 tok/s is exactly the load that heats a phone, and nothing stopped a start on a
+phone already hot. [ThermalPolicy] now owns that decision in one place.
+
+- `ThermalReading` comes from the telemetry the app already collects: the hottest readable thermal
+  zone, whether the phone is charging, and whether any sensor answered at all. A missing sensor is
+  `UNKNOWN`, not 0 C, and unknown work proceeds — the honest behaviour for a unit with no zone.
+- Bands: below 55 C OK; 55-70 C WARM (starts, but says so); 70 C and above HOT (refused, with the
+  measured number and the limit in the sentence). Charging moves the warm band down to 48 C.
+- These are policy defaults, not soak measurements. Nothing in this project has run the 30-minute
+  soak the roadmap asks for, so the thresholds are a defensible starting point and are labelled as
+  such in the source. Changing them after a soak is a one-line edit.
+- The gate sits in front of `sendAiMessage` and `importLibraryPack`, the two sustained jobs a user
+  starts by hand, and refuses with a notification instead of silently doing nothing.
+- The shell agent's prompt now carries the module registry: every window type with its capability,
+  and `BLOCKED - <reason>` for the ones the phone cannot open. The prompt states that a blocked
+  module must not be suggested, which removes the class of answer where the agent proposes VS Code
+  on a phone with no guest.
+
+Measured: `gradle --no-daemon assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**, **105
+unit tests, 0 failures, 17 suites** (100 in 16 before this round; `ThermalPolicyTest` adds 5).
+
+Two defects were caught by that suite before this shipped: the charging test expected WARM at 45 C
+while the policy's charging band starts at 48 C, and the caution sentence dropped its "expect it to
+throttle" tail whenever the phone was charging, because `if ... else "" + tail` bound the tail to the
+else branch. Both are fixed; the second is now pinned by an assertion.
+
+**Not measured:** a genuinely hot phone. The guard has never refused a real start, because reaching
+70 C means running the soak this project still owes. It is `[static]`: modelled, unit tested, not
+observed.

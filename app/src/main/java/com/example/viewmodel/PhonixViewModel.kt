@@ -3423,7 +3423,29 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Reads the live thermal telemetry and refuses sustained work on a phone that is too hot.
+     *
+     * The guard exists because a 1.5B model at 8-17 tok/s is exactly the load that heats a phone, and
+     * starting it on a phone already at 74 C is how a battery gets cooked. Absent sensors are not
+     * treated as cool: [com.example.model.ThermalPolicy] returns UNKNOWN and the work proceeds, which
+     * is the honest behaviour when nothing answered.
+     */
+    private fun thermalRefusal(activity: String): String? {
+        val telemetry = _uiState.value.telemetry
+        val reading = com.example.model.ThermalReading(
+            hottestC = telemetry.hottestZoneC.takeIf { telemetry.hasReading },
+            isCharging = telemetry.isCharging,
+            hasReading = telemetry.hasReading
+        )
+        return com.example.model.ThermalPolicy.refusal(reading, activity)
+    }
+
     fun sendAiMessage(prompt: String) {
+        thermalRefusal("Local AI")?.let { message ->
+            _uiState.update { state -> state.copy(notificationMessage = message) }
+            return
+        }
         val trimmed = prompt.trim()
         if (trimmed.isEmpty() || _uiState.value.isAiGenerating) return
         val userMsg = AiChatMessage(
@@ -3582,6 +3604,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * existing library untouched.
      */
     fun importLibraryPack(uri: android.net.Uri) {
+        thermalRefusal("Importing a pack")?.let { message ->
+            _uiState.update { state -> state.copy(notificationMessage = message) }
+            return
+        }
         _uiState.update { it.copy(libraryPackBusy = true) }
         viewModelScope.launch {
             val app = getApplication<Application>()
@@ -3678,6 +3704,19 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         get() {
         val guest = runCatching { LinuxRuntime.container(getApplication<Application>()).activeDistro() }
             .getOrDefault(DistroCatalog.alpine)
+        val moduleFacts = com.example.model.ModuleFacts(
+            guestInstalled = runCatching {
+                LinuxRuntime.container(getApplication<Application>()).isInstalled
+            }.getOrDefault(false),
+            isDeviceOwner = runCatching {
+                com.example.util.HostDebloat.canRemovePackages(getApplication<Application>())
+            }.getOrDefault(false)
+        )
+        val moduleList = com.example.model.ModuleRegistry.modules.joinToString("\n") { module ->
+            val blocked = module.blockedReason(moduleFacts)
+            if (blocked == null) "  ${module.title}: ${module.subtitle}"
+            else "  ${module.title}: BLOCKED - $blocked"
+        }
         return """
         You are Phonix Shell, a command-line agent working inside a ${guest.name} guest on this phone.
         Packages come from ${guest.packageManager}; do not suggest another distro's package manager.
@@ -3688,6 +3727,9 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         Rules: no explanation, no markdown, no code fences, one command per reply. Prefer python3 or sh.
         Use relative paths in the guest home. Never run rm -rf /, mkfs, dd to a device, or anything that
         reboots or wipes the device. Check before you create: use ls and cat first.
+        Windows this app can open on this device (a BLOCKED one cannot be opened at all, so never
+        suggest it; say what is missing instead):
+${moduleList}
     """.trimIndent()
         }
 
