@@ -272,7 +272,14 @@ private fun ShortcutContextMenuView(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = if (shortcut.launchPackage != null) "Host App (${shortcut.launchPackage})" else "Windowed App",
+                        text = when {
+                            shortcut.linuxCommand != null ->
+                                "Linux ${if (shortcut.isLinuxGuiApp) "X11 GUI" else "CLI"} (${shortcut.linuxCommand})"
+                            shortcut.launchPackage != null ->
+                                "Host App (${shortcut.launchPackage})"
+                            else ->
+                                "Windowed App"
+                        },
                         color = Slate400,
                         fontSize = 9.sp
                     )
@@ -593,7 +600,7 @@ private fun WallpaperContextMenuView(
         ) {
             ContextMenuItem(
                 icon = Icons.Default.Add,
-                title = "Add Installed App to Desktop...",
+                title = "Add App or Linux Shortcut to Desktop...",
                 tint = PhonixCyan,
                 onClick = onAddApp
             )

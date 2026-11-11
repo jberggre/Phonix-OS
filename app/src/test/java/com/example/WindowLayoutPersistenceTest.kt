@@ -93,4 +93,34 @@ class WindowLayoutPersistenceTest {
             WindowGeometry.layoutKey(WindowBounds(1920f, 1080f))
         )
     }
+
+    @Test
+    fun `linux command desktop shortcuts round trip through DesktopPrefs`() {
+        val cliShortcut = com.example.model.DesktopShortcut.createFromLinuxCommand(
+            title = "htop",
+            command = "htop",
+            isGuiApp = false,
+            gridCol = 0,
+            gridRow = 1
+        )
+        val guiShortcut = com.example.model.DesktopShortcut.createFromLinuxCommand(
+            title = "GIMP",
+            command = "gimp",
+            isGuiApp = true,
+            gridCol = 1,
+            gridRow = 1
+        )
+        val initial = com.example.model.DesktopCustomization(
+            shortcuts = listOf(cliShortcut, guiShortcut)
+        )
+        DesktopPrefs.save(context, initial)
+
+        val restored = DesktopPrefs.load(context)
+        assertNotNull(restored)
+        assertEquals(2, restored!!.shortcuts.size)
+        assertEquals("htop", restored.shortcuts[0].linuxCommand)
+        assertEquals(false, restored.shortcuts[0].isLinuxGuiApp)
+        assertEquals("gimp", restored.shortcuts[1].linuxCommand)
+        assertEquals(true, restored.shortcuts[1].isLinuxGuiApp)
+    }
 }

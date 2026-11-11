@@ -140,4 +140,157 @@ class ExampleUnitTest {
         assertEquals(64_000_000_000L, state.totalBytes)
         assertEquals(559_000_000L, state.guestBytes)
     }
+
+    @Test
+    fun `linux desktop shortcuts and distro catalog entries are valid`() {
+        val cli = com.example.model.DesktopShortcut.createFromLinuxCommand(
+            title = "htop",
+            command = "htop",
+            isGuiApp = false,
+            gridCol = 0,
+            gridRow = 1
+        )
+        assertEquals("htop", cli.linuxCommand)
+        assertFalse(cli.isLinuxGuiApp)
+        assertEquals(WindowType.TERMINAL, cli.windowType)
+
+        val gui = com.example.model.DesktopShortcut.createFromLinuxCommand(
+            title = "GIMP",
+            command = "gimp",
+            isGuiApp = true,
+            gridCol = 1,
+            gridRow = 1
+        )
+        assertEquals("gimp", gui.linuxCommand)
+        assertTrue(gui.isLinuxGuiApp)
+        assertEquals(WindowType.LINUX_DESKTOP, gui.windowType)
+
+        val distros = com.example.model.DistroCatalog.distros
+        assertEquals(5, distros.size)
+        assertTrue(distros.first().isBundled)
+        assertTrue(distros.filter { !it.isBundled }.all { it.downloadUrl.startsWith("https://") })
+
+        val des = com.example.model.LinuxDesktopEnvironment.entries
+        assertEquals(4, des.size)
+        assertEquals(
+            com.example.model.LinuxDesktopEnvironment.XFCE4,
+            com.example.model.LinuxDesktopEnvironment.fromId("xfce4")
+        )
+    }
+
+    @Test
+    fun `help tab and workstation documentation are searchable in offline library and notes`() {
+        val tabs = com.example.viewmodel.AppNavTab.entries
+        assertTrue(tabs.contains(com.example.viewmodel.AppNavTab.HELP))
+        assertEquals("Help & Docs", com.example.viewmodel.AppNavTab.HELP.title)
+
+        val workstationHits = KnowledgeLibrary.retrieve("how do I use phonix-pin and switch ubuntu xfce distro", KnowledgeCategory.HARDWARE)
+        assertTrue("expected workstation doc in HARDWARE shelf", workstationHits.any { it.id == "hw_phonix_workstation" })
+
+        val distroNote = com.example.model.DefaultAiKnowledge.matchResponse("how to install packages in debian or ubuntu with apt", "Stock", 40f)
+        assertTrue(distroNote.first.contains("Debian 12"))
+        assertTrue(distroNote.first.contains("apt-get"))
+
+        val pinNote = com.example.model.DefaultAiKnowledge.matchResponse("how to pin shortcut with phonix-pin or switch xfce4", "Stock", 40f)
+        assertTrue(pinNote.first.contains("phonix-pin"))
+        assertTrue(pinNote.first.contains("XFCE4"))
+    }
+
+    @Test
+    fun `bundled alpine-rootfs tgz extracts all 83 files and passes symlink-aware shell check`() {
+        val assetCandidates = listOf(
+            java.io.File("src/main/assets/alpine-rootfs.tgz"),
+            java.io.File("app/src/main/assets/alpine-rootfs.tgz")
+        )
+        val assetFile = assetCandidates.firstOrNull { it.isFile }
+        assertNotNull("Expected bundled alpine-rootfs.tgz in assets", assetFile)
+
+        val tempDir = java.nio.file.Files.createTempDirectory("phonix-alpine-test").toFile()
+        try {
+            val extractedCount = assetFile!!.inputStream().use { input ->
+                com.example.engine.TarGzExtractor(input).extractTo(tempDir)
+            }
+            assertEquals("Expected 83 regular files extracted from alpine-rootfs.tgz", 83, extractedCount)
+            assertTrue(
+                "bin/busybox must exist after extraction",
+                com.example.engine.LinuxContainer.guestEntryExists(tempDir, "bin/busybox")
+            )
+            assertTrue(
+                "bin/sh (symlink to /bin/busybox or fallback binary) must be detected by guestEntryExists",
+                com.example.engine.LinuxContainer.guestEntryExists(tempDir, "bin/sh")
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `docker pihole adblock and samba smb are configured in server catalog and offline docs`() {
+        val servers = DefaultServerCatalog.getDefaultServices()
+        val smb = servers.find { it.id == "samba_smb" }
+        assertNotNull("Expected Samba SMB server in DefaultServerCatalog", smb)
+        assertEquals(4445, smb?.port)
+        assertEquals("phonix-smb start", smb?.startHint)
+
+        val adblock = servers.find { it.id == "dnsmasq_adblock" }
+        assertNotNull("Expected Adblock DNS Sinkhole (Pi-hole Engine) in DefaultServerCatalog", adblock)
+        assertEquals(5353, adblock?.port)
+        assertEquals("phonix-adblock start", adblock?.startHint)
+
+        // Verify Chrome appears only once in DebloatCatalog
+        val chromeEntries = DebloatCatalog.getDefaultPackages().filter { it.packageName == "com.android.chrome" }
+        assertEquals("com.android.chrome must appear exactly once in DebloatCatalog", 1, chromeEntries.size)
+
+        // Verify Docker/Pi-hole/SMB knowledge doc and AI note response
+        val dockerHits = KnowledgeLibrary.retrieve("can we run docker pihole and smb filesharing like termux", KnowledgeCategory.HARDWARE)
+        assertTrue("Expected hw_docker_pihole_smb doc in HARDWARE shelf", dockerHits.any { it.id == "hw_docker_pihole_smb" })
+
+        val dockerNote = com.example.model.DefaultAiKnowledge.matchResponse("how to run docker pihole and smb on phonix", "Stock", 40f)
+        assertTrue(dockerNote.first.contains("phonix-smb"))
+        assertTrue(dockerNote.first.contains("phonix-adblock"))
+        assertTrue(dockerNote.first.contains("phonix-docker"))
+    }
+
+    @Test
+    fun `switching x11 desktop environment preserves window manager taskbar and fallback`() {
+        for (de in com.example.model.LinuxDesktopEnvironment.entries) {
+            val script = com.example.engine.LinuxDesktop.buildStartScript(de, forceSwitch = true)
+            // 1. Package install block must appear BEFORE killing the existing window manager
+            val installIdx = script.indexOf("keeping current desktop active during install")
+            val killIdx = script.indexOf("for proc in icewm icewm-session")
+            assertTrue("Install check must precede WM replacement for ${de.id}", installIdx in 0 until killIdx)
+
+            // 2. D-Bus & XDG_RUNTIME_DIR must be configured for PRoot
+            assertTrue(script.contains("XDG_RUNTIME_DIR=/tmp/runtime-root"))
+            assertTrue(script.contains("dbus-uuidgen --ensure"))
+
+            // 3. Fallback to IceWM must always be present if target WM fails to start
+            assertTrue(script.contains("restoring IceWM fallback window manager & taskbar"))
+        }
+
+        val xfceScript = com.example.engine.LinuxDesktop.buildStartScript(
+            com.example.model.LinuxDesktopEnvironment.XFCE4,
+            forceSwitch = true
+        )
+        assertTrue(xfceScript.contains("xfwm4 --replace"))
+        assertTrue(xfceScript.contains("xfce4-panel --disable-wm-check"))
+
+        val openboxScript = com.example.engine.LinuxDesktop.buildStartScript(
+            com.example.model.LinuxDesktopEnvironment.OPENBOX,
+            forceSwitch = true
+        )
+        assertTrue(openboxScript.contains("openbox --replace"))
+        assertTrue(openboxScript.contains("tint2 -c /root/.config/tint2/tint2rc"))
+
+        val lxqtScript = com.example.engine.LinuxDesktop.buildStartScript(
+            com.example.model.LinuxDesktopEnvironment.LXQT,
+            forceSwitch = true
+        )
+        assertTrue(lxqtScript.contains("openbox --replace"))
+        assertTrue(lxqtScript.contains("lxqt-panel"))
+        assertTrue(lxqtScript.contains("tint2 -c /root/.config/tint2/tint2rc"))
+    }
 }
+
+
+

@@ -1,7 +1,6 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -65,11 +64,7 @@ fun ServerCenterScreen(
     viewModel: PhonixViewModel,
     modifier: Modifier = Modifier
 ) {
-    LaunchedEffect(Unit) {
-        viewModel.refreshServerStates()
-        // Declarations can change while the app runs; the Hub is where they are visible.
-        viewModel.reloadModuleManifests()
-    }
+    LaunchedEffect(Unit) { viewModel.refreshServerStates() }
     val ip = uiState.localIpAddress
     val uptimeHours = uiState.uptimeSeconds / 3600
     val uptimeMins = (uiState.uptimeSeconds % 3600) / 60
@@ -99,30 +94,6 @@ fun ServerCenterScreen(
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Refresh", fontSize = 11.sp)
-            }
-        }
-
-        // Manifests are data, so their failures have to be visible where the services they declare
-        // live. A rejected file that only reached logcat would look like a manifest that did nothing.
-        if (uiState.manifests.manifests.isNotEmpty() || uiState.manifests.issues.isNotEmpty()) {
-            Card(colors = CardDefaults.cardColors(containerColor = Slate900), shape = RoundedCornerShape(10.dp)) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "Module manifests: ${uiState.manifests.manifests.size} accepted, " +
-                            "${uiState.manifests.issues.size} rejected",
-                        color = if (uiState.manifests.issues.isEmpty()) PhonixCyan else PhonixAmber,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    uiState.manifests.issues.forEach { issue ->
-                        Text(
-                            text = issue.toString(),
-                            color = Slate400,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
             }
         }
 
@@ -218,47 +189,58 @@ fun ServerCenterScreen(
                     }
 
                     Text(
-                        text = when {
-                            service.apkPackage.isBlank() && service.port > 0 ->
-                                "port ${service.port} · ${service.category} · no apk package"
-                            service.port > 0 ->
-                                "port ${service.port} · ${service.category} · apk package: ${service.apkPackage}"
-                            else -> "no port · ${service.category} · process-only probe"
-                        },
+                        text = "port ${service.port} (${service.protocol}) · ${service.category} · pkg: ${service.apkPackage}",
                         color = Slate400,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
+                    if (ip.isNotBlank() && service.isRunning) {
+                        Text(
+                            text = "Endpoint: ${service.endpoint(ip)}",
+                            color = PhonixGreen,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Text(service.description, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
-
-                    // Supervision is opt-in and its state is probe-derived: the line says what was
-                    // observed, and tapping it starts or stops the restart policy.
-                    val supervisionLine = uiState.supervision[service.id]
-                    Text(
-                        text = supervisionLine?.let { "$it - tap to stop supervising" }
-                            ?: "Not supervised - tap to keep it running",
-                        color = if (supervisionLine == null) Slate400 else PhonixCyan,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clickable {
-                            viewModel.toggleServiceSupervision(service.id)
-                        }
-                    )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = { viewModel.toggleServerService(service.id) },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (service.isInstalled) Slate800 else PhonixAmber
+                                containerColor = when {
+                                    service.isRunning -> Slate800
+                                    service.isInstalled -> PhonixGreen
+                                    else -> PhonixAmber
+                                }
                             ),
                             modifier = Modifier.height(30.dp)
                         ) {
                             Text(
-                                text = if (service.isInstalled) "Show start command" else "Install package",
-                                color = if (service.isInstalled) Color.White else Color.Black,
+                                text = when {
+                                    service.isRunning -> "Stop Daemon"
+                                    service.isInstalled -> "Start on :${service.port}"
+                                    else -> "Install & Start"
+                                },
+                                color = if (service.isRunning) Color.White else Color.Black,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                        if (service.id == "dnsmasq_adblock") {
+                            Button(
+                                onClick = {
+                                    viewModel.runServerHelperCommand(
+                                        "phonix-adblock update",
+                                        "Updating StevenBlack Pi-hole hosts list in guest..."
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("Pull 130k+ Hosts", fontSize = 10.sp)
+                            }
                         }
                         Button(
                             onClick = { viewModel.toggleWindow(WindowType.TERMINAL) },
@@ -269,47 +251,81 @@ fun ServerCenterScreen(
                         }
                     }
 
-                    if (service.isInstalled) {
-                        Text(
-                            text = service.startHint,
-                            color = PhonixCyan,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
+                    Text(
+                        text = "CLI: ${service.startHint}",
+                        color = PhonixCyan,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
             }
         }
 
+        // Termux-Style Docker (udocker & QEMU VM) + Port Mapping Lab
         Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1B08)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1F33)),
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, PhonixAmber.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                .border(1.dp, PhonixCyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
             shape = RoundedCornerShape(10.dp)
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Info, contentDescription = null, tint = PhonixAmber, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Info, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Some servers cannot run here", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("Termux-Style Docker, Pi-hole & SMB on Unrooted Android", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Text(
-                    "Pi-hole (DNS port 53) and SMB file sharing (port 445) are missing from this list " +
-                        "on purpose. Both need a privileged port below 1024, and Android does not let an " +
-                        "app - even one running this container - bind those without root. Installing " +
-                        "the package would look like it worked and then fail to listen. The Privacy Hub " +
-                        "walks through running Pi-hole on a spare Pi or old PC instead.",
+                    "1. SMB File Sharing (Port 4445): Unrooted Android blocks ports < 1024 (like standard SMB port 445). " +
+                        "Phonix runs real Samba (smbd) on port 4445 via `phonix-smb start`, sharing `/root/shared` at " +
+                        "`smb://${ip.ifBlank { "<LAN-IP>" }}:4445/phonix` (works in macOS Finder, Linux Files, VLC, Kodi, Solid Explorer, and `smbclient -p 4445`).",
                     color = Slate300,
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp
                 )
-                Button(
-                    onClick = { viewModel.toggleWindow(WindowType.PRIVACY) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Slate800),
-                    modifier = Modifier.height(30.dp)
-                ) {
-                    Text("Open Privacy Hub", fontSize = 11.sp)
+                Text(
+                    "2. Pi-hole Engine (`dnsmasq` on Port 5353): Official Pi-hole's installer requires systemd and privileged port 53, " +
+                        "but its core DNS sinkhole engine is `dnsmasq`. `phonix-adblock start` runs real `dnsmasq` on port 5353 with " +
+                        "StevenBlack's 130,000+ ad/tracker hosts list. Point a router's DNS port-forward (53 -> 5353) or test with " +
+                        "`nslookup doubleclick.net 127.0.0.1 -port=5353`.",
+                    color = Slate300,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp
+                )
+                Text(
+                    "3. Running Docker in Termux / PRoot: Native `dockerd` needs kernel cgroups and mount namespaces that unrooted Android " +
+                        "blocks inside PRoot. Just like in Termux, you have two real ways to run Docker containers here:\n" +
+                        "• `udocker` (Rootless OCI Engine): Pulls and runs Docker Hub images directly inside PRoot with zero VM overhead.\n" +
+                        "• `qemu-system-aarch64` (Full Kernel VM): Boots an Alpine/Debian virtual machine with its own kernel to run native `dockerd` and `docker compose`.",
+                    color = Slate300,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            viewModel.runServerHelperCommand(
+                                "phonix-docker setup-udocker",
+                                "Installing udocker rootless OCI container engine — watch Terminal"
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PhonixCyan),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Setup udocker (PRoot)", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = {
+                            viewModel.runServerHelperCommand(
+                                "phonix-docker setup-qemu",
+                                "Installing QEMU AArch64 VM for native dockerd — watch Terminal"
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PhonixAmber),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Setup QEMU Docker VM", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -325,13 +341,12 @@ fun ServerCenterScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Info, contentDescription = null, tint = Slate400, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Why install instead of toggle", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("Live Process Verification", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Text(
-                    "There is no service manager in this container: proot has no init, so a daemon is " +
-                        "just a process you start. Installing the package here runs the real apk command; " +
-                        "starting it is yours to do, and the state shown above comes from actually finding " +
-                        "the process.",
+                    "There is no systemd init inside PRoot: every server above is a real user-space daemon " +
+                        "started in the guest and verified via `pidof`. You can also control them from any " +
+                        "terminal tab using `phonix-smb`, `phonix-adblock`, and `phonix-docker`.",
                     color = Slate300,
                     fontSize = 11.sp,
                     lineHeight = 16.sp

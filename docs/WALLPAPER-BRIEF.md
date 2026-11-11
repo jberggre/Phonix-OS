@@ -24,8 +24,9 @@ image files are required for any of them, and none of them claims to be a photog
 
 ### Naming and honesty rules
 
-- A preset may only name software the app actually runs. "Alpine" is fair; "Ubuntu" is not,
-  because there is no Ubuntu rootfs in the box.
+- A preset may only name software the app ships bundled out of the box. "Alpine" is fair because
+  Alpine 3.24 ships inside the APK (`assets/alpine-rootfs.tgz`); Debian, Ubuntu, and Arch are
+  downloaded on demand when selected by the user rather than bundled in the APK.
 - No preset may imply a capability: no fake terminals printing commands nobody ran, no fake
   desktop icons, no "root" prompt on a screen where the guest is stopped. The Terminal Green
   wallpaper is wallpaper — it is a static prompt, and the caption is a list of real commands, not

@@ -15,27 +15,27 @@ enum class MiniPcProfile(val title: String, val subtitle: String, val descriptio
     EVERYDAY_DESKTOP(
         title = "Everyday Workstation",
         subtitle = "Office, Web & Media",
-        description = "Balanced CPU frequency, hardware-accelerated Chrome, file management, and streaming media."
+        description = "Keeps the Linux subsystem enabled, selects the stock passive cooling guide, and trims only analytics/carrier telemetry."
     ),
     HOMELAB_SERVER(
         title = "Homelab & Linux Server",
         subtitle = "Headless 24/7 Appliance",
-        description = "Stripped GUI overhead, automated service restarts, SSH/FTP server stacks, and PRoot containers."
+        description = "Enables the Linux subsystem for SSH/HTTP/Git daemons, selects the continuous server cooling guide, and pre-selects the full host trim list."
     ),
     GAMING_EMULATION(
         title = "Retro Gaming & Emulation",
-        subtitle = "Peak GPU Clocks",
-        description = "Unthrottled GPU governor, Turnip/VirGL drivers, gamepad mapping, and active cooling fan profile."
+        subtitle = "Android Games & Emulators",
+        description = "Selects the heatsink & fan cooling guide and pre-selects the full host trim list (including Samsung GOS) to free up RAM."
     ),
     MINIMAL_LEAN(
         title = "Ultra-Lean Zero Bloat",
         subtitle = "Max Storage & Free RAM",
-        description = "Bypasses all non-essential phone services to maximize flash longevity and RAM for heavy multitasking."
+        description = "Skips the Linux guest container by default and pre-selects the full host trim list to maximize internal flash storage."
     ),
     CYBERDECK_DEV(
         title = "Cyberdeck & Developer Station",
-        subtitle = "Terminal, VS Code, Python & AI",
-        description = "Full Linux development toolchain with offline AI assistant and Alpine musl compilers."
+        subtitle = "Terminal, X11 Desktop, Python & AI",
+        description = "Enables the Linux subsystem, X11 desktop window, and offline AI knowledge vault with the full host trim list."
     )
 }
 
@@ -176,7 +176,9 @@ data class OobeSetupConfig(
         AppCategory.APP_STORE,
         AppCategory.LINUX_TERMINAL
     ),
-    val enableLinuxDesktop: Boolean = false,
+    val enableLinuxDesktop: Boolean = true,
+    val selectedDistroId: String = "alpine",
+    val selectedDe: LinuxDesktopEnvironment = LinuxDesktopEnvironment.ICEWM,
     val preferredBrowser: PreferredBrowser = PreferredBrowser.PHONIX_BROWSER,
     val debloatChrome: Boolean = false,
     val enableAggressiveDebloat: Boolean = true,

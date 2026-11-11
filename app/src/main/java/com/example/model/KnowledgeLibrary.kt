@@ -414,13 +414,50 @@ object KnowledgeLibrary {
                 • git log --oneline, git diff, git checkout -- file
                 • A local repo is a real backup only if it lives on a different disk or is pushed elsewhere.
 
-                PACKAGES (Alpine)
-                • apk update, apk add <pkg>, apk del <pkg>, apk search <term>
+                PACKAGES (Multi-distro: Alpine apk, Debian/Ubuntu apt, Arch pacman)
+                • Alpine (bundled default): apk update && apk add <pkg>, apk del <pkg>, apk search <term>
+                • Debian 12 / Ubuntu 24.04 / Kali: apt-get update && apt-get install -y <pkg>, apt-cache search <term>
+                • Arch Linux ARM: pacman -Sy --noconfirm <pkg>, pacman -Ss <term>
+
+                PINNING SHORTCUTS TO PHONIX DESKTOP (phonix-pin)
+                • CLI command shortcut: phonix-pin "My Script" "python3 /root/app.py"
+                • X11 GUI app shortcut: phonix-pin "Firefox" "firefox" --gui
             """.trimIndent(),
             command = "python3 -m http.server 8080"
         ),
 
         // ---------------- HARDWARE ----------------
+        KnowledgeDoc(
+            id = "hw_phonix_workstation",
+            category = KnowledgeCategory.HARDWARE,
+            title = "Phonix Linux distros, X11 desktops & terminal shortcuts",
+            summary = "Switching Alpine/Debian/Ubuntu/Arch, IceWM/XFCE4/Openbox/LXQt on DISPLAY=:1, and phonix-pin.",
+            keywords = listOf("distro", "alpine", "debian", "ubuntu", "arch", "kali", "apk", "apt", "pacman", "x11", "xfce", "icewm", "openbox", "lxqt", "pin", "shortcut", "phonix-pin", "terminal", "help"),
+            body = """
+                MULTI-DISTRO PROOT RUNTIME
+                • Alpine Linux 3.24 ships bundled inside the APK (assets/alpine-rootfs.tgz) and extracts offline.
+                • Debian 12, Ubuntu 24.04 LTS, Arch Linux ARM, and Kali Linux stream over HTTPS on demand when selected in the Setup Wizard or Linux System Hub, extracting into filesDir/linux/<distroId>.
+                • Package managers: Alpine uses apk, Debian/Ubuntu/Kali use apt-get, and Arch uses pacman.
+
+                X11 DESKTOP ENVIRONMENTS (DISPLAY=:1)
+                • Phonix runs Xvfb (:1, 1280x720x24) + x11vnc (:5900) + websockify (:6080) inside the Linux Desktop window.
+                • Switch window managers live in the Linux Desktop header:
+                  - IceWM (~35 MB RAM, lightweight taskbar)
+                  - XFCE4 (~140 MB RAM, full desktop panel & session)
+                  - Openbox (~25 MB RAM, minimal window manager)
+                  - LXQt (~110 MB RAM, modern Qt desktop)
+
+                TERMINAL TABS, EXTRA KEYS & PIPE BOUNDARY
+                • Use '+' in the Terminal header to open multiple independent shell tabs.
+                • Extra keys bar: ↑/↓ history, TAB path/command completion, Ctrl+C (pkill active job), Ctrl+D (exit/close tab).
+                • The main Terminal runs /bin/sh over standard pipes; run full-screen curses TUIs (htop, vim, nano) inside '+ xterm' in the Linux Desktop (X11) window.
+
+                PINNING DESKTOP SHORTCUTS
+                • Run 'phonix-pin "<Title>" "<cmd>" [--gui]' in Terminal, click the auto-detected Pin banner after apk/apt/pacman install, or right-click the desktop -> '+ Pin App to Desktop'.
+            """.trimIndent(),
+            command = "phonix-pin --help",
+            tier = KnowledgeTier.LIGHTWEIGHT
+        ),
         KnowledgeDoc(
             id = "hw_thermal",
             category = KnowledgeCategory.HARDWARE,
@@ -439,16 +476,44 @@ object KnowledgeLibrary {
                 • Do not stack the board on fabric; the back panel is part of the heatsink.
 
                 SERVERS IN THE GUEST
-                • The Alpine userland is unrooted, so bind to ports >= 1024: 8080 for nginx, 3000 for Node.
-                • apk add nginx, then nginx -c /etc/nginx/nginx.conf
-                • Check it from outside: curl -I http://127.0.0.1:8080
+                • The Linux userland is unrooted, so bind to ports >= 1024: 8088 for nginx, 2222 for Dropbear SSH, 8000 for Python HTTP.
+                • Check it from outside: curl -I http://127.0.0.1:8088
                 • A port answering on 127.0.0.1 is not the same as reachable from the LAN; bind 0.0.0.0 for that.
 
                 CPU AND MEMORY
-                • htop, or: top -b -n1 | head -20
+                • top -b -n1 | head -20 (or run interactive htop inside '+ xterm' on the X11 Linux Desktop)
                 • Per-core load: cat /proc/loadavg
             """.trimIndent(),
             command = "cat /sys/class/thermal/thermal_zone0/temp",
+            tier = KnowledgeTier.LIGHTWEIGHT
+        ),
+        KnowledgeDoc(
+            id = "hw_docker_pihole_smb",
+            category = KnowledgeCategory.HARDWARE,
+            title = "Docker, Pi-hole Adblock & Samba SMB on unrooted Android",
+            summary = "Running phonix-smb (:4445), phonix-adblock (:5353), udocker, and QEMU Linux VM.",
+            keywords = listOf("docker", "udocker", "qemu", "pihole", "pi-hole", "adblock", "dns", "dnsmasq", "smb", "samba", "nas", "share", "termux", "container"),
+            body = """
+                1. SAMBA SMB FILE SHARING (phonix-smb on port 4445)
+                • Standard SMB port 445 is privileged (<1024). Phonix binds real smbd to port 4445 and shares /root/shared.
+                • Install & start: install 'samba' in Server Center (or 'apk add samba') and run 'phonix-smb start'.
+                • Connect from Windows/macOS/Linux/Android: smb://<LAN-IP>:4445/phonix (guest access enabled).
+
+                2. PI-HOLE DNS SINKHOLE ENGINE (phonix-adblock on port 5353)
+                • Standard Pi-hole's curl|bash installer requires systemd and port 53, which unrooted PRoot does not provide.
+                • However, Pi-hole's actual DNS sinkhole engine is dnsmasq + a hosts blocklist, which runs natively in PRoot via 'phonix-adblock':
+                  - 'phonix-adblock start' starts dnsmasq on port 5353 using /etc/phonix-adblock.hosts.
+                  - 'phonix-adblock update' downloads 130,000+ ad/tracker domains from StevenBlack's unified hosts list and reloads dnsmasq.
+
+                3. DOCKER IN UNROOTED PROOT (phonix-docker: udocker vs QEMU VM)
+                • Native 'dockerd' requires Linux kernel cgroups, mount namespaces, and overlayfs (blocked on unrooted Android).
+                • Option A — Rootless OCI Container Runner (udocker):
+                  Run 'phonix-docker setup-udocker' to install udocker inside PRoot, then pull & run Docker Hub images without a kernel daemon:
+                  'udocker pull alpine:latest && udocker run alpine:latest uname -a'
+                • Option B — Full Linux Kernel VM (qemu-system-aarch64):
+                  Run 'phonix-docker setup-qemu' to install QEMU ARM64 and create /root/docker-vm/start-vm.sh with port forwarding (2223->22, 8090->80, 9000->9000) for native dockerd and docker compose.
+            """.trimIndent(),
+            command = "phonix-docker --help",
             tier = KnowledgeTier.LIGHTWEIGHT
         ),
 

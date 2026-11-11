@@ -35,15 +35,16 @@ Limits worth repeating to customers:
 - The chosen resolver sees every lookup. It is a trade of one intermediary for another.
 - Private DNS applies to this phone only.
 
-## Local AI and Phone Screen
+## Local AI, Optional Distro Downloads, and Phone Screen
 
-These are the two features that touch sensitive data, so the boundaries are explicit:
+These are the features that touch sensitive data or make explicit opt-in network requests, so the boundaries are explicit:
 
 - **Local AI:** the question, system prompt and streamed answer stay on the phone. `llama-server`
-  binds `127.0.0.1:8081`; there is no cloud AI key and no external inference call. The one network
+  binds `127.0.0.1:8081` (or `:8080`); there is no cloud AI key and no external inference call. The one network
   request is the **model download** from Hugging Face when the customer taps Set up. The model is
   stored app-privately and can be deleted by clearing Phonix’s data (or the in-app reset). The
   curated notes are sent to the local model only as context; they do not leave the device.
+- **Linux Distributions:** **Alpine Linux 3.24** ships bundled inside the APK (`assets/alpine-rootfs.tgz`) and unpacks completely offline with zero network calls. If the user explicitly chooses **Debian 12**, **Ubuntu 24.04 LTS**, **Arch Linux ARM**, or **Kali Linux** in the Setup Wizard or Linux System tab, Phonix downloads the official ARM64 rootfs tarball over HTTPS (`images.linuxcontainers.org`, `cdimage.ubuntu.com`, or `os.archlinuxarm.org`) into `filesDir/linux/<distroId>`. No telemetry or user identifiers are sent during rootfs or package downloads (`apk`, `apt-get`, `pacman`).
 - **Phone Screen:** `MediaProjection` captures the default display and writes it only to the
   in-process frame state used by the Phone Screen window. It is read-only, shows Android’s
   mandatory capture-consent dialog, and is stopped when the window closes. There is no recording,

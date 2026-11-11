@@ -203,6 +203,10 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                                         uiState = uiState,
                                         viewModel = viewModel
                                     )
+                                    AppNavTab.HELP -> com.example.ui.components.HelpDocsScreen(
+                                        uiState = uiState,
+                                        viewModel = viewModel
+                                    )
                                 }
                             }
 

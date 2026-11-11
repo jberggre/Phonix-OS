@@ -177,39 +177,76 @@ object DefaultAiKnowledge {
                     "cat /sys/class/thermal/thermal_zone0/temp"
                 )
             }
+            lower.contains("distro") || lower.contains("alpine") || lower.contains("debian") || lower.contains("ubuntu") || lower.contains("arch") || lower.contains("kali") || lower.contains("apk") || lower.contains("apt") || lower.contains("pacman") -> {
+                Pair(
+                    "🐧 [MULTI-DISTRO LINUX & PACKAGE MANAGERS]\n\n" +
+                    "• Alpine Linux 3.24 (Bundled Default): Ships inside the APK for instant offline extraction. Package manager: 'apk update && apk add <pkg>'.\n" +
+                    "• Debian 12 (Bookworm) & Ubuntu 24.04 LTS (Noble): Streamed over HTTPS on demand when selected in Setup Wizard or Linux System Hub. Package manager: 'apt-get update && apt-get install -y <pkg>'.\n" +
+                    "• Arch Linux ARM: Streamed over HTTPS on demand. Package manager: 'pacman -Sy --noconfirm <pkg>'.\n" +
+                    "• Kali Linux Rolling: Uses Debian ARM64 base + apt.",
+                    "cat /etc/os-release | head -n 6"
+                )
+            }
+            lower.contains("pin") || lower.contains("shortcut") || lower.contains("phonix-pin") || lower.contains("x11") || lower.contains("xfce") || lower.contains("icewm") || lower.contains("openbox") || lower.contains("lxqt") -> {
+                Pair(
+                    "🖥️ [DESKTOP SHORTCUTS & X11 DESKTOP ENVIRONMENTS]\n\n" +
+                    "1. Pinning Shortcuts to Phonix Desktop:\n" +
+                    "• Terminal CLI: run 'phonix-pin \"My App\" \"<command>\" [--gui]'.\n" +
+                    "• Auto-Banner: after installing a package with apk/apt/pacman, click 'Pin to Desktop' on the banner above the terminal input.\n" +
+                    "• Desktop Menu: right-click (or long-press) the desktop -> '+ Pin App to Desktop'.\n\n" +
+                    "2. X11 Desktop Environments (DISPLAY=:1):\n" +
+                    "• Switch between IceWM (~35 MB RAM), XFCE4 (~140 MB RAM), Openbox (~25 MB RAM), and LXQt (~110 MB RAM) using the selector chips in the Linux Desktop window header.",
+                    "phonix-pin --help"
+                )
+            }
+            lower.contains("docker") || lower.contains("udocker") || lower.contains("qemu") || lower.contains("pihole") || lower.contains("pi-hole") || lower.contains("adblock") || lower.contains("smb") || lower.contains("samba") || lower.contains("nas") -> {
+                Pair(
+                    "🐳 [DOCKER, PI-HOLE DNS SINKHOLE & SAMBA SMB ON UNROOTED ANDROID]\n\n" +
+                    "1. Samba SMB File Sharing (Port 4445):\n" +
+                    "• Real 'smbd' runs natively inside PRoot on unprivileged port 4445 sharing '/root/shared'.\n" +
+                    "• Start from Server Suite or run: 'phonix-smb start' -> connect to smb://<LAN-IP>:4445/phonix.\n\n" +
+                    "2. Pi-hole DNS Sinkhole Engine (Port 5353):\n" +
+                    "• Standard Pi-hole's installer requires systemd + port 53, but its core engine (dnsmasq + hosts sinkhole) runs natively via 'phonix-adblock start' on port 5353.\n" +
+                    "• Pull 130,000+ ad/tracker domains from StevenBlack's unified list with: 'phonix-adblock update'.\n\n" +
+                    "3. Docker on Unrooted Android (Two Termux-Style Approaches):\n" +
+                    "• Fast Rootless Containers (udocker): Run 'phonix-docker setup-udocker' to pull & run Docker Hub images directly in PRoot ('udocker run hello-world').\n" +
+                    "• Full Kernel Docker Daemon (QEMU VM): Run 'phonix-docker setup-qemu' to install 'qemu-system-aarch64' and boot a virtual Linux kernel with cgroups for native 'dockerd' and 'docker compose'.",
+                    "phonix-docker --help"
+                )
+            }
             lower.contains("server") || lower.contains("nginx") || lower.contains("port") || lower.contains("http") -> {
                 Pair(
-                    "Alpine userland is unrooted, so servers must bind to ports >= 1024. Nginx is pre-configured on port 8080 and Node.js microservices on port 3000.",
-                    "apk add nginx && nginx -c /etc/nginx/nginx.conf"
+                    "Linux userland runs unrooted via PRoot, so servers bind to ports >= 1024: Nginx on :8088, Dropbear SSH on :2222, Samba SMB on :4445, Adblock DNS Sinkhole on :5353, Python HTTP on :8000, Redis on :6379, MariaDB on :3306, and Mosquitto on :1883.",
+                    "python3 -m http.server 8000"
                 )
             }
             lower.contains("debloat") || lower.contains("chrome") || lower.contains("samsung") -> {
                 Pair(
-                    "To debloat Google Chrome and OEM background telemetry for pure privacy, run the pm disable-user command via adb or shell.",
-                    "pm disable-user --user 0 com.android.chrome"
+                    "To debloat OEM background packages without root, use System Debloater to open Android App Info or run the generated 'adb shell pm uninstall -k --user 0 <pkg>' script from a computer (or directly if Phonix is Device Owner).",
+                    "echo 'Use System Debloater window or ADB: pm uninstall -k --user 0 <package>'"
                 )
             }
             lower.contains("fan") || lower.contains("cooling") -> {
                 Pair(
-                    "Active cooling profile is set to $coolingModeName. Because the battery has been removed for direct DC power, continuous charging heat is completely eliminated.",
-                    "echo 'Active cooling operational'"
+                    "Active cooling profile is set to $coolingModeName. In Thermals & Power, you can monitor live thermal zones and configure direct DC power behavior.",
+                    "cat /sys/class/thermal/thermal_zone0/temp"
                 )
             }
             lower.contains("vscode") || lower.contains("ide") -> {
                 Pair(
-                    "VS Code Web needs Microsoft's Alpine arm64 CLI and a working serve-web listener on port 8000. The VS Code window probes that port and reports a failure if nothing answers; the base Alpine image does not include the CLI.",
+                    "VS Code Web needs Microsoft's ARM64 CLI (or Python HTTP fallback) listening on port 8000. The VS Code window probes 127.0.0.1:8000 and only turns green when a socket answers.",
                     "code serve-web --host 127.0.0.1 --port 8000 --without-connection-token &"
                 )
             }
             lower.contains("htop") || lower.contains("top") || lower.contains("cpu") || lower.contains("ram") -> {
                 Pair(
-                    "Snapdragon 855 octa-core CPU and 8GB RAM can be monitored in real-time using htop in the terminal.",
-                    "htop"
+                    "Monitor CPU and RAM in the main pipe terminal with 'top -b -n1 | head -20' or 'free -m'. For interactive full-screen htop, launch '+ xterm' inside the Linux Desktop (X11) window.",
+                    "top -b -n1 | head -n 15"
                 )
             }
             else -> {
                 Pair(
-                    "This is the rule-based Phonix offline knowledge base, not a language model. It matches topics against built-in notes on this device.\n\nAvailable topics:\n• 'survival' - Rule of 3s, shelter, fire, navigation\n• 'water' - Boiling, DIY sand/charcoal filtration, SODIS\n• 'first aid' - Bleeding, tourniquets, ORS rehydration, burns\n• 'farming' - Calorie crops, composting 3:1, seed saving\n• 'radio' - Emergency VHF/UHF/CB frequencies, mesh comms\n• 'power' - 12V to 5V buck converters, solar sizing\n• 'coding' - Python, Bash, C compiler, offline git\n• 'thermal' - Motherboard temps & cooling status",
+                    "This is the rule-based Phonix offline knowledge base, not a language model. It matches topics against built-in notes on this device.\n\nAvailable topics:\n• 'distro' - Alpine (apk), Debian/Ubuntu (apt), Arch (pacman) & switching\n• 'pin' / 'x11' - phonix-pin desktop shortcuts & IceWM/XFCE4/Openbox/LXQt\n• 'survival' - Rule of 3s, shelter, fire, navigation\n• 'water' - Boiling, DIY sand/charcoal filtration, SODIS\n• 'first aid' - Bleeding, tourniquets, ORS rehydration, burns\n• 'farming' - Calorie crops, composting 3:1, seed saving\n• 'radio' - Emergency VHF/UHF/CB frequencies, mesh comms\n• 'power' - 12V to 5V buck converters, solar sizing\n• 'coding' - Python, Bash, C compiler, offline git\n• 'thermal' - Motherboard temps & cooling status",
                     "uname -a"
                 )
             }

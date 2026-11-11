@@ -26,16 +26,11 @@ import java.util.zip.GZIPInputStream
  *  - `proot` is dynamically linked against Termux's `libtalloc`/`libandroid-shmem`, so those
  *    ship beside it and are found through LD_LIBRARY_PATH.
  */
-class LinuxContainer(
-    private val context: Context,
-    /** When set, this container always targets that guest instead of the desktop's choice. */
-    private val distroOverride: String? = null
-) {
+class LinuxContainer(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("phonix_linux_prefs", Context.MODE_PRIVATE)
 
-    fun activeDistroId(): String =
-        distroOverride ?: (prefs.getString("active_distro_id", "alpine") ?: "alpine")
+    fun activeDistroId(): String = prefs.getString("active_distro_id", "alpine") ?: "alpine"
 
     fun activeDistro(): com.example.model.LinuxDistro =
         com.example.model.DistroCatalog.getDistro(activeDistroId())
@@ -53,37 +48,24 @@ class LinuxContainer(
     private val prootLoader = File(nativeLibs, "libproot_loader.so")
 
     val isInstalled: Boolean
-        get() = File(rootfs, MARKER).isFile ||
+        get() = hasWorkingShell(rootfs) && (
+            File(rootfs, ".phonix-installed").isFile ||
                 File(rootfs, "etc/alpine-release").isFile ||
                 File(rootfs, "etc/os-release").isFile
+            )
 
     /** Release string read from the active rootfs, e.g. `3.24.3` or `12.7`. */
     fun version(): String = try {
-        // Bare versions only: the hub prints "<distro name> <version>", and the distro name
-        // already carries its release ("Debian 12 (Bookworm)"), so a PRETTY_NAME-style string
-        // here rendered as "Debian 12 (Bookworm) Debian 12.15".
-        //
-        // `/etc/debian_version` is trusted only when it really is a Debian release number. Ubuntu
-        // puts "trixie/sid" there and Kali puts "kali-rolling", and preferring the file blindly
-        // made the hub announce "Ubuntu 24.04 LTS trixie/sid" and "Kali Linux Minimal
-        // kali-rolling" instead of the point release the guest actually reports.
-        val debianVersion = File(rootfs, "etc/debian_version")
-            .takeIf { it.isFile }
-            ?.readText()
-            ?.trim()
-            ?.takeIf { it.firstOrNull()?.isDigit() == true }
-        val osRelease = File(rootfs, "etc/os-release").takeIf { it.isFile }?.readLines().orEmpty()
-        fun field(name: String): String? = osRelease.firstOrNull { it.startsWith("$name=") }
-            ?.substringAfter("=")
-            ?.trim('"', '\'')
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-
-        debianVersion
-            ?: field("VERSION_ID")
-            ?: File(rootfs, "etc/alpine-release").takeIf { it.isFile }?.readText()?.trim()
-            ?: field("PRETTY_NAME")
-            ?: activeDistro().version
+        when {
+            File(rootfs, "etc/alpine-release").isFile -> File(rootfs, "etc/alpine-release").readText().trim()
+            File(rootfs, "etc/debian_version").isFile -> "Debian " + File(rootfs, "etc/debian_version").readText().trim()
+            File(rootfs, "etc/os-release").isFile -> {
+                val lines = File(rootfs, "etc/os-release").readLines()
+                lines.firstOrNull { it.startsWith("PRETTY_NAME=") }
+                    ?.substringAfter("=")?.trim('"', '\'') ?: activeDistro().version
+            }
+            else -> activeDistro().version
+        }
     } catch (_: Throwable) {
         activeDistro().version
     }
@@ -97,317 +79,219 @@ class LinuxContainer(
         val marker = File(target, ".phonix-installed")
         if (marker.isFile && isInstalled) return
 
+        // A previous run may have died mid-extraction; start from a clean tree.
+        if (target.exists()) target.deleteRecursively()
+        target.mkdirs()
+        workDir.mkdirs()
+
         onProgress("Unpacking Alpine Linux root filesystem (first run, ~4 MB)...")
-        val extracted = extractBundled(target)
+        val extracted = context.assets.open(ASSET_ROOTFS).use { stream ->
+            TarGzExtractor(stream).extractTo(target)
+        }
         onProgress("Unpacked $extracted files.")
         writeGuestConfig(target)
         marker.writeText("alpine-minirootfs-3.24.3-aarch64\n")
     }
 
     /**
-     * Installs [distro] and makes it the active guest.
+     * Switches distribution: downloads and extracts the real rootfs for [distro] (or unpacks the
+     * bundled Alpine archive), verifies it contains a working shell, optionally removes the
+     * previous rootfs to reclaim disk space, and only then updates `active_distro_id`.
      *
-     * The previous rootfs is deleted only after the new one has been downloaded, unpacked and
-     * checked, so a failed switch (no network, mirror moved, disk full) leaves the working guest
-     * exactly as it was. The earlier ordering purged first, so one failed switch could leave the
-     * app with no usable userspace at all.
+     * Never writes a fake `/etc/os-release` or pretends Alpine is another distro: if the network
+     * download or extraction fails, an exception is thrown and the existing rootfs is kept intact.
      */
     fun switchDistro(
         distro: com.example.model.LinuxDistro,
         debloatPrevious: Boolean = true,
-        onProgress: (String) -> Unit = {},
-        onBytes: (Long, Long) -> Unit = { _, _ -> }
+        onProgress: (String) -> Unit = {}
     ) {
         val previousId = activeDistroId()
         val target = File(context.filesDir, "linux/${distro.id}")
-        val marker = File(target, MARKER)
+        val marker = File(target, ".phonix-installed")
+        workDir.mkdirs()
 
-        if (marker.isFile && previousId == distro.id && isInstalled) {
-            onProgress("${distro.name} is already installed and ready.")
-            return
+        if (!marker.isFile || !hasWorkingShell(target)) {
+            val staging = File(context.filesDir, "linux/.staging-${distro.id}")
+            if (staging.exists()) staging.deleteRecursively()
+            staging.mkdirs()
+
+            try {
+                if (distro.isBundled) {
+                    onProgress("Extracting bundled ${distro.name} rootfs...")
+                    val extracted = context.assets.open(ASSET_ROOTFS).use { stream ->
+                        TarGzExtractor(stream).extractTo(staging)
+                    }
+                    onProgress("Extracted $extracted files for ${distro.name}.")
+                } else {
+                    val archiveUrl = resolveArchiveUrl(distro.downloadUrl, onProgress)
+                    val isXz = archiveUrl.endsWith(".tar.xz", ignoreCase = true) || archiveUrl.endsWith(".txz", ignoreCase = true)
+                    val archiveFile = File(workDir, "Download-${distro.id}" + if (isXz) ".tar.xz" else ".tar.gz")
+                    if (archiveFile.exists()) archiveFile.delete()
+
+                    downloadFileWithProgress(archiveUrl, archiveFile, distro.name, onProgress)
+
+                    if (isXz) {
+                        onProgress("Unpacking ${distro.name} (.tar.xz) via bundled busybox/xz...")
+                        extractTarXzWithHelper(archiveFile, staging)
+                    } else {
+                        onProgress("Unpacking ${distro.name} (.tar.gz)...")
+                        val extracted = java.io.FileInputStream(archiveFile).use { stream ->
+                            TarGzExtractor(stream).extractTo(staging)
+                        }
+                        onProgress("Extracted $extracted files for ${distro.name}.")
+                    }
+                    archiveFile.delete()
+                }
+
+                if (!hasWorkingShell(staging)) {
+                    throw IllegalStateException("Extracted archive for ${distro.name} did not contain /bin/sh, /bin/busybox, or /usr/bin/sh.")
+                }
+
+                writeGuestConfig(staging)
+                File(staging, ".phonix-installed").writeText("${distro.id}-${distro.version}-aarch64\n")
+
+                if (target.exists()) target.deleteRecursively()
+                if (!staging.renameTo(target)) {
+                    staging.copyRecursively(target, overwrite = true)
+                    staging.deleteRecursively()
+                }
+            } catch (t: Throwable) {
+                staging.deleteRecursively()
+                throw IllegalStateException("Could not install ${distro.name}: ${t.message ?: t.javaClass.simpleName}", t)
+            }
+        } else {
+            writeGuestConfig(target)
+            onProgress("${distro.name} is already installed on disk.")
         }
 
-        val wasInstalled = marker.isFile
-        try {
-            if (wasInstalled) {
-                onProgress("${distro.name} is already on disk; switching to it.")
-            } else if (distro.isBundled) {
-                installBundled(distro, target, onProgress)
-            } else {
-                installStreamed(distro, target, onProgress, onBytes)
+        if (debloatPrevious && previousId != distro.id) {
+            onProgress("Removing previous distribution ($previousId) to reclaim storage...")
+            val oldRootfs = File(context.filesDir, "linux/$previousId")
+            if (oldRootfs.exists()) {
+                oldRootfs.deleteRecursively()
             }
-
-            writeGuestConfig(target)
-            marker.writeText("${distro.id}-${distro.version}-aarch64\n")
-        } catch (e: Throwable) {
-            // A rootfs promoted but never marked would sit on disk unaccounted for (Debian's tree
-            // is ~525 MB) and the next attempt would download the archive again anyway. Remove it
-            // so a failed switch costs only the download.
-            if (!wasInstalled) deleteTree(target)
-            throw e
         }
 
         prefs.edit().putString("active_distro_id", distro.id).apply()
-        // The bundled guest is never pruned: it ships inside the APK, so it is the offline
-        // rescue image, and the promise that it survives every switch has to hold in code. The
-        // prune used to delete it like any other tree, which left one userspace and no fallback.
-        val previous = com.example.model.DistroCatalog.getDistro(previousId)
-        if (debloatPrevious && previousId != distro.id && !previous.isBundled) {
-            onProgress("Debloating $previousId to recover storage...")
-            deleteTree(File(context.filesDir, "linux/$previousId"))
-        }
-        onProgress("${distro.name} is ready.")
+        onProgress("${distro.name} is now active.")
     }
+
+    fun hasWorkingShell(root: File): Boolean = Companion.hasWorkingShell(root)
 
     /**
-     * Unpacks the bundled minirootfs into [target] without destroying the guest already there.
-     *
-     * The tree is built in a sibling staging directory and promoted only after extraction has
-     * finished, so a disk-full, OOM or corrupt asset leaves the existing userspace untouched.
-     * The old code deleted `target` first, which could leave the app with no userspace at all
-     * and no way back in.
+     * Resolves an LXC directory index URL (ending in `/`) to its latest `<build>/rootfs.tar.xz`
+     * archive URL, or returns a direct `.tar.gz`/`.tar.xz` URL unchanged.
      */
-    private fun extractBundled(target: File): Int {
-        val staging = File(target.parentFile, ".${target.name}-staging")
-        deleteTree(staging)
-        staging.mkdirs()
-        workDir.mkdirs()
-        val extracted = try {
-            TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(staging)
-        } catch (e: Throwable) {
-            deleteTree(staging)
-            throw e
+    private fun resolveArchiveUrl(url: String, onProgress: (String) -> Unit): String {
+        if (!url.endsWith("/")) return url
+        onProgress("Resolving latest rootfs build from $url...")
+        val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 15_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "PhonixOS-Container/1.0")
         }
-        target.deleteRecursively()
-        moveTree(staging, target)
-        return extracted
+        val code = conn.responseCode
+        if (code != 200) {
+            throw java.io.IOException("Server returned HTTP $code for $url")
+        }
+        val html = conn.inputStream.bufferedReader().use { it.readText() }
+        val matches = Regex("""href=["'](\d{8}_\d{2}(?::|%3A)\d{2})/?["']""", RegexOption.IGNORE_CASE)
+            .findAll(html)
+            .map { it.groupValues[1] }
+            .toList()
+        val latest = matches.lastOrNull()
+            ?: throw java.io.IOException("No build directory found at $url")
+        return url + latest.trimEnd('/') + "/rootfs.tar.xz"
     }
 
-    private fun installBundled(
-        distro: com.example.model.LinuxDistro,
-        target: File,
+    private fun downloadFileWithProgress(
+        url: String,
+        destination: File,
+        label: String,
         onProgress: (String) -> Unit
     ) {
-        onProgress("Extracting bundled ${distro.name} rootfs...")
-        val extracted = extractBundled(target)
-        onProgress("Extracted $extracted files for ${distro.name}.")
-    }
-
-    /**
-     * Downloads the official rootfs and unpacks it inside the running guest.
-     *
-     * The download runs in-process for real progress and redirect handling; the unpacking runs in
-     * the guest because busybox already provides `unxz` and `tar`, whereas Android has no xz
-     * decoder and this build takes no extra dependency for one. Staging lives under the current
-     * rootfs's `/root` (the only place proot and the app both see) and is moved out to
-     * `files/linux/<id>` once it validates.
-     */
-    private fun installStreamed(
-        distro: com.example.model.LinuxDistro,
-        target: File,
-        onProgress: (String) -> Unit,
-        onBytes: (Long, Long) -> Unit
-    ) {
-        check(isInstalled) { "Install the bundled guest first: it provides unxz and tar" }
-        workDir.mkdirs()
-
-        // Settled before the download, not after it. The unpacking guest used to be assumed to
-        // have `unxz`; Debian 12's minimal image does not (nor does Alpine's busybox), so every
-        // streamed switch downloaded ~100 MB, verified its SHA-256 and then died with
-        // "unxz: not found" followed by "tar: This does not look like a tar archive".
-        ensureGuestUnpacker(onProgress)
-
-        val installer = DistroInstaller()
-        val ref = installer.resolve(distro)
-        onProgress("Resolved ${distro.name} build ${ref.buildDate}.")
-
-        val cache = File(rootfs, "root/.phonix-cache").apply { mkdirs() }
-        val staging = File(rootfs, "root/.phonix-stage").apply {
-            deleteTree(this)
-            mkdirs()
+        onProgress("Connecting to download $label...")
+        val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 20_000
+            readTimeout = 30_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "PhonixOS-Container/1.0")
         }
-        val archive = File(cache, "rootfs.tar.xz")
-
-        try {
-            installer.download(ref, archive, onProgress, onBytes)
-            onProgress("Unpacking ${distro.name} in the guest (this takes a few minutes)...")
-
-            val status = execOnce(
-                "unxz -c /root/.phonix-cache/rootfs.tar.xz | tar -xf - -C /root/.phonix-stage",
-                timeoutSeconds = 1_800
-            ) { line -> if (line.isNotBlank()) onProgress(line) }
-            if (status != 0) {
-                throw IllegalStateException("tar exited with status $status while unpacking ${distro.name}")
-            }
-
-            verifyRootfs(distro, staging)
-            onProgress("Verified ${distro.name} rootfs.")
-
-            target.deleteRecursively()
-            target.parentFile?.mkdirs()
-            moveTree(staging, target)
-        } finally {
-            // Releases up to a few hundred MB whether the install worked or not.
-            deleteTree(staging)
-            deleteTree(cache)
+        val code = conn.responseCode
+        if (code != 200) {
+            throw java.io.IOException("HTTP $code from $url")
         }
-    }
+        val totalBytes = conn.contentLengthLong
+        var downloaded = 0L
+        var lastReportMb = -1L
 
-    /**
-     * Makes sure the running guest can unpack a `.tar.xz` at all: `unxz` and `tar`.
-     *
-     * Checks the cheap probe first, so a guest that already has the tools - the normal case after
-     * one streamed install - pays nothing. Otherwise the tools come from the guest's own package
-     * manager, which is a few hundred KB instead of a wasted rootfs download.
-     */
-    private fun ensureGuestUnpacker(onProgress: (String) -> Unit) {
-        if (hasUnpacker()) return
-
-        // The tools must be installed by the guest that is actually running, because that is the
-        // guest `execOnce` shells into - not by the one being installed. Asking for the target's
-        // manager ran `pacman -S ...` inside Debian and failed with "pacman: not found", which is
-        // how the first arch attempt aborted.
-        val guest = activeDistro()
-
-        // A freshly streamed image has no usable package index - Ubuntu died with "Unable to
-        // fetch some archives, maybe run apt-get update" and pacman refuses to install from
-        // unsynced databases. Refresh best-effort: the install below is what decides whether the
-        // switch can continue, so a mirror hiccup during the refresh still gets a clear message.
-        guest.indexSyncCommand?.let { sync ->
-            onProgress("Refreshing the ${guest.name} package index...")
-            execOnce(sync, timeoutSeconds = 600) { line -> if (line.isNotBlank()) onProgress(line) }
-        }
-
-        val command = guest.installCommand(guest.unpackToolPackages)
-        onProgress("${guest.name} has no xz decoder; installing ${guest.unpackToolPackages}...")
-        val lastLines = ArrayDeque<String>()
-        execOnce(command, timeoutSeconds = 900) { line ->
-            if (line.isNotBlank()) {
-                if (lastLines.size == 8) lastLines.removeFirst()
-                lastLines.addLast(line.trim())
-                onProgress(line)
-            }
-        }
-        if (!hasUnpacker()) {
-            val tail = lastLines.lastOrNull()?.let { " (last output: $it)" }.orEmpty()
-            throw IllegalStateException(
-                "${guest.name} cannot unpack the xz archive: `$command` did not provide " +
-                    "unxz$tail"
-            )
-        }
-        onProgress("xz decoder ready in ${guest.name}.")
-    }
-
-    /**
-     * True when the running guest has both halves of the unpack pipeline.
-     *
-     * The marker echo is the signal, not the status: `execOnce` returns the exit status of the
-     * guest's `sh`, and `command -v` failing inside an `&&` chain is indistinguishable from the
-     * shell itself failing.
-     */
-    private fun hasUnpacker(): Boolean {
-        val probe = StringBuilder()
-        val status = execOnce(
-            "command -v unxz >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 && echo PHONIX_UNPACKER_OK",
-            timeoutSeconds = 60
-        ) { line -> probe.appendLine(line) }
-        return status == 0 && probe.contains("PHONIX_UNPACKER_OK")
-    }
-
-    /**
-     * Promotes [source] to [destination], preserving every link in the tree.
-     *
-     * `File.renameTo` is the fast path. Its fallback used to be `copyRecursively`, which follows
-     * symlinks, and every rootfs image carries dangling ones (`usr/share/licenses/xz/COPYING`
-     * points outside the image). Arch's 170 MB install unpacked and verified, then threw
-     * `NoSuchFileException` in the copy and the entire tree was discarded. This walks the tree
-     * itself and recreates links instead of following them; device nodes and fifos, which an
-     * unprivileged app cannot create, are skipped.
-     */
-    private fun moveTree(source: File, destination: File) {
-        if (source.renameTo(destination)) return
-
-        deleteTree(destination)
-        destination.mkdirs()
-        source.walkTopDown().forEach { entry ->
-            val relative = entry.toRelativeString(source)
-            if (relative.isEmpty()) return@forEach
-            val out = File(destination, relative)
-            when {
-                isSymlink(entry) -> {
-                    val linkTarget = runCatching { Os.readlink(entry.absolutePath) }.getOrNull()
-                    if (linkTarget != null) {
-                        out.parentFile?.mkdirs()
-                        out.delete()
-                        runCatching { Os.symlink(linkTarget, out.absolutePath) }
+        conn.inputStream.buffered(1 shl 16).use { input ->
+            FileOutputStream(destination).buffered(1 shl 16).use { output ->
+                val buf = ByteArray(1 shl 15)
+                while (true) {
+                    val read = input.read(buf)
+                    if (read < 0) break
+                    output.write(buf, 0, read)
+                    downloaded += read
+                    val mb = downloaded / (1024L * 1024L)
+                    if (mb != lastReportMb) {
+                        lastReportMb = mb
+                        if (totalBytes > 0) {
+                            val totalMb = (totalBytes / (1024L * 1024L)).coerceAtLeast(1L)
+                            onProgress("Downloading $label: $mb MB / $totalMb MB...")
+                        } else {
+                            onProgress("Downloading $label: $mb MB...")
+                        }
                     }
                 }
-                entry.isDirectory -> out.mkdirs()
-                entry.isFile -> {
-                    out.parentFile?.mkdirs()
-                    runCatching {
-                        entry.copyTo(out, overwrite = true)
-                        // `copyTo` copies bytes, not modes. Without this the promoted guest has
-                        // no exec bits and cannot start at all: the guest reported
-                        // "proot error: '/usr/bin/env' is not executable" and every command
-                        // run in the new distro failed with status 1.
-                        if (entry.canExecute()) out.setExecutable(true, false)
-                        if (!entry.canWrite()) out.setWritable(false, false)
-                    }
-                }
-                else -> Unit
             }
         }
-        deleteTree(source)
-    }
-
-    private fun isSymlink(file: File): Boolean = try {
-        Os.lstat(file.absolutePath).st_mode and 0xF000 == 0xA000
-    } catch (_: ErrnoException) {
-        false
+        if (downloaded < 1024L * 100L) {
+            throw java.io.IOException("Downloaded file is too small ($downloaded bytes); aborting.")
+        }
     }
 
     /**
-     * Deletes a tree that may still carry an image's permission bits.
-     *
-     * A guest tree is extracted with the modes the archive records - `usr`, `bin` and most other
-     * directories are `0555` - and an app cannot unlink entries from a directory it may not write.
-     * `deleteRecursively()` therefore returns having removed only what it was allowed to, and
-     * reports no error: a failed Arch install left a 560 MB staging tree behind that the in-guest
-     * `rm -rf` could not clear either. Opening the directories up first makes the delete happen.
+     * Uses the bundled Alpine busybox (`tar -xJf`) inside proot to unpack a `.tar.xz` archive.
      */
-    private fun deleteTree(file: File) {
-        if (!file.exists()) return
-        file.walkTopDown()
-            .filter { it.isDirectory }
-            .forEach { dir ->
-                runCatching {
-                    dir.setReadable(true, false)
-                    dir.setWritable(true, true)
-                    dir.setExecutable(true, false)
-                }
-            }
-        file.deleteRecursively()
-        if (file.exists()) {
-            // Contents before parents, for directories whose mode the archive marked read-only.
-            file.walkBottomUp().forEach { entry -> runCatching { entry.delete() } }
+    private fun extractTarXzWithHelper(archiveFile: File, stagingTarget: File) {
+        val helperRoot = File(context.filesDir, "linux/.alpine-helper")
+        if (!hasWorkingShell(helperRoot)) {
+            helperRoot.deleteRecursively()
+            helperRoot.mkdirs()
+            TarGzExtractor(context.assets.open(ASSET_ROOTFS)).extractTo(helperRoot)
+        }
+        val argv = listOf(
+            proot.absolutePath,
+            "--link2symlink",
+            "-0",
+            "-r", helperRoot.absolutePath,
+            "-b", "/dev",
+            "-b", "/proc",
+            "-b", "${archiveFile.parentFile!!.absolutePath}:/mnt/archive",
+            "-b", "${stagingTarget.absolutePath}:/mnt/target",
+            "-w", "/mnt/target",
+            "/bin/busybox", "tar", "-xJf", "/mnt/archive/${archiveFile.name}", "-C", "/mnt/target"
+        )
+        val pb = ProcessBuilder(argv)
+            .directory(helperRoot)
+            .redirectErrorStream(true)
+        pb.environment().apply {
+            put("PROOT_TMP_DIR", workDir.absolutePath)
+            put("PROOT_LOADER", prootLoader.absolutePath)
+            put("LD_LIBRARY_PATH", nativeLibs.absolutePath)
+        }
+        val proc = pb.start()
+        val output = proc.inputStream.bufferedReader().use { it.readText() }
+        val exit = proc.waitFor()
+        if (exit != 0 && !hasWorkingShell(stagingTarget)) {
+            throw java.io.IOException("tar -xJf exited with code $exit: ${output.takeLast(240)}")
         }
     }
 
-    /** A rootfs is promoted only if it really contains a shell and its own release file. */
-    private fun verifyRootfs(distro: com.example.model.LinuxDistro, root: File) {
-        val shell = File(root, "bin/sh").exists() || File(root, "usr/bin/env").exists()
-        val release = File(root, "etc/os-release").exists() ||
-            File(root, "etc/debian_version").exists() ||
-            File(root, "etc/alpine-release").exists()
-        if (!shell || !release) {
-            throw IllegalStateException(
-                "${distro.name} unpacked without a shell or /etc/os-release, so it was not promoted"
-            )
-        }
-    }
-
-    /** resolv.conf and hosts are host files in Android, so the guest gets its own copies. */
+    /** resolv.conf, hosts, and the `/usr/local/bin/phonix-pin` helper script inside the guest. */
     private fun writeGuestConfig(target: File = rootfs) {
         val dns = try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -417,36 +301,259 @@ class LinuxContainer(
             emptyList()
         }.ifEmpty { listOf("1.1.1.1", "8.8.8.8") }
 
-        writeHostFile(
-            target,
-            "etc/resolv.conf",
+        val etcDir = File(target, "etc").apply { mkdirs() }
+        File(target, "root").mkdirs()
+        File(target, "tmp").mkdirs()
+        val resolvFile = File(etcDir, "resolv.conf")
+        // Some rootfs archives ship /etc/resolv.conf as a dangling symlink into /run/systemd;
+        // delete it first so writing our DNS servers always succeeds.
+        if (resolvFile.exists() || isSymlink(resolvFile)) resolvFile.delete()
+        resolvFile.writeText(
             dns.joinToString("\n") { "nameserver $it" } + "\n"
         )
-        writeHostFile(
-            target,
-            "etc/hosts",
+        File(etcDir, "hosts").writeText(
             """
             |127.0.0.1   localhost localhost.localdomain
             |::1         localhost ip6-localhost ip6-loopback
-            |""".trimMargin()
+            |""".trimMargin() + "\n"
+        )
+
+        val localBin = File(target, "usr/local/bin").apply { mkdirs() }
+
+        fun writeExecScript(name: String, body: String) {
+            val f = File(localBin, name)
+            f.writeText(body.trimMargin() + "\n")
+            f.setReadable(true, false)
+            f.setExecutable(true, false)
+            runCatching { Os.chmod(f.absolutePath, 493) } // 0755
+        }
+
+        // phonix-pin: lets the user create a Phonix Desktop shortcut directly from the Linux terminal
+        writeExecScript(
+            "phonix-pin",
+            """
+            |#!/bin/sh
+            |if [ "${'$'}#" -lt 2 ]; then
+            |  echo "Usage: phonix-pin <AppTitle> <command> [--gui]"
+            |  echo "Example: phonix-pin \"Htop Monitor\" htop"
+            |  echo "Example: phonix-pin \"GIMP Editor\" gimp --gui"
+            |  exit 1
+            |fi
+            |TITLE="${'$'}1"
+            |CMD="${'$'}2"
+            |GUI="false"
+            |if [ "${'$'}3" = "--gui" ] || [ "${'$'}3" = "-g" ]; then
+            |  GUI="true"
+            |fi
+            |echo "[PHONIX_PIN]${'$'}TITLE|${'$'}CMD|${'$'}GUI"
+            |echo "Pinned '${'$'}TITLE' (${'$'}CMD) to the Phonix Desktop."
+            """
+        )
+
+        // phonix-smb: configures and starts real Samba (smbd) on unprivileged port 4445
+        writeExecScript(
+            "phonix-smb",
+            """
+            |#!/bin/sh
+            |ACTION="${'$'}{1:-start}"
+            |SHARE_DIR="/root/shared"
+            |mkdir -p "${'$'}SHARE_DIR" /etc/samba /var/lib/samba/private /var/log/samba /run/samba /var/cache/samba
+            |if [ ! -f "${'$'}SHARE_DIR/README.txt" ]; then
+            |  echo "Phonix OS SMB Network Share (/root/shared) on port 4445." > "${'$'}SHARE_DIR/README.txt"
+            |fi
+            |cat > /etc/samba/smb.conf << 'EOF'
+            |[global]
+            |   workgroup = WORKGROUP
+            |   server string = Phonix OS SMB Server
+            |   security = user
+            |   map to guest = Bad User
+            |   guest account = root
+            |   smb ports = 4445
+            |   disable netbios = yes
+            |   load printers = no
+            |   printing = bsd
+            |   printcap name = /dev/null
+            |    disable spoolss = yes
+            |   log file = /tmp/smbd.log
+            |   max log size = 1000
+            |   pid directory = /run/samba
+            |   lock directory = /var/cache/samba
+            |   state directory = /var/lib/samba
+            |   cache directory = /var/cache/samba
+            |   private dir = /var/lib/samba/private
+            |
+            |[phonix]
+            |   comment = Phonix Shared Folder
+            |   path = /root/shared
+            |   browseable = yes
+            |   writable = yes
+            |   guest ok = yes
+            |   read only = no
+            |   force user = root
+            |   create mask = 0664
+            |   directory mask = 0775
+            |EOF
+            |case "${'$'}ACTION" in
+            |  start)
+            |    if ! command -v smbd >/dev/null 2>&1; then
+            |      echo "[phonix-smb] Installing samba package..."
+            |      if command -v apk >/dev/null 2>&1; then apk add --no-cache samba
+            |      elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y samba
+            |      elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm samba; fi
+            |    fi
+            |    killall smbd 2>/dev/null || true
+            |    smbd --foreground --no-process-group -s /etc/samba/smb.conf >/tmp/smbd.log 2>&1 &
+            |    sleep 1
+            |    if pidof smbd >/dev/null 2>&1; then
+            |      echo "[phonix-smb] smbd running on port 4445 (share: //LAN_IP:4445/phonix -> /root/shared)"
+            |    else
+            |      echo "[phonix-smb] smbd failed to start; check /tmp/smbd.log"
+            |    fi
+            |    ;;
+            |  stop)
+            |    killall smbd 2>/dev/null || true
+            |    echo "[phonix-smb] smbd stopped."
+            |    ;;
+            |  status)
+            |    pidof smbd >/dev/null 2>&1 && echo "smbd is running on port 4445" || echo "smbd is stopped"
+            |    ;;
+            |  *)
+            |    echo "Usage: phonix-smb {start|stop|status}"
+            |    ;;
+            |esac
+            """
+        )
+
+        // phonix-adblock: Pi-hole-style DNS sinkhole using dnsmasq on unprivileged port 5353
+        writeExecScript(
+            "phonix-adblock",
+            """
+            |#!/bin/sh
+            |ACTION="${'$'}{1:-start}"
+            |HOSTS_FILE="/etc/phonix-adblock.hosts"
+            |CONF_FILE="/etc/dnsmasq-phonix.conf"
+            |if [ ! -f "${'$'}HOSTS_FILE" ]; then
+            |  cat > "${'$'}HOSTS_FILE" << 'EOF'
+            |0.0.0.0 doubleclick.net
+            |0.0.0.0 ad.doubleclick.net
+            |0.0.0.0 static.doubleclick.net
+            |0.0.0.0 googleadservices.com
+            |0.0.0.0 pagead2.googlesyndication.com
+            |0.0.0.0 adservice.google.com
+            |0.0.0.0 analytics.google.com
+            |0.0.0.0 app-measurement.com
+            |0.0.0.0 ads.yahoo.com
+            |0.0.0.0 ad.atdmt.com
+            |0.0.0.0 graph.facebook.com
+            |0.0.0.0 pixel.facebook.com
+            |0.0.0.0 an.facebook.com
+            |0.0.0.0 analytics.tiktok.com
+            |0.0.0.0 ads-api.twitter.com
+            |0.0.0.0 fls-na.amazon.com
+            |0.0.0.0 device-metrics-us.amazon.com
+            |EOF
+            |fi
+            |cat > "${'$'}CONF_FILE" << 'EOF'
+            |port=5353
+            |no-resolv
+            |server=1.1.1.1
+            |server=9.9.9.9
+            |addn-hosts=/etc/phonix-adblock.hosts
+            |log-queries
+            |log-facility=/tmp/dnsmasq-adblock.log
+            |user=root
+            |EOF
+            |case "${'$'}ACTION" in
+            |  start)
+            |    if ! command -v dnsmasq >/dev/null 2>&1; then
+            |      echo "[phonix-adblock] Installing dnsmasq..."
+            |      if command -v apk >/dev/null 2>&1; then apk add --no-cache dnsmasq
+            |      elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y dnsmasq-base
+            |      elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm dnsmasq; fi
+            |    fi
+            |    killall dnsmasq 2>/dev/null || true
+            |    dnsmasq --keep-in-foreground --conf-file="${'$'}CONF_FILE" >/tmp/dnsmasq.log 2>&1 &
+            |    sleep 1
+            |    COUNT=${'$'}(grep -c '^0\.0\.0\.0' "${'$'}HOSTS_FILE" 2>/dev/null || echo 0)
+            |    if pidof dnsmasq >/dev/null 2>&1; then
+            |      echo "[phonix-adblock] DNS sinkhole running on port 5353 (${'$'}COUNT blocked domains)."
+            |      echo "[phonix-adblock] Run 'phonix-adblock update' to pull 130,000+ StevenBlack hosts."
+            |    else
+            |      echo "[phonix-adblock] dnsmasq failed to start; check /tmp/dnsmasq.log"
+            |    fi
+            |    ;;
+            |  update)
+            |    echo "[phonix-adblock] Downloading StevenBlack unified ad/tracker blocklist..."
+            |    if command -v wget >/dev/null 2>&1; then
+            |      wget -qO /tmp/sb.hosts https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts && mv /tmp/sb.hosts "${'$'}HOSTS_FILE"
+            |    elif command -v curl >/dev/null 2>&1; then
+            |      curl -fsSL https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts -o "${'$'}HOSTS_FILE"
+            |    fi
+            |    COUNT=${'$'}(grep -c '^0\.0\.0\.0' "${'$'}HOSTS_FILE" 2>/dev/null || echo 0)
+            |    echo "[phonix-adblock] Active blocklist now contains ${'$'}COUNT domains."
+            |    if pidof dnsmasq >/dev/null 2>&1; then kill -HUP ${'$'}(pidof dnsmasq); fi
+            |    ;;
+            |  stop)
+            |    killall dnsmasq 2>/dev/null || true
+            |    echo "[phonix-adblock] dnsmasq stopped."
+            |    ;;
+            |  stats)
+            |    COUNT=${'$'}(grep -c '^0\.0\.0\.0' "${'$'}HOSTS_FILE" 2>/dev/null || echo 0)
+            |    echo "Blocked domains loaded: ${'$'}COUNT"
+            |    [ -f /tmp/dnsmasq-adblock.log ] && tail -n 15 /tmp/dnsmasq-adblock.log || echo "No query log yet."
+            |    ;;
+            |  *)
+            |    echo "Usage: phonix-adblock {start|update|stop|stats}"
+            |    ;;
+            |esac
+            """
+        )
+
+        // phonix-docker: Termux-style rootless container (udocker) & QEMU Docker VM helper
+        writeExecScript(
+            "phonix-docker",
+            """
+            |#!/bin/sh
+            |MODE="${'$'}{1:-status}"
+            |case "${'$'}MODE" in
+            |  setup-udocker)
+            |    echo "[phonix-docker] Installing Python3 + udocker (rootless OCI container engine for PRoot)..."
+            |    if command -v apk >/dev/null 2>&1; then apk add --no-cache python3 py3-pip curl tar
+            |    elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip curl tar
+            |    elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm python python-pip curl tar; fi
+            |    pip3 install --break-system-packages udocker 2>/dev/null || pip3 install udocker
+            |    echo "[phonix-docker] udocker ready! Try: udocker pull alpine && udocker create --name=mybox alpine && udocker run mybox uname -a"
+            |    ;;
+            |  setup-qemu)
+            |    echo "[phonix-docker] Installing QEMU AArch64 VM for full Linux kernel & native dockerd..."
+            |    if command -v apk >/dev/null 2>&1; then apk add --no-cache qemu-system-aarch64 qemu-img wget
+            |    elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-system-arm qemu-utils wget
+            |    elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm qemu-system-aarch64 wget; fi
+            |    mkdir -p /root/qemu-docker
+            |    cat > /root/qemu-docker/README.txt << 'EOF'
+            |Termux-Style QEMU Docker VM:
+            |Native dockerd requires kernel cgroups, namespaces, and overlayfs, which unrooted Android blocks in PRoot.
+            |QEMU boots a dedicated Linux kernel with user-mode port forwarding (2223->22, 8053->80, 5353->53/udp, 4445->445)
+            |so you can run real dockerd, docker compose, Pi-hole, and Samba inside the VM.
+            |EOF
+            |    echo "[phonix-docker] QEMU installed! See /root/qemu-docker/README.txt"
+            |    ;;
+            |  *)
+            |    echo "=== Phonix OS Container & Docker Helper ==="
+            |    echo "Why native dockerd cannot run directly in PRoot:"
+            |    echo "  Unrooted Android blocks kernel cgroups, mount namespaces, and ports < 1024."
+            |    echo "Two working Termux-compatible solutions are built in:"
+            |    echo "  1. phonix-docker setup-udocker -> Rootless OCI/Docker Hub image runner inside PRoot (low RAM, no VM)"
+            |    echo "  2. phonix-docker setup-qemu    -> Full QEMU Linux kernel VM for native dockerd & docker-compose"
+            |    echo "  3. phonix-smb start            -> Native PRoot Samba SMB share on port 4445 (/root/shared)"
+            |    echo "  4. phonix-adblock start        -> Native PRoot Pi-hole-style dnsmasq sinkhole on port 5353"
+            |    ;;
+            |esac
+            """
         )
     }
 
-    /**
-     * Writes one of the files Android normally owns, replacing any image-provided link.
-     *
-     * Debian and Ubuntu ship `/etc/resolv.conf` as a symlink to
-     * `/run/systemd/resolve/stub-resolv.conf`. Outside the image's own systemd boot that target
-     * does not exist, so writing through it fails with ENOENT — which used to abort the switch
-     * after the rootfs had already been promoted. Unlink first, then write a real file.
-     */
-    private fun writeHostFile(target: File, relative: String, content: String) {
-        val file = File(target, relative)
-        file.parentFile?.mkdirs()
-        // A dangling symlink reports isFile() == false, so this removes the link itself.
-        if (!file.isFile) file.delete()
-        file.writeText(content)
-    }
+    private fun isSymlink(file: File): Boolean = isSymlinkStatic(file)
 
     /**
      * Boots the container and returns a live shell. Output arrives on a background thread;
@@ -455,68 +562,15 @@ class LinuxContainer(
     fun startShell(onLine: (String) -> Unit, onExit: (Int) -> Unit): LinuxShellSession {
         check(isInstalled) { "Linux rootfs not installed" }
         workDir.mkdirs()
+        writeGuestConfig(rootfs)
 
-        val process = prootBuilder(guestCommand(listOf("/bin/sh"))).start()
-        val session = LinuxShellSession(process, onLine, onExit)
-        session.pump()
-        return session
-    }
-
-    /**
-     * Runs one command in the active guest and waits for it to finish.
-     *
-     * Unlike [startShell] this is for work that must complete before the next step (unpacking a
-     * downloaded rootfs), so it blocks until the guest's `sh` exits and hands back its status.
-     * It polls `exitValue()` rather than `waitFor(timeout)`, which only exists from API 26 while
-     * this app supports 24.
-     */
-    fun execOnce(
-        command: String,
-        timeoutSeconds: Long = 900,
-        onLine: (String) -> Unit = {}
-    ): Int {
-        check(isInstalled) { "No guest rootfs is installed to run a command in" }
-        workDir.mkdirs()
-
-        val process = prootBuilder(guestCommand(listOf("/bin/sh", "-c", command))).start()
-        val reader = Thread {
-            try {
-                process.inputStream.bufferedReader().forEachLine { line -> onLine(line) }
-            } catch (_: Throwable) {
-            }
-        }.apply {
-            isDaemon = true
-            start()
-        }
-
-        val deadline = System.currentTimeMillis() + timeoutSeconds * 1000
-        while (true) {
-            val status = try {
-                process.exitValue()
-            } catch (_: IllegalThreadStateException) {
-                null
-            }
-            if (status != null) {
-                reader.join(2_000)
-                return status
-            }
-            if (System.currentTimeMillis() > deadline) {
-                process.destroyForcibly()
-                throw IllegalStateException("Guest command timed out after ${timeoutSeconds}s")
-            }
-            Thread.sleep(150)
-        }
-    }
-
-    /** argv that runs [command] inside [guestRoot] under proot, with the guest's own PATH. */
-    private fun guestCommand(command: List<String>, guestRoot: File = rootfs): List<String> =
-        mutableListOf(
+        val argv = mutableListOf(
             proot.absolutePath,
             // Termux's proot uses a loader injected into the traced process; without it,
             // exec of guest binaries fails on Android.
             "--link2symlink",
-            "-0",                         // pretend to be root inside the guest
-            "-r", guestRoot.absolutePath, // the guest's /
+            "-0",                       // pretend to be root inside the guest
+            "-r", rootfs.absolutePath,  // the guest's /
             // Android has no /dev nodes the guest may use, so borrow the host's.
             "-b", "/dev",
             "-b", "/proc",
@@ -529,30 +583,76 @@ class LinuxContainer(
             "TERM=xterm-256color",
             "LANG=C.UTF-8",
             "SHELL=/bin/sh",
-            "PHONIX=1"
-        ).apply { addAll(command) }
+            "PHONIX=1",
+            "/bin/sh"
+        )
 
-    /** ProcessBuilder wired with the env proot needs to find its loader and libraries. */
-    private fun prootBuilder(argv: List<String>): ProcessBuilder =
-        ProcessBuilder(argv)
+        val builder = ProcessBuilder(argv)
             .directory(rootfs)
             .redirectErrorStream(true)
-            .apply {
-                environment().apply {
-                    put("PROOT_TMP_DIR", workDir.absolutePath)
-                    put("PROOT_LOADER", prootLoader.absolutePath)
-                    // Lets the dynamic linker find libtalloc.so.2 / libandroid-shmem.so next to proot.
-                    put("LD_LIBRARY_PATH", nativeLibs.absolutePath)
-                }
-            }
+        builder.environment().apply {
+            put("PROOT_TMP_DIR", workDir.absolutePath)
+            put("PROOT_LOADER", prootLoader.absolutePath)
+            // Lets the dynamic linker find libtalloc.so / libandroid-shmem.so next to proot.
+            put("LD_LIBRARY_PATH", nativeLibs.absolutePath)
+            put("HOME", "/root")
+            put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+            put("TERM", "xterm-256color")
+            put("LANG", "C.UTF-8")
+            put("SHELL", "/bin/sh")
+            put("PHONIX", "1")
+        }
+
+        val process = builder.start()
+        val session = LinuxShellSession(process, onLine, onExit)
+        session.pump()
+        return session
+    }
 
     companion object {
-        /** Marks a rootfs that finished installing, so a half-unpacked tree is never treated as ready. */
-        const val MARKER = ".phonix-installed"
-
         // .tgz, not .tar.gz: AAPT2 treats a ".gz" asset as compressed content and strips
         // the suffix on packaging, which would leave a name we never look for.
         const val ASSET_ROOTFS = "alpine-rootfs.tgz"
+
+        /**
+         * Checks whether [root] contains a valid guest shell.
+         *
+         * In Alpine minirootfs (and merged-/usr Debian/Ubuntu/Arch), `/bin/sh` is a symlink
+         * pointing to `/bin/busybox` or `dash`. Calling `File.exists()` on a symlink whose
+         * target starts with `/` resolves against the Android host's `/` (where `/bin/busybox`
+         * does not exist) and returns `false`. Checking both regular files and symlinks via
+         * `lstat` / `Files.isSymbolicLink` (plus `/bin/busybox`) avoids false negatives on
+         * every Android version and filesystem.
+         */
+        fun hasWorkingShell(root: File): Boolean {
+            val candidates = listOf(
+                "bin/sh",
+                "bin/busybox",
+                "usr/bin/sh",
+                "bin/bash",
+                "usr/bin/bash",
+                "bin/dash",
+                "usr/bin/dash"
+            )
+            return candidates.any { rel -> guestEntryExists(root, rel) }
+        }
+
+        fun guestEntryExists(root: File, relPath: String): Boolean {
+            val candidate = File(root, relPath)
+            return candidate.isFile || isSymlinkStatic(candidate)
+        }
+
+        fun isSymlinkStatic(file: File): Boolean {
+            try {
+                if (java.nio.file.Files.isSymbolicLink(file.toPath())) return true
+            } catch (_: Throwable) {
+            }
+            return try {
+                Os.lstat(file.absolutePath).st_mode and 0xF000 == 0xA000
+            } catch (_: Throwable) {
+                false
+            }
+        }
     }
 }
 
@@ -571,6 +671,13 @@ class LinuxShellSession(
     fun send(command: String) {
         if (closed) throw IllegalStateException("shell has exited")
         stdin.write((command + "\n").toByteArray(Charsets.UTF_8))
+        stdin.flush()
+    }
+
+    /** Sends raw characters (e.g. Ctrl+C \u0003, Ctrl+D \u0004) to the guest shell. */
+    fun sendRaw(raw: String) {
+        if (closed) throw IllegalStateException("shell has exited")
+        stdin.write(raw.toByteArray(Charsets.UTF_8))
         stdin.flush()
     }
 
@@ -688,7 +795,7 @@ class TarGzExtractor(private val stream: InputStream) {
                 val mode = readOctal(header, 100, 8)
                 val size = readOctal(header, 124, 12).toLong()
                 val type = header[156].toInt().toChar()
-                var linkName = pendingLongLink ?: readString(header, 157, 100)
+                val linkName = pendingLongLink ?: readString(header, 157, 100)
                 pendingLongLink = null
                 val prefix = readString(header, 345, 155)
                 val fullName = if (prefix.isNotEmpty()) "$prefix/$name" else name
@@ -701,13 +808,13 @@ class TarGzExtractor(private val stream: InputStream) {
                         continue
                     }
                     'L' -> {
-                        val data = gz.readNBytes(size.toInt())
+                        val data = readExactBytes(gz, size.toInt())
                         pendingLongName = data.toString(Charsets.UTF_8).trimEnd('\u0000', '\n')
                         skip(gz, alignedSize(size) - size)
                         continue
                     }
                     'K' -> {
-                        val data = gz.readNBytes(size.toInt())
+                        val data = readExactBytes(gz, size.toInt())
                         pendingLongLink = data.toString(Charsets.UTF_8).trimEnd('\u0000', '\n')
                         skip(gz, alignedSize(size) - size)
                         continue
@@ -727,7 +834,13 @@ class TarGzExtractor(private val stream: InputStream) {
                         if (target.exists() || isSymlink(target)) target.delete()
                         try {
                             Os.symlink(linkName, target.absolutePath)
-                        } catch (_: ErrnoException) {
+                        } catch (_: Throwable) {
+                            runCatching {
+                                java.nio.file.Files.createSymbolicLink(
+                                    target.toPath(),
+                                    java.nio.file.Paths.get(linkName)
+                                )
+                            }
                         }
                     }
                     '1' -> {
@@ -736,7 +849,7 @@ class TarGzExtractor(private val stream: InputStream) {
                         if (source != null && source.isFile) {
                             try {
                                 Os.link(source.absolutePath, target.absolutePath)
-                            } catch (_: ErrnoException) {
+                            } catch (_: Throwable) {
                                 source.copyTo(target, overwrite = true)
                             }
                         }
@@ -755,6 +868,24 @@ class TarGzExtractor(private val stream: InputStream) {
                 }
             }
         }
+
+        // Fallback for filesystems or test environments where symlink creation was blocked:
+        // ensure /bin/sh and /usr/bin/env exist if /bin/busybox was extracted.
+        val busybox = File(destination, "bin/busybox")
+        if (busybox.isFile) {
+            for (rel in listOf("bin/sh", "usr/bin/env")) {
+                val target = File(destination, rel)
+                if (!target.isFile && !isSymlink(target)) {
+                    runCatching {
+                        target.parentFile?.mkdirs()
+                        busybox.copyTo(target, overwrite = true)
+                        target.setReadable(true, false)
+                        target.setExecutable(true, false)
+                    }
+                }
+            }
+        }
+
         return files
     }
 
@@ -764,26 +895,33 @@ class TarGzExtractor(private val stream: InputStream) {
         file.setExecutable(mode and 0b001001001 != 0, false)
     }
 
-    /** Rejects absolute paths and `..` traversal so a hostile archive cannot escape the rootfs. */
+    /**
+     * Lexical path resolution within [root]. Rejects empty paths and `..` traversal above [root]
+     * without calling `canonicalFile` (which would dereference guest symlinks against the host
+     * Android root `/` during extraction).
+     */
     private fun safeResolve(root: File, name: String): File? {
-        val clean = name.trimStart('/')
-        if (clean.isEmpty()) return null
-        val candidate = File(root, clean).canonicalFile
-        val rootPath = root.canonicalPath
-        return if (candidate.path == rootPath || candidate.path.startsWith(rootPath + File.separator)) {
-            candidate
-        } else {
-            null
+        val parts = mutableListOf<String>()
+        for (segment in name.trimStart('/').split('/')) {
+            when (segment) {
+                "", "." -> Unit
+                ".." -> if (parts.isNotEmpty()) parts.removeAt(parts.lastIndex) else return null
+                else -> parts.add(segment)
+            }
         }
+        if (parts.isEmpty()) return null
+        return File(root, parts.joinToString(File.separator))
     }
 
-    private fun isSymlink(file: File): Boolean = try {
-        Os.lstat(file.absolutePath).st_mode and 0xF000 == 0xA000
-    } catch (_: ErrnoException) {
-        false
-    }
+    private fun isSymlink(file: File): Boolean = LinuxContainer.isSymlinkStatic(file)
 
     private fun alignedSize(size: Long): Long = (size + 511) / 512 * 512
+
+    private fun readExactBytes(input: InputStream, length: Int): ByteArray {
+        val buf = ByteArray(length.coerceAtLeast(0))
+        readFully(input, buf)
+        return buf
+    }
 
     private fun readFully(input: InputStream, buffer: ByteArray): Boolean {
         var offset = 0

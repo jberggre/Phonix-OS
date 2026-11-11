@@ -9,7 +9,6 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.BuildConfig
 import com.example.engine.LinuxDesktop
 import com.example.engine.LinuxRuntime
 import com.example.engine.LocalAiEngine
@@ -20,6 +19,7 @@ import com.example.model.DistroCatalog
 import com.example.model.LinuxAppCatalog
 import com.example.model.LinuxAppEntry
 import com.example.model.LinuxAppStatus
+import com.example.model.LinuxDesktopEnvironment
 import com.example.model.LinuxDistro
 import com.example.model.ServerServiceItem
 import com.example.model.StorageState
@@ -30,7 +30,6 @@ import com.example.model.MotherboardCoolingState
 import com.example.model.DebloatCatalog
 import com.example.model.DebloatPackage
 import com.example.model.DesktopCustomization
-import com.example.model.DesktopIconGrid
 import com.example.model.DesktopShortcut
 import com.example.model.DesktopWallpaper
 import com.example.model.DesktopAccentColor
@@ -57,10 +56,8 @@ import com.example.model.DeviceCompatibilityClassifier
 import com.example.model.WindowBounds
 import com.example.model.WindowGeometry
 import com.example.model.AppUpdateInfo
+import com.example.model.VersionComparator
 import com.example.model.UpdateCheckState
-import com.example.model.UpdateFeed
-import com.example.model.UpdateManifest
-import com.example.engine.UpdateInstaller
 import com.example.model.AiChatMessage
 import com.example.model.AiEngineState
 import com.example.model.DefaultAiKnowledge
@@ -113,7 +110,8 @@ enum class AppNavTab(val title: String, val icon: String) {
     SERVERS("Servers", "dns"),
     PARTITIONS("Storage", "storage"),
     DISTROS("Linux System", "apps"),
-    APPS("PC Apps", "store")
+    APPS("PC Apps", "store"),
+    HELP("Help & Docs", "help")
 }
 
 enum class ContainerStatus {
@@ -136,6 +134,20 @@ data class SystemTelemetry(
     val hasReading: Boolean = false
 )
 
+data class TerminalTab(
+    val id: String,
+    val title: String,
+    val lines: List<TerminalLine> = emptyList(),
+    val commandHistory: List<String> = emptyList(),
+    val historyCursor: Int = -1
+)
+
+data class LinuxPinCandidate(
+    val title: String,
+    val command: String,
+    val isGui: Boolean
+)
+
 data class PhonixUiState(
     val activeTab: AppNavTab = AppNavTab.DESKTOP,
     val containerStatus: ContainerStatus = ContainerStatus.STOPPED,
@@ -153,6 +165,9 @@ data class PhonixUiState(
     val startMenuSearchQuery: String = "",
     val terminalLines: List<TerminalLine> = emptyList(),
     val terminalInput: String = "",
+    val terminalTabs: List<TerminalTab> = listOf(TerminalTab(id = "tab_1", title = "Shell 1")),
+    val activeTerminalTabId: String = "tab_1",
+    val recentPinCandidates: List<LinuxPinCandidate> = emptyList(),
     val isBenchmarkRunning: Boolean = false,
     val benchmarkLog: List<String> = emptyList(),
     val notificationMessage: String? = null,
@@ -180,23 +195,6 @@ data class PhonixUiState(
     val isTopNotchExpanded: Boolean = false,
     val activeContextMenu: DesktopContextMenuData? = null,
     val isOobeCompleted: Boolean = false,
-    /** Packs installed in private storage, as the library dialog lists them. */
-    val libraryPacks: List<com.example.model.InstalledPack> = emptyList(),
-    /** True while an import is being read off the main thread. */
-    val libraryPackBusy: Boolean = false,
-    /** The screen the desktop is currently on, as measured by the activity. */
-    val desktopDisplayKey: String = "",
-    val desktopDisplayLabel: String = "",
-    /** The deck arrangement remembered for that screen, if any. */
-    val desktopDeckPreset: String = "",
-    /** service id -> one-line supervision state, derived from probes and never assumed. */
-    val supervision: Map<String, String> = emptyMap(),
-    /** Manifests read at construction: accepted declarations plus every rejection, with reasons. */
-    val manifests: com.example.model.ManifestSet = com.example.model.ManifestSet(),
-    /** pack id -> what the last download attempt reported, so a refusal is visible where it happened. */
-    val packStates: Map<String, String> = emptyMap(),
-    /** Packs whose pinned digest was verified and whose bytes are installed in the guest. */
-    val verifiedPacks: Set<String> = emptySet(),
     val deviceChanges: DeviceChangeChoices = DeviceChangeChoices(),
     val deviceCapabilityReport: DeviceCapabilityReport? = null,
     val foldPosture: FoldPosture = FoldPosture.UNKNOWN,
@@ -207,8 +205,6 @@ data class PhonixUiState(
     val installedBrowsers: List<com.example.util.InstalledBrowserInfo> = emptyList(),
     /** package name -> whether this device actually has it, so the trim list stops guessing. */
     val debloatInstalled: Map<String, Boolean> = emptyMap(),
-    /** Packages this install has hidden as device owner, so the list can offer an undo. */
-    val debloatHidden: Set<String> = emptySet(),
     /** The exact command text copied last, so the UI can confirm the paste really exists. */
     val debloatCopiedCommand: String? = null,
     /** Advice about the ticked packages, and whether a model or the built-in summary wrote it. */
@@ -264,12 +260,11 @@ data class PhonixUiState(
     // VS Code is only "running" after a real loopback connection succeeds.
     val vsCodeServerRunning: Boolean = false,
     val vsCodeServerProbing: Boolean = false,
-    val vsCodeServerStatus: String = "Server not started",
-    // The CLI counts as installed only after it printed a version from inside the guest.
-    val vsCodeCliVersion: String? = null,
-    val vsCodeInstalling: Boolean = false,
-    val vsCodeInstallStatus: String = ""
-)
+    val vsCodeServerStatus: String = "Server not started"
+) {
+    val activeDesktopEnvironment: LinuxDesktopEnvironment
+        get() = oobeConfig.selectedDe
+}
 
 enum class BootTarget {
     LINUX_DISTRO_DIRECT,
@@ -379,65 +374,17 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     private var aiChatJob: Job? = null
     private var aiStreamingMessageId: String? = null
 
-    /** The screen the desktop is on, as last reported by the activity. */
-    private var currentDisplay: com.example.model.DisplayIdentity? = null
-
-    /** Display key -> arrangement, loaded once at construction. */
-    private var deckProfiles = com.example.model.DeckProfiles()
-
-    /** Screens already taken over in this process, so a display event cannot re-apply forever. */
-    private val deckAppliedTo = mutableSetOf<String>()
-
-    /**
-     * Keeps guest services alive. It lives in the view model's scope because PRoot has no init: when
-     * this process dies there is nothing left to restart anything, which is stated in the UI rather
-     * than hidden.
-     */
-    private val serviceSupervisor = com.example.engine.ServiceSupervisor(
-        scope = viewModelScope,
-        runner = com.example.engine.GuestServiceRunner(getApplication())
-    )
-
-    /**
-     * Module manifests, read once at construction. They only ever add: a missing or rejected file
-     * leaves the built-in registry behaviour untouched, and every rejection is reported.
-     */
-    private var manifests = com.example.model.ManifestSet()
-
-    /**
-     * Fetches pinned packs. Its temporary directory lives under `packs/`, which is not a guest tree,
-     * so a half download is never somewhere a guest command could run it.
-     */
-    private val packDownloader = com.example.engine.PackDownloader(
-        privateRoot = java.io.File(getApplication<Application>().filesDir, "packs"),
-        guestRoot = {
-            runCatching { com.example.engine.LinuxRuntime.container(getApplication<Application>()).rootfs }
-                .getOrNull()
-                ?.takeIf { it.isDirectory }
-        }
-    )
-
     init {
-        // Packs are read from private storage once, at construction, so the shelves are complete
-        // before the first screen asks for them.
-        com.example.model.KnowledgeLibrary.attachPacks(libraryPackStore())
-        // Manifests are read at construction and again when the Server Hub opens, so a
-        // manifest dropped into private storage takes effect without reinstalling the app.
-        reloadModuleManifests()
-        // Deck profiles are per screen; a corrupt or unknown entry is dropped rather than applied.
-        deckProfiles = com.example.model.DeckProfiles(
-            com.example.util.DesktopPrefs.loadDeckProfiles(getApplication())
-                .mapNotNull { (displayKey, name) ->
-                    runCatching { displayKey to com.example.model.DeckPreset.valueOf(name) }.getOrNull()
-                }
-                .toMap()
-        )
         val prefs = application.getSharedPreferences("phonix_os_prefs", Context.MODE_PRIVATE)
         val oobeDone = prefs.getBoolean("oobe_completed", false)
         val savedChanges = DeviceSetupPreferences.choices(application)
+        val activeContainerDistro = LinuxRuntime.container(application).activeDistro()
+        val activeDe = LinuxDesktop.activeDesktopEnvironment(application)
         val setupConfig = OobeSetupConfig(
             deviceChanges = savedChanges,
-            enableLinuxDesktop = savedChanges.startLinuxOnLaunch
+            enableLinuxDesktop = savedChanges.startLinuxOnLaunch,
+            selectedDistroId = activeContainerDistro.id,
+            selectedDe = activeDe
         )
         // Personalisation is remembered across launches: wallpaper, accent, toggles, icon
         // positions, renames and the taskbar pins.
@@ -447,31 +394,12 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 isOobeCompleted = oobeDone,
                 deviceChanges = savedChanges,
                 oobeConfig = setupConfig,
+                currentDistro = activeContainerDistro,
                 customization = savedDesktop ?: it.customization
             )
         }
         persistDesktopLayout()
         persistWindowLayout()
-
-        // The persisted guest is the truth: currentDistro defaulted to the first catalog entry
-        // (Alpine), so the terminal prompt and boot splash named Alpine after switching to Debian.
-        viewModelScope.launch(Dispatchers.IO) {
-            val active = runCatching { LinuxRuntime.container(getApplication<Application>()).activeDistro() }.getOrNull()
-            if (active != null) _uiState.update { it.copy(currentDistro = active) }
-        }
-
-        // Supervision states are mirrored for the UI on every transition.
-        viewModelScope.launch {
-            serviceSupervisor.states.collect { states ->
-                _uiState.update { state ->
-                    state.copy(
-                        supervision = states.mapValues { (_, supervisionState) ->
-                            com.example.model.SupervisionMachine.describe(supervisionState)
-                        }
-                    )
-                }
-            }
-        }
 
         detectLocalIp()
         initTerminalWelcome()
@@ -515,101 +443,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
      * first measured bounds arrive, so a live rotation or dock/undock still normalises the
      * windows the user has now instead of swapping in an old layout.
      */
-    /**
-     * The activity reports the display it is actually on, with that display's own size in dp.
-     *
-     * The view model's own bounds are the phone's until the window has been measured, which is too
-     * late for a preset applied at dock time: arranging 1920x1080 windows against a 411 dp viewport
-     * squashes all of them. So the caller supplies the size it is arranged for.
-     */
-    fun onDesktopDisplayChanged(
-        identity: com.example.model.DisplayIdentity,
-        bounds: com.example.model.WindowBounds,
-        isExternal: Boolean
-    ) {
-        currentDisplay = identity
-        val remembered = if (isExternal) deckProfiles.presetFor(identity) else null
-        _uiState.update {
-            it.copy(
-                desktopDisplayKey = identity.key,
-                desktopDisplayLabel = identity.label,
-                desktopDeckPreset = remembered?.name.orEmpty()
-            )
-        }
-        if (!isExternal) return
-        if (!com.example.model.DeckProfiles.mayTakeOverOnAppear(identity)) return
-        if (!deckAppliedTo.add(identity.key)) return
-        val preset = remembered ?: return
-        applyDeckPresetInternal(
-            preset = preset,
-            bounds = bounds,
-            message = "Deck ${preset.title} restored for ${identity.label}"
-        )
-        android.util.Log.i(
-            "PhonixDeck",
-            "applied ${preset.name} for ${identity.key} at ${bounds.widthDp}x${bounds.heightDp} dp"
-        )
-    }
-
-    /**
-     * Applies one of the three deck arrangements to the display currently in front of the phone, and
-     * remembers it for that display so a replug restores it.
-     */
-    fun applyDeckPreset(preset: com.example.model.DeckPreset) {
-        val bounds = windowBounds.value
-        if (bounds == null) {
-            _uiState.update {
-                it.copy(notificationMessage = "The desktop size is not known yet; try again in a moment.")
-            }
-            return
-        }
-        currentDisplay?.let { identity ->
-            if (com.example.model.DeckProfiles.mayTakeOverOnAppear(identity) &&
-                deckProfiles.remember(identity, preset)
-            ) {
-                persistDeckProfiles()
-            }
-            _uiState.update { it.copy(desktopDeckPreset = preset.name) }
-        }
-        applyDeckPresetInternal(preset, bounds, "Deck layout: ${preset.title}")
-    }
-
-    fun forgetDeckForCurrentDisplay() {
-        val identity = currentDisplay ?: return
-        if (deckProfiles.forget(identity)) persistDeckProfiles()
-        deckAppliedTo.remove(identity.key)
-        _uiState.update {
-            it.copy(
-                desktopDeckPreset = "",
-                notificationMessage = "No deck remembered for ${identity.label}"
-            )
-        }
-    }
-
-    private fun applyDeckPresetInternal(
-        preset: com.example.model.DeckPreset,
-        bounds: com.example.model.WindowBounds,
-        message: String
-    ) {
-        val windows = preset.windows(bounds)
-        maxZIndex = (windows.maxOfOrNull { it.zIndex } ?: 0f) + 1f
-        _uiState.update {
-            it.copy(
-                windows = windows,
-                activeWindowId = windows.lastOrNull()?.id,
-                isStartMenuOpen = false,
-                notificationMessage = message
-            )
-        }
-    }
-
-    private fun persistDeckProfiles() {
-        com.example.util.DesktopPrefs.saveDeckProfiles(
-            getApplication(),
-            deckProfiles.asMap().mapValues { (_, preset) -> preset.name }
-        )
-    }
-
     private fun persistWindowLayout() {
         viewModelScope.launch {
             combine(_uiState.map { it.windows }.distinctUntilChanged(), windowBounds) { windows, bounds ->
@@ -765,25 +598,33 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** The guest mounted right now; package commands follow its own manager, not a hardcoded apk. */
-    private fun activeGuestDistro(): com.example.model.LinuxDistro =
-        runCatching { LinuxRuntime.container(getApplication()).activeDistro() }
-            .getOrDefault(com.example.model.DistroCatalog.alpine)
-
-    /** Runs the real install in the guest and reports its own output, including failures. */
+    /** Runs the real package manager (`apk`, `apt-get`, or `pacman`) in the guest and reports its own output. */
     fun installLinuxApp(entry: LinuxAppEntry) {
         if (_uiState.value.linuxAppBusyPackage != null) return
+        val pkgManager = LinuxRuntime.container(getApplication()).activeDistro().packageManager
+        val cmdSummary = when (pkgManager) {
+            "apt" -> "apt-get update && apt-get install -y ${entry.packageName}"
+            "pacman" -> "pacman -Sy --noconfirm ${entry.packageName}"
+            else -> "apk add --no-cache ${entry.packageName}"
+        }
         _uiState.update {
             it.copy(
                 linuxAppBusyPackage = entry.packageName,
-                linuxAppLog = listOf(activeGuestDistro().installCommand(entry.packageName))
+                linuxAppLog = listOf(cmdSummary)
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (!LinuxRuntime.isRunning) LinuxRuntime.start(getApplication())
+                val installCmd = "if command -v apk >/dev/null 2>&1; then " +
+                    "apk add --no-cache ${entry.packageName} 2>&1; " +
+                    "elif command -v apt-get >/dev/null 2>&1; then " +
+                    "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ${entry.packageName} 2>&1; " +
+                    "elif command -v pacman >/dev/null 2>&1; then " +
+                    "pacman -Sy --noconfirm ${entry.packageName} 2>&1; " +
+                    "fi"
                 val output = LinuxRuntime.run(
-                    "${activeGuestDistro().installCommand(entry.packageName)} 2>&1",
+                    installCmd,
                     timeoutMs = 600_000
                 )
                 val tail = output?.lines()?.filter { it.isNotBlank() }?.takeLast(14).orEmpty()
@@ -796,6 +637,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
                 refreshLinuxApps()
+                probeAndOfferPinCandidates(listOf(entry.packageName))
             } catch (t: Throwable) {
                 _uiState.update {
                     it.copy(
@@ -809,13 +651,23 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun linuxProbeCommand(): String =
         LinuxAppCatalog.apps.joinToString("; ") { entry ->
-            "${activeGuestDistro().installedQuery(entry.packageName)} && echo $HAVE_PREFIX${entry.packageName}"
+            "(apk info -e ${entry.packageName} >/dev/null 2>&1 || " +
+                "dpkg -s ${entry.packageName} >/dev/null 2>&1 || " +
+                "pacman -Qi ${entry.packageName} >/dev/null 2>&1 || " +
+                "command -v ${entry.packageName} >/dev/null 2>&1) && echo $HAVE_PREFIX${entry.packageName}"
         }
 
     private fun bootstrapLinux() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 LinuxRuntime.start(getApplication())
+                val activeDistro = LinuxRuntime.container(getApplication()).activeDistro()
+                _uiState.update {
+                    it.copy(
+                        containerStatus = ContainerStatus.RUNNING,
+                        currentDistro = activeDistro
+                    )
+                }
                 // A foreground service is only started when the user opted into keeping
                 // Linux alive beyond the visible app session.
                 if (DeviceSetupPreferences.shouldKeepLinuxInBackground(getApplication())) {
@@ -827,17 +679,37 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     TerminalLine("[container] could not start: ${t.javaClass.simpleName}: ${t.message}", TerminalLine.LineType.ERROR)
                 )
                 appendTerminalLine(
-                    TerminalLine("Built-in command emulator remains active for this session.", TerminalLine.LineType.SYSTEM)
+                    TerminalLine("Start the container from the Terminal power button when ready.", TerminalLine.LineType.SYSTEM)
                 )
             }
         }
     }
 
     private fun appendTerminalLine(line: TerminalLine) {
+        if (line.text.startsWith("[PHONIX_PIN]")) {
+            val payload = line.text.removePrefix("[PHONIX_PIN]").trim()
+            val parts = payload.split("|")
+            if (parts.size >= 2) {
+                val title = parts[0].trim().ifBlank { parts[1].trim() }
+                val cmd = parts[1].trim()
+                val isGui = parts.getOrNull(2)?.trim().equals("true", ignoreCase = true)
+                if (cmd.isNotEmpty()) {
+                    pinLinuxCommandToDesktop(title = title, command = cmd, isGui = isGui)
+                }
+            }
+            return
+        }
         _uiState.update { state ->
-            val lines = state.terminalLines + line
-            // A long-lived 24/7 shell would otherwise grow without bound.
-            state.copy(terminalLines = if (lines.size > 400) lines.takeLast(300) else lines)
+            val updatedLines = (state.terminalLines + line).let {
+                if (it.size > 400) it.takeLast(300) else it
+            }
+            val updatedTabs = state.terminalTabs.map { tab ->
+                if (tab.id == state.activeTerminalTabId) tab.copy(lines = updatedLines) else tab
+            }
+            state.copy(
+                terminalLines = updatedLines,
+                terminalTabs = updatedTabs
+            )
         }
     }
 
@@ -877,36 +749,36 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun initTerminalWelcome() {
-        // The banner has to name the guest that is actually installed; it used to say Alpine
-        // unconditionally, so a Debian install opened to "Alpine Linux terminal" and an `apk add`
-        // hint that the guest cannot run.
-        val guest = runCatching { LinuxRuntime.container(getApplication<Application>()).activeDistro() }
-            .getOrDefault(DistroCatalog.alpine)
-        val sampleInstall = if (guest.isBundled) "apk add nginx" else "${guest.packageManager} install nginx"
+        val distro = LinuxRuntime.container(getApplication()).activeDistro()
+        val welcomeLines = listOf(
+            TerminalLine(
+                "===========================================================",
+                TerminalLine.LineType.ACCENT
+            ),
+            TerminalLine(
+                " Phonix OS Desktop — ${distro.name} (${distro.version}, aarch64)",
+                TerminalLine.LineType.ACCENT
+            ),
+            TerminalLine(
+                " Container: proot userspace (${distro.packageManager}) | No root required",
+                TerminalLine.LineType.SYSTEM
+            ),
+            TerminalLine(
+                " Tip: Use `phonix-pin \"App Name\" <cmd> [--gui]` to add a desktop shortcut",
+                TerminalLine.LineType.OUTPUT
+            ),
+            TerminalLine(
+                "===========================================================",
+                TerminalLine.LineType.ACCENT
+            )
+        )
         _uiState.update { state ->
+            val updatedTabs = state.terminalTabs.mapIndexed { idx, tab ->
+                if (idx == 0) tab.copy(lines = welcomeLines) else tab
+            }
             state.copy(
-                terminalLines = listOf(
-                    TerminalLine(
-                        "===========================================================",
-                        TerminalLine.LineType.ACCENT
-                    ),
-                    TerminalLine(
-                        " Phonix OS Desktop — ${guest.name} terminal (aarch64)",
-                        TerminalLine.LineType.ACCENT
-                    ),
-                    TerminalLine(
-                        " Container: proot userspace, no root required | SoC telemetry: live",
-                        TerminalLine.LineType.SYSTEM
-                    ),
-                    TerminalLine(
-                        " Once booted, commands run for real: $sampleInstall, ps, df -h",
-                        TerminalLine.LineType.OUTPUT
-                    ),
-                    TerminalLine(
-                        "===========================================================",
-                        TerminalLine.LineType.ACCENT
-                    )
-                )
+                terminalLines = welcomeLines,
+                terminalTabs = updatedTabs
             )
         }
     }
@@ -1155,12 +1027,167 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(terminalInput = input) }
     }
 
+    fun addTerminalTab() {
+        _uiState.update { state ->
+            val nextNum = state.terminalTabs.size + 1
+            val newId = "tab_${System.currentTimeMillis() % 100000}"
+            val distro = state.currentDistro
+            val initialLines = listOf(
+                TerminalLine(
+                    "# Workspace Tab $nextNum (${distro.name} — shared proot shell)",
+                    TerminalLine.LineType.SYSTEM
+                )
+            )
+            val newTab = TerminalTab(
+                id = newId,
+                title = "Shell $nextNum",
+                lines = initialLines
+            )
+            state.copy(
+                terminalTabs = state.terminalTabs + newTab,
+                activeTerminalTabId = newId,
+                terminalLines = initialLines,
+                terminalInput = ""
+            )
+        }
+    }
+
+    fun selectTerminalTab(tabId: String) {
+        _uiState.update { state ->
+            val target = state.terminalTabs.firstOrNull { it.id == tabId } ?: return@update state
+            state.copy(
+                activeTerminalTabId = target.id,
+                terminalLines = target.lines
+            )
+        }
+    }
+
+    fun closeTerminalTab(tabId: String) {
+        _uiState.update { state ->
+            if (state.terminalTabs.size <= 1) {
+                return@update state.copy(
+                    terminalLines = emptyList(),
+                    terminalTabs = state.terminalTabs.map { it.copy(lines = emptyList()) }
+                )
+            }
+            val remaining = state.terminalTabs.filterNot { it.id == tabId }
+            val nextActive = if (state.activeTerminalTabId == tabId) {
+                remaining.last()
+            } else {
+                remaining.firstOrNull { it.id == state.activeTerminalTabId } ?: remaining.last()
+            }
+            state.copy(
+                terminalTabs = remaining,
+                activeTerminalTabId = nextActive.id,
+                terminalLines = nextActive.lines
+            )
+        }
+    }
+
+    /**
+     * Handles Termux-style helper keys for a line-oriented shell:
+     * - UP / DOWN: navigates real command history for the active tab
+     * - TAB: completes common Linux commands or file paths from the guest
+     * - CTRL_C: sends SIGINT (\u0003 and pkill -INT) to interrupt running guest jobs
+     * - CTRL_D: sends EOF (\u0004)
+     * - token strings (`~`, `/`, `-`, `|`, `&&`, `>`): inserts into the terminal input field
+     */
+    fun onTerminalExtraKey(key: String) {
+        when (key) {
+            "UP" -> navigateTerminalHistory(direction = -1)
+            "DOWN" -> navigateTerminalHistory(direction = 1)
+            "CTRL_C" -> {
+                if (LinuxRuntime.isRunning) {
+                    LinuxRuntime.sendRaw("\u0003")
+                    LinuxRuntime.send("pkill -INT -P 1 >/dev/null 2>&1 || true")
+                    appendTerminalLine(TerminalLine("^C (interrupt signal sent)", TerminalLine.LineType.SYSTEM))
+                }
+                _uiState.update { it.copy(terminalInput = "") }
+            }
+            "CTRL_D" -> {
+                if (LinuxRuntime.isRunning) {
+                    LinuxRuntime.sendRaw("\u0004")
+                    appendTerminalLine(TerminalLine("^D (EOF sent)", TerminalLine.LineType.SYSTEM))
+                }
+            }
+            "TAB" -> autoCompleteTerminalInput()
+            else -> {
+                _uiState.update { state ->
+                    state.copy(terminalInput = state.terminalInput + key)
+                }
+            }
+        }
+    }
+
+    private fun navigateTerminalHistory(direction: Int) {
+        _uiState.update { state ->
+            val activeTab = state.terminalTabs.firstOrNull { it.id == state.activeTerminalTabId }
+                ?: return@update state
+            val history = activeTab.commandHistory
+            if (history.isEmpty()) return@update state
+            val currentIdx = if (activeTab.historyCursor < 0) history.size else activeTab.historyCursor
+            val nextIdx = (currentIdx + direction).coerceIn(0, history.size)
+            val nextInput = if (nextIdx in history.indices) history[nextIdx] else ""
+            val updatedTabs = state.terminalTabs.map { tab ->
+                if (tab.id == activeTab.id) tab.copy(historyCursor = nextIdx) else tab
+            }
+            state.copy(
+                terminalInput = nextInput,
+                terminalTabs = updatedTabs
+            )
+        }
+    }
+
+    private fun autoCompleteTerminalInput() {
+        val current = _uiState.value.terminalInput
+        val tokens = current.split(" ")
+        val prefix = tokens.lastOrNull()?.trim().orEmpty()
+        if (prefix.isEmpty()) return
+
+        val commonCommands = listOf(
+            "apk", "apt", "apt-get", "pacman", "phonix-pin", "python3", "uname", "htop",
+            "ls", "cd", "cat", "mkdir", "rm", "cp", "mv", "chmod", "chown", "curl", "wget",
+            "git", "nano", "vim", "grep", "find", "ps", "kill", "pkill", "df", "free",
+            "ip", "ping", "netstat", "tar", "gzip", "clear", "reboot", "poweroff"
+        )
+        val match = commonCommands.firstOrNull { it.startsWith(prefix, ignoreCase = true) && it != prefix }
+        if (match != null) {
+            val head = if (tokens.size > 1) tokens.dropLast(1).joinToString(" ") + " " else ""
+            _uiState.update { it.copy(terminalInput = "$head$match ") }
+            return
+        }
+
+        if (LinuxRuntime.isRunning) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val safePrefix = prefix.replace("'", "")
+                val out = LinuxRuntime.run("ls -1d ${safePrefix}* 2>/dev/null | head -1", timeoutMs = 2_500)
+                val firstPath = out?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() }
+                if (!firstPath.isNullOrBlank()) {
+                    val head = if (tokens.size > 1) tokens.dropLast(1).joinToString(" ") + " " else ""
+                    _uiState.update { it.copy(terminalInput = "$head$firstPath") }
+                }
+            }
+        }
+    }
+
     fun executeTerminalCommand(command: String) {
         val trimmed = command.trim()
         if (trimmed.isEmpty()) return
 
+        // Record in active tab's command history
+        _uiState.update { state ->
+            val updatedTabs = state.terminalTabs.map { tab ->
+                if (tab.id == state.activeTerminalTabId) {
+                    val newHistory = (tab.commandHistory + trimmed).takeLast(100)
+                    tab.copy(commandHistory = newHistory, historyCursor = newHistory.size)
+                } else tab
+            }
+            state.copy(terminalTabs = updatedTabs)
+        }
+
         if (trimmed.equals("clear", ignoreCase = true)) {
-            _uiState.update { it.copy(terminalLines = emptyList(), terminalInput = "") }
+            clearTerminal()
+            _uiState.update { it.copy(terminalInput = "") }
             return
         }
 
@@ -1177,172 +1204,126 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        // A live container answers for real. The emulator only covers the window between
-        // activity start and the shell being ready (or a failed unpack).
+        val distroId = _uiState.value.currentDistro.id
+        // A live container answers for real.
         if (LinuxRuntime.isRunning && LinuxRuntime.send(trimmed)) {
-            _uiState.update {
-                it.copy(
-                    terminalLines = it.terminalLines + TerminalLine(
-                        "phonix@phonix-minipc:~$ $trimmed",
-                        TerminalLine.LineType.INPUT
-                    ),
-                    terminalInput = ""
+            appendTerminalLine(
+                TerminalLine(
+                    "root@$distroId:~# $trimmed",
+                    TerminalLine.LineType.INPUT
                 )
+            )
+            _uiState.update { it.copy(terminalInput = "") }
+
+            val installedPkgs = parseInstalledPackagesFromCommand(trimmed)
+            if (installedPkgs.isNotEmpty()) {
+                probeAndOfferPinCandidates(installedPkgs)
             }
             return
         }
 
         // No container, no answer. Saying so is better than printing a prepared response.
-        _uiState.update { curr ->
-            curr.copy(
-                terminalLines = curr.terminalLines + TerminalLine(
-                    "[phonix] the Linux container is not running - start it from the Terminal power button",
-                    TerminalLine.LineType.ERROR
-                ),
-                terminalInput = ""
+        appendTerminalLine(
+            TerminalLine(
+                "[phonix] the Linux container is not running - start it from the Terminal power button",
+                TerminalLine.LineType.ERROR
             )
-        }
-    }
-
-    fun clearTerminal() {
-        _uiState.update { it.copy(terminalLines = emptyList()) }
-    }
-
-    // Server Management
-    /**
-     * Server Hub action.
-     *
-     * There is no daemon to switch on from here: the package either exists inside the guest or
-     * it does not. So this asks the guest and, when missing, runs the real install command in
-     * the terminal. Nothing is reported as running until the process is actually found.
-     */
-    /**
-     * Starts or stops supervising a catalog service.
-     *
-     * Deliberately separate from [toggleServerService]: that path installs a package or prints the
-     * start command, and changing it would change behaviour people already rely on. This one adds
-     * the restart policy and a health signal on top, and refuses to start when the guest is not up.
-     */
-    fun toggleServiceSupervision(serviceId: String) {
-        val service = _uiState.value.serverServices.find { it.id == serviceId } ?: return
-        val current = serviceSupervisor.state(serviceId)
-        val active = current != null && current.phase in setOf(
-            com.example.model.SupervisionPhase.STARTING,
-            com.example.model.SupervisionPhase.RUNNING,
-            com.example.model.SupervisionPhase.BACKOFF
         )
-        if (active) {
-            serviceSupervisor.stopSupervising(serviceId)
-            _uiState.update {
-                it.copy(notificationMessage = "${service.name}: no longer supervised (the process keeps running)")
-            }
-            return
-        }
-        if (!LinuxRuntime.isRunning) {
-            _uiState.update {
-                it.copy(notificationMessage = "Start the Linux container first (Terminal power button)")
-            }
-            return
-        }
-        if (!service.isInstalled) {
-            _uiState.update {
-                it.copy(notificationMessage = "Install ${service.apkPackage} in the guest first")
-            }
-            return
-        }
-        val declared = manifests.service(serviceId)
-        serviceSupervisor.start(
-            if (declared != null) com.example.engine.ServiceSupervisor.specFor(service, declared)
-            else com.example.engine.ServiceSupervisor.specFor(service)
-        )
-        _uiState.update {
-            it.copy(notificationMessage = "Supervising ${service.name}: restarts and health come from the guest")
-        }
+        _uiState.update { it.copy(terminalInput = "") }
     }
 
     /**
-     * Reads module manifests from private storage.
-     *
-     * Called at construction and again when the Server Hub opens. Rebuilding only the declared
-     * services keeps a reload idempotent: the catalog keeps the state the guest reported for it, and
-     * a manifest that was fixed or deleted is reflected instead of lingering from the last read.
+     * Extracts package names from `apk add ...`, `apt install ...`, `apt-get install ...`, or
+     * `pacman -S ...` so Phonix can verify if they installed a runnable binary and offer a
+     * 1-click "Pin to Desktop" chip.
      */
-    /**
-     * Downloads and installs one pinned pack.
-     *
-     * The outcome text is the UI's evidence: "Verified: N bytes installed" appears only after the
-     * digest matched, and every failure path reports its refusal reason instead.
-     */
-    fun downloadPack(packId: String) {
-        val catalogue = packCatalogue()
-        val release = catalogue.firstOrNull { it.id == packId.trim().lowercase(java.util.Locale.ROOT) }
-        viewModelScope.launch {
-            _uiState.update { it.copy(packStates = it.packStates + (packId to "Downloading and verifying...")) }
-            val result = packDownloader.install(release)
-            val verified = runCatching { packDownloader.verified(catalogue) }.getOrDefault(emptySet())
-            val outcome = result.fold(
-                onSuccess = { file -> "Verified: ${file.length()} bytes installed" },
-                onFailure = { error -> "Refused: " + (error.message ?: "unknown error") }
-            )
-            _uiState.update {
-                it.copy(
-                    packStates = it.packStates + (packId to outcome),
-                    verifiedPacks = verified,
-                    notificationMessage = outcome
-                )
-            }
+    private fun parseInstalledPackagesFromCommand(cmd: String): List<String> {
+        val tokens = cmd.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.size < 2) return emptyList()
+        val afterSubcmd = when {
+            tokens[0] == "apk" && tokens.contains("add") -> tokens.dropWhile { it != "add" }.drop(1)
+            (tokens[0] == "apt" || tokens[0] == "apt-get") && tokens.contains("install") ->
+                tokens.dropWhile { it != "install" }.drop(1)
+            tokens[0] == "pacman" && tokens.any { it.startsWith("-S") } ->
+                tokens.drop(1)
+            else -> emptyList()
         }
+        return afterSubcmd
+            .filter { !it.startsWith("-") && !it.contains(";") && !it.contains("&") && !it.contains("|") }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
     }
 
-    /** The packs this build can verify: the shipped table, plus the bench controls in a debug build. */
-    private fun packCatalogue(): List<com.example.model.PackRelease> =
-        com.example.model.PackTrust.catalogue(com.example.BuildConfig.DEBUG)
-
-    fun reloadModuleManifests() {
+    private fun probeAndOfferPinCandidates(packages: List<String>) {
+        if (packages.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val loaded = runCatching {
-                com.example.model.ModuleManifestStore(
-                    java.io.File(getApplication<Application>().filesDir, "modules")
-                ).load(
-                    // A debug build can also name the bench controls; a release build cannot.
-                    packCatalogue().map { it.id }.toSet()
-                )
-            }.getOrElse { error ->
-                com.example.model.ManifestSet(
-                    issues = listOf(
-                        com.example.model.ManifestIssue(
-                            "modules",
-                            "could not be read: " + (error.message ?: "unknown error")
+            delay(1_800)
+            if (!LinuxRuntime.isRunning) return@launch
+            val guiSet = setOf(
+                "firefox", "chromium", "thunderbird", "libreoffice", "libreoffice-writer",
+                "libreoffice-calc", "gimp", "inkscape", "vlc", "mpv", "audacity", "geany",
+                "xterm", "xfce4-terminal", "qterminal", "thunar", "pcmanfm-qt"
+            )
+            val checkScript = packages.joinToString("; ") { pkg ->
+                val bin = when (pkg) {
+                    "libreoffice-writer" -> "libreoffice --writer"
+                    "libreoffice-calc" -> "libreoffice --calc"
+                    else -> pkg
+                }
+                val binExec = bin.substringBefore(" ")
+                "command -v $binExec >/dev/null 2>&1 && echo PIN_READY:$pkg|$bin"
+            }
+            val out = LinuxRuntime.run(checkScript, timeoutMs = 15_000) ?: return@launch
+            val verified = out.lineSequence()
+                .filter { it.startsWith("PIN_READY:") }
+                .mapNotNull { line ->
+                    val parts = line.removePrefix("PIN_READY:").split("|")
+                    if (parts.size == 2) {
+                        val pkg = parts[0].trim()
+                        val cmd = parts[1].trim()
+                        val catalogEntry = LinuxAppCatalog.byPackage(pkg)
+                        val title = catalogEntry?.title ?: pkg.replaceFirstChar {
+                            if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString()
+                        }
+                        LinuxPinCandidate(
+                            title = title,
+                            command = cmd,
+                            isGui = pkg in guiSet || (catalogEntry != null && catalogEntry.category != "Development" && catalogEntry.category != "System")
                         )
-                    )
-                )
-            }
-            manifests = loaded
-            val verifiedPacks = runCatching {
-                packDownloader.verified(packCatalogue())
-            }.getOrDefault(emptySet())
-            _uiState.update { state ->
-                state.copy(
-                    manifests = loaded,
-                    verifiedPacks = verifiedPacks,
-                    // Catalog entries are the ones no manifest declared (declaredLaunch is null), so
-                    // filtering them out is what makes a second reload add nothing new.
-                    serverServices = state.serverServices.filter { it.declaredLaunch == null } +
-                        loaded.manifests
-                            .mapNotNull { manifest -> manifest.service?.let { it to manifest.packages } }
-                            .map { (service, packages) -> service.toServerServiceItem(packages) }
-                )
-            }
-            if (loaded.issues.isNotEmpty()) {
-                _uiState.update {
-                    it.copy(
-                        notificationMessage = "${loaded.issues.size} module manifest(s) rejected - see Servers"
-                    )
+                    } else null
+                }
+                .toList()
+            if (verified.isNotEmpty()) {
+                _uiState.update { state ->
+                    val merged = (verified + state.recentPinCandidates)
+                        .distinctBy { it.command }
+                        .take(5)
+                    state.copy(recentPinCandidates = merged)
                 }
             }
         }
     }
 
+    fun dismissPinCandidate(command: String) {
+        _uiState.update { state ->
+            state.copy(recentPinCandidates = state.recentPinCandidates.filterNot { it.command == command })
+        }
+    }
+
+    fun clearTerminal() {
+        _uiState.update { state ->
+            val updatedTabs = state.terminalTabs.map { tab ->
+                if (tab.id == state.activeTerminalTabId) tab.copy(lines = emptyList()) else tab
+            }
+            state.copy(terminalLines = emptyList(), terminalTabs = updatedTabs)
+        }
+    }
+
+    // Server Management
+    /**
+     * Server Hub action: installs the package (using apk, apt-get, or pacman) or starts/stops
+     * the daemon inside the live container, then re-probes actual process state via `pidof`.
+     */
     fun toggleServerService(serviceId: String) {
         val service = _uiState.value.serverServices.find { it.id == serviceId } ?: return
         viewModelScope.launch {
@@ -1351,31 +1332,56 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
             if (!service.isInstalled) {
-                appendTerminalLine(TerminalLine(activeGuestDistro().installCommand(service.apkPackage), TerminalLine.LineType.INPUT))
-                _uiState.update { it.copy(notificationMessage = "Installing ${service.apkPackage} in the guest - watch the terminal") }
-                LinuxRuntime.send(activeGuestDistro().installCommand(service.apkPackage))
+                val cmd = when (service.id) {
+                    "samba_smb" -> "phonix-smb start"
+                    "dnsmasq_adblock" -> "phonix-adblock start"
+                    else -> "if command -v apk >/dev/null 2>&1; then apk add --no-cache ${service.apkPackage}; " +
+                        "elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ${service.apkPackage}; " +
+                        "elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm ${service.apkPackage}; fi"
+                }
+                appendTerminalLine(TerminalLine(cmd, TerminalLine.LineType.INPUT))
+                _uiState.update { it.copy(notificationMessage = "Installing ${service.name} in the guest — watch Terminal") }
+                LinuxRuntime.send(cmd)
             } else if (!service.isRunning) {
-                appendTerminalLine(TerminalLine("# ${service.name} is installed. Start it from the terminal:", TerminalLine.LineType.SYSTEM))
-                appendTerminalLine(TerminalLine(service.startHint, TerminalLine.LineType.SYSTEM))
-                _uiState.update { it.copy(notificationMessage = "${service.name}: run the command shown in the terminal") }
+                appendTerminalLine(TerminalLine(service.startHint, TerminalLine.LineType.INPUT))
+                _uiState.update { it.copy(notificationMessage = "Starting ${service.name} on port ${service.port}...") }
+                LinuxRuntime.send(service.startHint)
             } else {
-                _uiState.update { it.copy(notificationMessage = "${service.name} is running (process found in the guest)") }
+                val stopCmd = when (service.id) {
+                    "samba_smb" -> "phonix-smb stop"
+                    "dnsmasq_adblock" -> "phonix-adblock stop"
+                    else -> "killall ${service.processName} 2>/dev/null || true"
+                }
+                appendTerminalLine(TerminalLine(stopCmd, TerminalLine.LineType.INPUT))
+                _uiState.update { it.copy(notificationMessage = "Stopping ${service.name}...") }
+                LinuxRuntime.send(stopCmd)
             }
+            delay(1_500)
             refreshServerStates()
         }
     }
 
-    /** Reads installed/running state straight out of the guest. No assumptions. */
+    fun runServerHelperCommand(command: String, statusLabel: String) {
+        viewModelScope.launch {
+            if (!LinuxRuntime.isRunning) {
+                _uiState.update { it.copy(notificationMessage = "Start the Linux container first (Terminal power button)") }
+                return@launch
+            }
+            appendTerminalLine(TerminalLine(command, TerminalLine.LineType.INPUT))
+            _uiState.update { it.copy(notificationMessage = statusLabel) }
+            LinuxRuntime.send(command)
+            delay(1_800)
+            refreshServerStates()
+        }
+    }
+
+    /** Reads installed/running state straight out of the guest across apk/apt/pacman. */
     fun refreshServerStates() {
         viewModelScope.launch {
             val services = _uiState.value.serverServices
             if (!LinuxRuntime.isRunning || services.isEmpty()) return@launch
             val script = services.joinToString("; ") { s ->
-                // A manifest service may declare no package: there is nothing to install and nothing
-                // to query, so it stays installed and only its process is asked.
-                val packageCheck = if (s.apkPackage.isBlank()) "true"
-                    else activeGuestDistro().installedQuery(s.apkPackage)
-                "$packageCheck && echo pkg:${s.id}=1 || echo pkg:${s.id}=0; " +
+                "(command -v ${s.processName} >/dev/null 2>&1 || apk info -e ${s.apkPackage} >/dev/null 2>&1) && echo pkg:${s.id}=1 || echo pkg:${s.id}=0; " +
                     "pidof ${s.processName} >/dev/null 2>&1 && echo run:${s.id}=1 || echo run:${s.id}=0"
             }
             val out = LinuxRuntime.run(script, 20_000) ?: return@launch
@@ -1477,32 +1483,10 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val stats = android.os.StatFs(app.filesDir.absolutePath)
             val total = stats.totalBytes
             val free = stats.availableBytes
-            // Measure whichever distro is active: this used to hardcode linux/alpine, so after a
-            // switch the hub reported "On disk: -" and a path to a directory that no longer exists.
-            val (usedByGuest, guestDir) = withContext(Dispatchers.IO) {
-                val activeId = runCatching { LinuxRuntime.container(app).activeDistroId() }
-                    .getOrDefault("alpine")
-                val dir = app.filesDir.resolve("linux/$activeId")
-                // walkFileTree does not follow links. A rootfs is full of them (/bin -> usr/bin,
-                // /lib -> usr/lib), and walking through them counted whole subtrees twice: Debian
-                // reported 815 MB for a 525 MB tree.
-                val bytes = runCatching {
-                    var total = 0L
-                    java.nio.file.Files.walkFileTree(
-                        dir.toPath(),
-                        object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
-                            override fun visitFile(
-                                file: java.nio.file.Path,
-                                attrs: java.nio.file.attribute.BasicFileAttributes
-                            ): java.nio.file.FileVisitResult {
-                                total += attrs.size()
-                                return java.nio.file.FileVisitResult.CONTINUE
-                            }
-                        }
-                    )
-                    total
-                }.getOrDefault(0L)
-                bytes to dir
+            val guestRoot = LinuxRuntime.container(app).rootfs
+            val usedByGuest = withContext(Dispatchers.IO) {
+                runCatching { guestRoot.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
+                    .getOrDefault(0L)
             }
             _uiState.update {
                 it.copy(
@@ -1510,7 +1494,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         totalBytes = total,
                         freeBytes = free,
                         guestBytes = usedByGuest,
-                        guestPath = guestDir.absolutePath
+                        guestPath = guestRoot.absolutePath
                     )
                 )
             }
@@ -1521,17 +1505,19 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     fun restartContainer() {
         viewModelScope.launch {
             _uiState.update { it.copy(containerStatus = ContainerStatus.RESTARTING) }
-            withContext(Dispatchers.IO) {
+            val activeDistro = withContext(Dispatchers.IO) {
                 LinuxRuntime.stop()
                 runCatching { LinuxRuntime.start(getApplication()) }
                     .onFailure { appendTerminalLine(TerminalLine("[container] reboot failed: ${it.message}", TerminalLine.LineType.ERROR)) }
                 LinuxRuntime.send("uname -a")
+                LinuxRuntime.container(getApplication()).activeDistro()
             }
             _uiState.update {
                 it.copy(
-                    containerStatus = ContainerStatus.RUNNING,
+                    containerStatus = if (LinuxRuntime.isRunning) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
+                    currentDistro = activeDistro,
                     uptimeSeconds = 0L,
-                    notificationMessage = "Linux container restarted"
+                    notificationMessage = "Linux container (${activeDistro.name}) restarted"
                 )
             }
         }
@@ -1550,9 +1536,13 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                         .onFailure { appendTerminalLine(TerminalLine("[container] start failed: ${it.message}", TerminalLine.LineType.ERROR)) }
                         .isSuccess
                 }
+                val activeDistro = LinuxRuntime.container(getApplication()).activeDistro()
                 // A start that threw is not a running guest; the status tile must not claim otherwise.
                 _uiState.update {
-                    it.copy(containerStatus = if (started) ContainerStatus.RUNNING else ContainerStatus.STOPPED)
+                    it.copy(
+                        containerStatus = if (started) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
+                        currentDistro = activeDistro
+                    )
                 }
                 if (started) startBackgroundServiceIfActive()
             }
@@ -1568,52 +1558,49 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Activates a distribution from the debug channel, on the same path the hub's button uses.
-     *
-     * `am start … --es phonix.distro alpine`. The previous rootfs is deliberately kept
-     * (`debloatPrevious = false`): a bench measurement must not cost the owner a working guest, and
-     * the switch already refuses to prune anything before the new tree is in place.
-     */
-    fun activateDistro(distroId: String) {
-        val target = com.example.model.DistroCatalog.byId(distroId)
-        if (target == null) {
-            _uiState.update { it.copy(notificationMessage = "No distribution has the id \"" + distroId + "\"") }
-            return
-        }
-        viewModelScope.launch {
-            _uiState.update { it.copy(notificationMessage = "Switching to " + target.name + "...") }
-            val failure = withContext(Dispatchers.IO) {
-                runCatching {
-                    LinuxRuntime.stop()
-                    LinuxRuntime.container(getApplication()).switchDistro(
-                        distro = target,
-                        debloatPrevious = false,
-                        onProgress = { line -> appendTerminalLine(TerminalLine(line, TerminalLine.LineType.INPUT)) }
-                    )
-                }.exceptionOrNull()
-            }
-            selectDistro(target)
-            refreshStorage()
-            restartContainer()
-            _uiState.update {
-                it.copy(
-                    notificationMessage = if (failure == null) {
-                        "Switched to " + target.name
-                    } else {
-                        target.name + " was not switched: " + (failure.message ?: failure.javaClass.simpleName)
-                    }
-                )
-            }
-        }
-    }
-
     fun selectDistro(distro: LinuxDistro) {
         _uiState.update { state ->
             state.copy(
                 currentDistro = distro,
-                notificationMessage = "Switched target distro to ${distro.name}"
+                oobeConfig = state.oobeConfig.copy(selectedDistroId = distro.id),
+                notificationMessage = "Selected ${distro.name}"
             )
+        }
+    }
+
+    fun selectOobeDistro(distroId: String) {
+        val distro = DistroCatalog.getDistro(distroId)
+        _uiState.update { state ->
+            state.copy(
+                oobeConfig = state.oobeConfig.copy(selectedDistroId = distro.id),
+                notificationMessage = "Wizard starting distro set to ${distro.name}"
+            )
+        }
+    }
+
+    fun selectOobeDe(de: LinuxDesktopEnvironment) {
+        LinuxDesktop.setPreferredDesktopEnvironment(getApplication(), de)
+        _uiState.update { state ->
+            state.copy(
+                oobeConfig = state.oobeConfig.copy(selectedDe = de),
+                notificationMessage = "X11 Desktop Environment set to ${de.title}"
+            )
+        }
+    }
+
+    fun switchDesktopEnvironment(de: LinuxDesktopEnvironment) {
+        LinuxDesktop.setPreferredDesktopEnvironment(getApplication(), de)
+        _uiState.update { state ->
+            state.copy(
+                oobeConfig = state.oobeConfig.copy(selectedDe = de),
+                notificationMessage = "Switching X11 Desktop to ${de.title} (keeping open windows & VNC live)..."
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!LinuxRuntime.isRunning) {
+                runCatching { LinuxRuntime.start(getApplication()) }
+            }
+            LinuxDesktop.switchDesktopEnvironment(getApplication(), de)
         }
     }
 
@@ -1679,7 +1666,12 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val updated = state.debloatPackages.map {
                 if (it.packageName == packageName) it.copy(isEnabled = !it.isEnabled) else it
             }
-            state.copy(debloatPackages = updated)
+            val chromeEnabled = updated.firstOrNull { it.packageName == "com.android.chrome" }?.isEnabled
+                ?: state.oobeConfig.debloatChrome
+            state.copy(
+                debloatPackages = updated,
+                oobeConfig = state.oobeConfig.copy(debloatChrome = chromeEnabled)
+            )
         }
     }
 
@@ -1840,70 +1832,123 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
             _uiState.update { it.copy(isWizardDeploying = true, wizardProgress = 0.05f, wizardLogs = emptyList()) }
             val cfg = _uiState.value.oobeConfig
-            // Selecting Linux in this explicit deployment step starts it for this session;
-            // persistent launch/background behavior remains governed by the saved choices.
+            val host = getApplication<Application>()
+            LinuxDesktop.setPreferredDesktopEnvironment(host, cfg.selectedDe)
+            val targetDistro = DistroCatalog.getDistro(cfg.selectedDistroId)
+
+            // Selecting Linux in this explicit deployment step unpacks the rootfs and starts it for
+            // this session; persistent launch/background behavior remains governed by saved choices.
             val startLinux = cfg.enableLinuxDesktop
+            var shellRunning = false
             if (startLinux) {
-                progress(0.05f, "Starting the optional Alpine container...")
-                val started = withContext(Dispatchers.IO) {
-                    runCatching { LinuxRuntime.start(getApplication()) }.isSuccess
-                }
-                if (!started) {
-                    log("x Container did not start; see the terminal for the reason.")
-                    _uiState.update {
-                        it.copy(isWizardDeploying = false, wizardStatusMessage = "Container failed to start", wizardProgress = 0f)
+                progress(0.10f, "Provisioning ${targetDistro.name} rootfs...")
+                val rootfsReady = withContext(Dispatchers.IO) {
+                    val container = LinuxRuntime.container(host)
+                    if (container.activeDistroId() != targetDistro.id || !container.isInstalled) {
+                        val unpacked = runCatching {
+                            LinuxRuntime.stop()
+                            container.switchDistro(
+                                distro = targetDistro,
+                                debloatPrevious = true,
+                                onProgress = { msg ->
+                                    log("   $msg")
+                                    progress(0.30f, msg)
+                                }
+                            )
+                        }
+                        if (unpacked.isFailure) {
+                            val err = unpacked.exceptionOrNull()?.message ?: "unpack failure"
+                            log("x  Could not unpack ${targetDistro.name} ($err)")
+                            if (!targetDistro.isBundled) {
+                                log("-  Falling back to bundled Alpine Linux (offline-ready)...")
+                                runCatching {
+                                    container.switchDistro(
+                                        distro = DistroCatalog.alpine,
+                                        debloatPrevious = false,
+                                        onProgress = { msg ->
+                                            log("   $msg")
+                                            progress(0.35f, msg)
+                                        }
+                                    )
+                                }.isSuccess
+                            } else {
+                                false
+                            }
+                        } else {
+                            true
+                        }
+                    } else {
+                        log("   ${targetDistro.name} rootfs is already unpacked on disk.")
+                        true
                     }
-                    return@launch
                 }
-                log("OK  Alpine ${LinuxRuntime.container(getApplication()).version()} container running")
+
+                if (rootfsReady) {
+                    val activeContainer = LinuxRuntime.container(host)
+                    val activeDistro = activeContainer.activeDistro()
+                    _uiState.update { it.copy(currentDistro = activeDistro) }
+                    log("OK  ${activeDistro.name} (${activeContainer.version()}) rootfs unpacked & verified")
+
+                    progress(0.45f, "Starting ${activeDistro.name} PRoot container...")
+                    val bootResult = withContext(Dispatchers.IO) {
+                        runCatching { LinuxRuntime.start(host) }
+                    }
+                    if (bootResult.isSuccess && LinuxRuntime.isRunning) {
+                        shellRunning = true
+                        log("OK  ${activeDistro.name} (${activeContainer.version()}) container running")
+                    } else {
+                        val reason = bootResult.exceptionOrNull()?.message ?: "PRoot process did not stay active"
+                        val abis = Build.SUPPORTED_ABIS.joinToString()
+                        log("-   Rootfs is installed, but PRoot shell did not start on ABI [$abis] ($reason)")
+                    }
+                } else {
+                    log("x  Rootfs extraction could not complete; you can retry from the Linux System Hub.")
+                }
             } else {
-                progress(0.05f, "Skipping Linux guest setup (not selected).")
+                progress(0.05f, "Skipping Linux guest setup (Ultra-Lean Mode selected).")
                 log("-   Linux guest was not installed or started")
             }
 
-            if (startLinux) {
-                progress(0.55f, "Installing the X11 desktop inside the guest (first run downloads ~450 MB)...")
-                LinuxDesktop.ensureStarted(getApplication())
-                log("OK  X11 desktop requested (progress appears in the Terminal window)")
+            if (startLinux && shellRunning) {
+                progress(0.60f, "Requesting ${cfg.selectedDe.title} on X11 (:1)...")
+                LinuxDesktop.ensureStarted(host)
+                log("OK  ${cfg.selectedDe.title} requested on X11 (:1) (watch Terminal for package progress)")
+            } else if (startLinux) {
+                progress(0.60f, "Saved ${cfg.selectedDe.title} as default X11 desktop.")
+                log("OK  ${cfg.selectedDe.title} saved as preferred X11 desktop environment")
             } else {
-                progress(0.55f, "Optional Linux guest setup skipped.")
+                progress(0.60f, "Optional Linux guest setup skipped.")
             }
 
-            // Host package removal happens here, and only where Android allows it. A device-owner
-            // install can hide packages for real; an ordinary install can only hand over commands.
-            val host = getApplication<Application>()
             val targets = debloatTargets()
             if (targets.isNotEmpty() && HostDebloat.canRemovePackages(host)) {
                 progress(0.75f, "Removing ${targets.size} selected package(s) from this device...")
                 val removed = hideSelectedPackages(host) { log(it) }
                 log("OK  $removed of ${targets.size} package(s) removed; hiding is reversible")
             } else if (targets.isNotEmpty()) {
-                log("-   ${targets.size} package(s) selected, but this install is not device owner")
-                log("-   Android gives a normal app no way to uninstall another app; nothing was removed")
+                log("-   ${targets.size} package(s) selected; this install is not device owner")
+                log("-   Preparing ADB trim commands for your clipboard instead of silent removal")
             } else {
-                log("-   nothing selected to remove from the host")
+                log("-   No host packages selected to remove")
             }
 
             progress(0.9f, "Finalizing setup choices and desktop layout...")
             completeOobeSetup(host) {
-                // OOBE has persisted the opt-in choices before we place anything on the clipboard.
-                if (cfg.deviceChanges.allowDebloatCommands && debloatTargets().isNotEmpty()) {
+                if (!HostDebloat.canRemovePackages(host) && debloatTargets().isNotEmpty()) {
                     val selectedCount = copyDebloatCommand()
                     if (selectedCount > 0) {
-                        log("OK  copied $selectedCount adb uninstall command(s) to the clipboard")
-                        log("-   they stay inert until you paste them into a PC terminal")
+                        log("OK  Copied $selectedCount adb uninstall command(s) to the clipboard")
+                        log("-   Paste them into a PC terminal whenever you are ready")
                     } else {
-                        log("x   clipboard copy failed; the command is previewed in the trim step")
+                        log("x   Clipboard copy failed; use Copy in Step 5 or Privacy Hub")
                     }
-                } else {
-                    log("-   automatic command copy is off; use Copy in the trim step if you want it")
                 }
                 _uiState.update {
                     it.copy(
                         isWizardDeploying = false,
                         wizardProgress = 1f,
                         wizardStatusMessage = "Setup complete",
-                        containerStatus = if (startLinux) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
+                        containerStatus = if (shellRunning) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
                         notificationMessage = "Phonix setup finished"
                     )
                 }
@@ -2199,10 +2244,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             val dragged = currentShortcuts.find { it.id == shortcutId } ?: return@update state
 
             if (lockGrid) {
-                val targetCol = DesktopIconGrid.nearestColumn(currentX, iconColumns)
-                val targetRow = DesktopIconGrid.nearestRow(currentY, iconAreaHeightDp)
-                val (targetX, targetY) =
-                    DesktopIconGrid.snap(targetCol, targetRow, iconAreaHeightDp)
+                val targetCol = Math.round((currentX - 16f) / 88f).coerceIn(0, 7).toInt()
+                val targetRow = Math.round((currentY - 16f) / 94f).coerceIn(0, 10).toInt()
 
                 // Check if another shortcut already occupies targetCol, targetRow
                 val occupant = currentShortcuts.find { it.id != shortcutId && it.gridCol == targetCol && it.gridRow == targetRow }
@@ -2218,13 +2261,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             .filter { it.id != shortcutId && it.id != occupant.id }
                             .map { Pair(it.gridCol, it.gridRow) }
                             .toSet() + Pair(targetCol, targetRow)
-                        findNearestFreeGridSlot(
-                            targetCol,
-                            targetRow,
-                            occupied,
-                            maxCol = iconColumns - 1,
-                            maxRow = DesktopIconGrid.maxRow(iconAreaHeightDp)
-                        )
+                        findNearestFreeGridSlot(targetCol, targetRow, occupied)
                     }
 
                     currentShortcuts.map { sc ->
@@ -2232,24 +2269,17 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             shortcutId -> sc.copy(
                                 gridCol = targetCol,
                                 gridRow = targetRow,
-                                posX = targetX,
-                                posY = targetY,
+                                posX = 16f + (targetCol * 88f),
+                                posY = 16f + (targetRow * 94f),
                                 hasCustomPosition = true
                             )
-                            occupant.id -> {
-                                val (occupantX, occupantY) = DesktopIconGrid.snap(
-                                    occupantNewCol,
-                                    occupantNewRow,
-                                    iconAreaHeightDp
-                                )
-                                sc.copy(
-                                    gridCol = occupantNewCol,
-                                    gridRow = occupantNewRow,
-                                    posX = occupantX,
-                                    posY = occupantY,
-                                    hasCustomPosition = true
-                                )
-                            }
+                            occupant.id -> sc.copy(
+                                gridCol = occupantNewCol,
+                                gridRow = occupantNewRow,
+                                posX = 16f + (occupantNewCol * 88f),
+                                posY = 16f + (occupantNewRow * 94f),
+                                hasCustomPosition = true
+                            )
                             else -> sc
                         }
                     }
@@ -2259,8 +2289,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                             sc.copy(
                                 gridCol = targetCol,
                                 gridRow = targetRow,
-                                posX = targetX,
-                                posY = targetY,
+                                posX = 16f + (targetCol * 88f),
+                                posY = 16f + (targetRow * 94f),
                                 hasCustomPosition = true
                             )
                         } else sc
@@ -2288,46 +2318,26 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // ---- Desktop icon grid ---------------------------------------------------------------
-
-    /**
-     * The icon area the desktop is laying out into, reported by the desktop screen whenever it
-     * changes. Snapping works in this space instead of a second set of guessed numbers, which is
-     * why "Lock Icons to Grid" cannot drop an icon somewhere the desktop never draws.
-     */
-    private var iconColumns = 6
-    private var iconAreaHeightDp = 720f
-
-    fun setIconGrid(columns: Int, areaHeightDp: Float) {
-        iconColumns = columns.coerceAtLeast(1)
-        iconAreaHeightDp = areaHeightDp.coerceAtLeast(1f)
-    }
-
-    /**
-     * Moves freeform icons by [deltaDp] when the icon area changes height, which is what happens
-     * when the taskbar docks to another edge. Icon positions are offsets inside that area, so
-     * without this an icon dragged to the bottom row is left behind under the bar - or stranded
-     * above it - instead of following the work area.
-     */
-    fun reanchorShortcuts(deltaDp: Float, areaHeightDp: Float) {
-        if (deltaDp == 0f) return
-        _uiState.update { state ->
-            val lowest = DesktopIconGrid.bottomRowTop(areaHeightDp)
-            val updated = state.customization.shortcuts.map { sc ->
-                if (!sc.hasCustomPosition) {
-                    sc
-                } else {
-                    sc.copy(posY = (sc.posY + deltaDp).coerceIn(0f, lowest))
-                }
-            }
-            state.copy(customization = state.customization.copy(shortcuts = updated))
-        }
-    }
-
     fun toggleLockIconsToGrid(enabled: Boolean) {
         _uiState.update { state ->
             val shortcuts = if (enabled) {
-                snapShortcutsToGrid(state.customization.shortcuts)
+                val occupied = mutableSetOf<Pair<Int, Int>>()
+                state.customization.shortcuts.map { sc ->
+                    val desiredCol = if (!sc.hasCustomPosition) sc.gridCol else Math.round((sc.posX - 16f) / 88f).coerceIn(0, 5).toInt()
+                    val desiredRow = if (!sc.hasCustomPosition) sc.gridRow else Math.round((sc.posY - 16f) / 94f).coerceIn(0, 7).toInt()
+                    val (finalCol, finalRow) = if (Pair(desiredCol, desiredRow) !in occupied) {
+                        Pair(desiredCol, desiredRow)
+                    } else {
+                        findNearestFreeGridSlot(desiredCol, desiredRow, occupied)
+                    }
+                    occupied.add(Pair(finalCol, finalRow))
+                    sc.copy(
+                        gridCol = finalCol,
+                        gridRow = finalRow,
+                        posX = 16f + (finalCol * 88f),
+                        posY = 16f + (finalRow * 94f)
+                    )
+                }
             } else {
                 state.customization.shortcuts
             }
@@ -2337,51 +2347,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     shortcuts = shortcuts
                 ),
                 notificationMessage = if (enabled) "Grid Snapping: Locked to Grid" else "Freeform Mode: Move shortcuts wherever you want"
-            )
-        }
-    }
-
-    /**
-     * Pins every icon to its nearest free grid slot.
-     *
-     * All of them, not only the dragged ones: an icon that has never been moved is drawn from
-     * [DesktopIconGrid.autoPosition] and has to be pinned to the slot it is drawn on, otherwise
-     * locking the grid appears to do nothing at all. Slots are the renderer's (90 x 88 dp, bottom
-     * anchored), so an icon already on the grid keeps its position to the pixel.
-     */
-    private fun snapShortcutsToGrid(shortcuts: List<DesktopShortcut>): List<DesktopShortcut> {
-        val columns = iconColumns
-        val areaHeight = iconAreaHeightDp
-        val occupied = mutableSetOf<Pair<Int, Int>>()
-        return shortcuts.mapIndexed { index, sc ->
-            val current = if (sc.hasCustomPosition) {
-                Pair(sc.posX, sc.posY)
-            } else {
-                DesktopIconGrid.autoPosition(index, shortcuts.size, columns, areaHeight)
-            }
-            val wanted = Pair(
-                DesktopIconGrid.nearestColumn(current.first, columns),
-                DesktopIconGrid.nearestRow(current.second, areaHeight)
-            )
-            val slot = if (wanted in occupied) {
-                findNearestFreeGridSlot(
-                    wanted.first,
-                    wanted.second,
-                    occupied,
-                    maxCol = columns - 1,
-                    maxRow = DesktopIconGrid.maxRow(areaHeight)
-                )
-            } else {
-                wanted
-            }
-            occupied.add(slot)
-            val (x, y) = DesktopIconGrid.snap(slot.first, slot.second, areaHeight)
-            sc.copy(
-                gridCol = slot.first,
-                gridRow = slot.second,
-                posX = x,
-                posY = y,
-                hasCustomPosition = true
             )
         }
     }
@@ -2452,16 +2417,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update {
             it.copy(
                 activeContextMenu = DesktopContextMenuData.WallpaperMenu(x, y),
-                isStartMenuOpen = false
-            )
-        }
-    }
-
-    /** Right-click or long-press on the taskbar: dock it to any of the four edges. */
-    fun openTaskbarContextMenu(position: TaskbarPosition) {
-        _uiState.update {
-            it.copy(
-                activeContextMenu = DesktopContextMenuData.TaskbarMenu(position),
                 isStartMenuOpen = false
             )
         }
@@ -2605,18 +2560,32 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     fun applyDebloatPreset(trimEverything: Boolean) {
         val dailySafe = setOf("Analytics & Tracking", "Carrier Telemetry")
         _uiState.update { state ->
+            val updated = state.debloatPackages.map { pkg ->
+                pkg.copy(isEnabled = trimEverything || pkg.category in dailySafe)
+            }
+            val chromeEnabled = updated.firstOrNull { it.packageName == "com.android.chrome" }?.isEnabled ?: false
             state.copy(
-                debloatPackages = state.debloatPackages.map { pkg ->
-                    pkg.copy(isEnabled = trimEverything || pkg.category in dailySafe)
-                },
+                debloatPackages = updated,
+                oobeConfig = state.oobeConfig.copy(debloatChrome = chromeEnabled),
                 debloatCopiedCommand = null
             )
         }
     }
 
     fun selectOobeProfile(profile: MiniPcProfile) {
+        val cooling = when (profile) {
+            MiniPcProfile.EVERYDAY_DESKTOP, MiniPcProfile.MINIMAL_LEAN -> CoolingMode.STOCK_PASSIVE
+            MiniPcProfile.GAMING_EMULATION -> CoolingMode.ACTIVE_MODDED_COOLING
+            MiniPcProfile.HOMELAB_SERVER, MiniPcProfile.CYBERDECK_DEV -> CoolingMode.SERVER_ECO_247
+        }
         _uiState.update { state ->
-            state.copy(oobeConfig = state.oobeConfig.copy(profile = profile))
+            state.copy(
+                coolingState = state.coolingState.copy(activeMode = cooling),
+                oobeConfig = state.oobeConfig.copy(
+                    profile = profile,
+                    enableLinuxDesktop = profile != MiniPcProfile.MINIMAL_LEAN
+                )
+            )
         }
         // A workstation profile and a headless appliance want very different trim lists.
         applyDebloatPreset(trimEverything = profile != MiniPcProfile.EVERYDAY_DESKTOP)
@@ -2637,37 +2606,11 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     .mapNotNull { it.packageName }
                     .mapNotNull { pkg -> PackageFacts.browserInfo(context, pkg) }
             }
-            _uiState.update { it.copy(installedBrowsers = browsers) }
-            refreshDebloatPresence(context)
-        }
-    }
-
-    /**
-     * Re-reads what this device really has and what this install has hidden, in one place.
-     *
-     * The two maps are always written together: a hidden package must never be offered as a
-     * removal target a second time, and the debloater needs the hidden set to offer an undo.
-     */
-    private suspend fun refreshDebloatPresence(context: Context) {
-        val packages = _uiState.value.debloatPackages.map { it.packageName }
-        val (present, hidden) = withContext(Dispatchers.IO) {
-            // "on disk" has to include packages the platform is hiding from this user, because
-            // setApplicationHidden makes getPackageInfo answer as if they were uninstalled.
-            val onDisk = packages.filter {
-                PackageFacts.isInstalled(context, it) || PackageFacts.isInstalledIncludingHidden(context, it)
+            val presence = withContext(Dispatchers.IO) {
+                _uiState.value.debloatPackages.associate { it.packageName to PackageFacts.isInstalled(context, it.packageName) }
             }
-            val hiddenNow = packages.filter { HostDebloat.isHidden(context, it) }
-            // A name the platform still calls hidden but that nothing is installed under is a
-            // stale record: unhide it once so the row can go back to ABSENT instead of offering
-            // a Restore button that cannot do anything.
-            val stale = HostDebloat.staleHiddenRecords(hiddenNow, onDisk)
-            stale.forEach { HostDebloat.unhidePackage(context, it) }
-            // Presence means "on disk", not "safe to remove": a hidden package is still installed,
-            // and reporting it absent left it with no Restore button and no way back.
-            val presentMap = packages.associate { pkg -> pkg to (pkg in onDisk) }
-            presentMap to (hiddenNow.toSet() - stale)
+            _uiState.update { it.copy(installedBrowsers = browsers, debloatInstalled = presence) }
         }
-        _uiState.update { it.copy(debloatInstalled = present, debloatHidden = hidden) }
     }
 
     /**
@@ -2745,39 +2688,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(debloatInstalled = presence) }
     }
 
-    /**
-     * Hides one package for real from the walkthrough. Only a device-owner install can do this,
-     * and [HostDebloat.hidePackage] returns the platform's own refusal rather than a guess.
-     */
-    fun hideHostPackage(packageName: String) {
-        val app = getApplication<Application>()
-        viewModelScope.launch {
-            val failure = withContext(Dispatchers.IO) { HostDebloat.hidePackage(app, packageName) }
-            appendTerminalLine(
-                TerminalLine(
-                    if (failure == null) "hid $packageName" else "could not hide $packageName: $failure",
-                    if (failure == null) TerminalLine.LineType.SUCCESS else TerminalLine.LineType.ERROR
-                )
-            )
-            refreshDebloatPresence(app)
-        }
-    }
-
-    /** Undoes [hideHostPackage]: puts a hidden package back on the launcher. */
-    fun unhideHostPackage(packageName: String) {
-        val app = getApplication<Application>()
-        viewModelScope.launch {
-            val failure = withContext(Dispatchers.IO) { HostDebloat.unhidePackage(app, packageName) }
-            appendTerminalLine(
-                TerminalLine(
-                    if (failure == null) "restored $packageName" else "could not restore $packageName: $failure",
-                    if (failure == null) TerminalLine.LineType.SUCCESS else TerminalLine.LineType.ERROR
-                )
-            )
-            refreshDebloatPresence(app)
-        }
-    }
-
     /** Hides the selected packages for real. Only meaningful on a device-owner install. */
     private suspend fun hideSelectedPackages(context: Context, log: (String) -> Unit): Int {
         val selected = _uiState.value.debloatPackages.filter { it.isEnabled }
@@ -2796,17 +2706,12 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         if (removed > 0) {
-            // A hidden package still answers getPackageInfo, so presence comes from the tri-state.
-            refreshDebloatPresence(context)
             _uiState.update { state ->
                 state.copy(
                     debloatPackages = state.debloatPackages.map { pkg ->
-                        if (pkg.isEnabled && state.debloatInstalled[pkg.packageName] == false) {
-                            pkg.copy(isEnabled = false)
-                        } else {
-                            pkg
-                        }
-                    }
+                        if (pkg.isEnabled && !PackageFacts.isInstalled(context, pkg.packageName)) pkg.copy(isEnabled = false) else pkg
+                    },
+                    debloatInstalled = state.debloatPackages.associate { it.packageName to PackageFacts.isInstalled(context, it.packageName) }
                 )
             }
         }
@@ -2827,7 +2732,13 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
 
     fun toggleOobeDebloatChrome(enabled: Boolean) {
         _uiState.update { state ->
-            state.copy(oobeConfig = state.oobeConfig.copy(debloatChrome = enabled))
+            val updated = state.debloatPackages.map {
+                if (it.packageName == "com.android.chrome") it.copy(isEnabled = enabled) else it
+            }
+            state.copy(
+                debloatPackages = updated,
+                oobeConfig = state.oobeConfig.copy(debloatChrome = enabled)
+            )
         }
     }
 
@@ -2874,15 +2785,6 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                 if (row >= 4) {
                     row = 0
                     col++
-                }
-            }
-
-            // Handle Chrome debloat if requested by user in OOBE
-            if (cfg.debloatChrome) {
-                if (HostDebloat.canRemovePackages(context)) {
-                    HostDebloat.hidePackage(context, "com.android.chrome")
-                } else {
-                    HostDebloat.launchUninstall(context, "com.android.chrome")
                 }
             }
 
@@ -3058,6 +2960,60 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun pinLinuxCommandToDesktop(
+        title: String,
+        command: String,
+        isGui: Boolean
+    ) {
+        val cleanCmd = command.trim()
+        val cleanTitle = title.trim().ifBlank { cleanCmd }
+        if (cleanCmd.isEmpty()) return
+
+        _uiState.update { state ->
+            val existing = state.customization.shortcuts
+            if (existing.any { it.linuxCommand == cleanCmd }) {
+                return@update state.copy(
+                    isAddAppDialogOpen = false,
+                    recentPinCandidates = state.recentPinCandidates.filterNot { it.command == cleanCmd },
+                    notificationMessage = "$cleanTitle is already pinned on desktop"
+                )
+            }
+
+            val maxCol = existing.maxOfOrNull { it.gridCol } ?: 0
+            val maxRowInLastCol = existing.filter { it.gridCol == maxCol }.maxOfOrNull { it.gridRow } ?: -1
+            val (nextCol, nextRow) = if (maxRowInLastCol >= 3) {
+                Pair(maxCol + 1, 0)
+            } else {
+                Pair(maxCol, maxRowInLastCol + 1)
+            }
+
+            val newShortcut = DesktopShortcut.createFromLinuxCommand(
+                title = cleanTitle,
+                command = cleanCmd,
+                isGuiApp = isGui,
+                gridCol = nextCol,
+                gridRow = nextRow
+            )
+
+            state.copy(
+                customization = state.customization.copy(shortcuts = existing + newShortcut),
+                isAddAppDialogOpen = false,
+                recentPinCandidates = state.recentPinCandidates.filterNot { it.command == cleanCmd },
+                notificationMessage = "Pinned Linux shortcut \"$cleanTitle\" to desktop"
+            )
+        }
+    }
+
+    fun pinLinuxAppEntry(entry: LinuxAppEntry) {
+        val cmd = when (entry.packageName) {
+            "libreoffice-writer" -> "libreoffice --writer"
+            "libreoffice-calc" -> "libreoffice --calc"
+            else -> entry.packageName
+        }
+        val isGui = entry.category != "System" && entry.packageName != "git" && entry.packageName != "python3"
+        pinLinuxCommandToDesktop(title = entry.title, command = cmd, isGui = isGui)
+    }
+
     fun openAppStore(context: Context, bounds: Rect? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(notificationMessage = "Opening App Store...") }
@@ -3076,6 +3032,45 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             if (shortcut.isAppStore) {
                 _uiState.update { it.copy(notificationMessage = "Opening App Store...") }
                 AppLaunchHelper.openAppStore(context, bounds)
+                return@launch
+            }
+
+            // Linux CLI or X11 GUI shortcut
+            val linuxCmd = shortcut.linuxCommand?.trim()
+            if (!linuxCmd.isNullOrEmpty()) {
+                if (!LinuxRuntime.isRunning) {
+                    _uiState.update {
+                        it.copy(
+                            containerStatus = ContainerStatus.STARTING,
+                            notificationMessage = "Starting Linux container for ${shortcut.title}..."
+                        )
+                    }
+                    withContext(Dispatchers.IO) {
+                        runCatching { LinuxRuntime.start(getApplication()) }
+                    }
+                    _uiState.update {
+                        it.copy(
+                            containerStatus = if (LinuxRuntime.isRunning) ContainerStatus.RUNNING else ContainerStatus.STOPPED
+                        )
+                    }
+                }
+                if (shortcut.isLinuxGuiApp) {
+                    val existingX11 = _uiState.value.windows.find { it.type == WindowType.LINUX_DESKTOP }
+                    if (existingX11 != null) focusWindow(existingX11.id) else openWindow(WindowType.LINUX_DESKTOP)
+                    withContext(Dispatchers.IO) {
+                        LinuxDesktop.launchGuiApp(context, linuxCmd)
+                    }
+                    _uiState.update {
+                        it.copy(notificationMessage = "Launching ${shortcut.title} ($linuxCmd) on X11 (:1)")
+                    }
+                } else {
+                    val existingTerm = _uiState.value.windows.find { it.type == WindowType.TERMINAL }
+                    if (existingTerm != null) focusWindow(existingTerm.id) else openWindow(WindowType.TERMINAL)
+                    executeTerminalCommand(linuxCmd)
+                    _uiState.update {
+                        it.copy(notificationMessage = "Running `$linuxCmd` in Terminal")
+                    }
+                }
                 return@launch
             }
 
@@ -3132,9 +3127,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value
         val presence = state.debloatInstalled
         return state.debloatPackages.filter { pkg ->
-            pkg.isEnabled &&
-                (presence.isEmpty() || presence[pkg.packageName] != false) &&
-                pkg.packageName !in state.debloatHidden
+            pkg.isEnabled && (presence.isEmpty() || presence[pkg.packageName] != false)
         }
     }
 
@@ -3176,7 +3169,14 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
         _uiState.update { state ->
             val updatedPkgs = state.debloatPackages.map { pkg ->
-                pkg.copy(isEnabled = pkg.category in DebloatCatalog.applianceCategories)
+                if (pkg.category.equals("Telephony & Carrier", ignoreCase = true) ||
+                    pkg.category.equals("Biometrics & Sensors", ignoreCase = true) ||
+                    pkg.category.equals("OEM Bloat", ignoreCase = true)
+                ) {
+                    pkg.copy(isEnabled = true)
+                } else {
+                    pkg
+                }
             }
             state.copy(debloatPackages = updatedPkgs)
         }
@@ -3212,184 +3212,110 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // -------------------------------------------------------------
-    // Manual software updates (user-initiated, verified, never silent)
+    // Manual GitHub Software Updates (User-initiated, No Backdoors)
     // -------------------------------------------------------------
     fun checkAppUpdates() {
-        val app = getApplication<Application>()
+        _uiState.update { it.copy(updateState = UpdateCheckState.CHECKING) }
         val packageInfo = runCatching {
-            app.packageManager.getPackageInfo(app.packageName, 0)
+            getApplication<Application>().packageManager.getPackageInfo(getApplication<Application>().packageName, 0)
         }.getOrNull()
-        val currentVersionName = packageInfo?.versionName ?: BuildConfig.VERSION_NAME
+        val currentVersionName = packageInfo?.versionName ?: "1.2"
         val currentVersionCode = packageInfo?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt()
             else @Suppress("DEPRECATION") it.versionCode
-        } ?: BuildConfig.VERSION_CODE
-
-        fun unknownState(note: String) = AppUpdateInfo(
-            currentVersionName = currentVersionName,
-            currentVersionCode = currentVersionCode,
-            latestVersionName = currentVersionName,
-            latestVersionCode = currentVersionCode,
-            releaseNotes = note,
-            releaseUrl = "",
-            isUpdateAvailable = false
-        )
-
-        // A build with no feed has checked nothing. Say that instead of implying it is current.
-        val feedUrl = BuildConfig.UPDATE_FEED_URL.trim()
-        if (feedUrl.isEmpty()) {
-            _uiState.update {
-                it.copy(
-                    updateState = UpdateCheckState.ERROR,
-                    updateInfo = unknownState(
-                        "No update feed is configured for this build. Nothing was checked and no update status is known."
-                    )
-                )
-            }
-            return
-        }
-
-        _uiState.update { it.copy(updateState = UpdateCheckState.CHECKING) }
+        } ?: 3
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val document = UpdateInstaller(app).readFeed(feedUrl)
-                val manifest = UpdateFeed.parse(document) ?: throw IllegalStateException(
-                    "The update feed is malformed: versionCode, versionName, an https apkUrl and a SHA-256 are required."
-                )
-                val available = UpdateFeed.isNewer(manifest, currentVersionCode)
+                val url = java.net.URL("https://api.github.com/repos/jberggre/Phonix-OS/releases/latest")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 4000
+                conn.readTimeout = 4000
+                conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                conn.setRequestProperty("User-Agent", "PhonixOS-Updater")
+
+                val responseCode = conn.responseCode
+                if (responseCode == 200) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val tagName = extractJsonString(body, "tag_name") ?: "v1.2"
+                    val notes = extractJsonString(body, "body") ?: "Latest bug fixes and performance enhancements."
+                    val downloadUrl = extractAssetDownloadUrl(body) ?: "https://github.com/jberggre/Phonix-OS/releases"
+
+                    val isAvailable = isNewerVersion(tagName, currentVersionName)
+                    val info = AppUpdateInfo(
+                        currentVersionName = currentVersionName,
+                        currentVersionCode = currentVersionCode,
+                        latestVersionName = tagName,
+                        releaseNotes = notes,
+                        apkDownloadUrl = downloadUrl,
+                        releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
+                        isUpdateAvailable = isAvailable
+                    )
+                    _uiState.update {
+                        it.copy(
+                            updateState = if (isAvailable) UpdateCheckState.UPDATE_AVAILABLE else UpdateCheckState.UP_TO_DATE,
+                            updateInfo = info
+                        )
+                    }
+                } else {
+                    val info = AppUpdateInfo(
+                        currentVersionName = currentVersionName,
+                        currentVersionCode = currentVersionCode,
+                        latestVersionName = currentVersionName,
+                        latestVersionCode = currentVersionCode,
+                        releaseNotes = if (responseCode == 404) {
+                            "No public update feed is configured for this build. No update status is known."
+                        } else {
+                            "Update check failed (HTTP $responseCode). No update status is known."
+                        },
+                        apkDownloadUrl = "",
+                        releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
+                        isUpdateAvailable = false
+                    )
+                    _uiState.update {
+                        it.copy(updateState = UpdateCheckState.ERROR, updateInfo = info)
+                    }
+                }
+            } catch (_: Exception) {
                 val info = AppUpdateInfo(
                     currentVersionName = currentVersionName,
                     currentVersionCode = currentVersionCode,
-                    latestVersionName = manifest.versionName,
-                    latestVersionCode = manifest.versionCode,
-                    releaseUrl = feedUrl,
-                    apkDownloadUrl = manifest.apkUrl,
-                    sha256 = manifest.sha256,
-                    releaseNotes = if (available) {
-                        manifest.notes.ifBlank { "${manifest.versionName} is published." }
-                    } else {
-                        "This unit runs the newest published build (${manifest.versionName})."
-                    },
-                    publishedDate = manifest.published,
-                    isUpdateAvailable = available
+                    latestVersionName = currentVersionName,
+                    latestVersionCode = currentVersionCode,
+                    releaseNotes = "Could not reach the update feed. No update status is known.",
+                    apkDownloadUrl = "",
+                    releaseUrl = "https://github.com/jberggre/Phonix-OS/releases",
+                    isUpdateAvailable = false
                 )
                 _uiState.update {
-                    it.copy(
-                        updateState = if (available) UpdateCheckState.UPDATE_AVAILABLE else UpdateCheckState.UP_TO_DATE,
-                        updateInfo = info
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        updateState = UpdateCheckState.ERROR,
-                        updateInfo = unknownState(
-                            "The update check failed: ${e.message ?: e.javaClass.simpleName}. No update status is known."
-                        )
-                    )
+                    it.copy(updateState = UpdateCheckState.ERROR, updateInfo = info)
                 }
             }
         }
     }
 
-    /**
-     * Downloads the feed's APK, verifies it, and hands it to Android's installer. The user sees
-     * the system's confirmation; this method never installs anything on its own.
-     */
     fun downloadAndInstallUpdate(context: Context) {
-        val info = _uiState.value.updateInfo ?: return
-        if (info.apkDownloadUrl.isBlank() || info.sha256.isBlank()) {
-            _uiState.update {
-                it.copy(
-                    updateState = UpdateCheckState.ERROR,
-                    updateInfo = info.copy(
-                        releaseNotes = "The feed published no APK with a SHA-256, so this build cannot install it itself."
-                    )
-                )
+        val downloadUrl = _uiState.value.updateInfo?.downloadUrl ?: "https://github.com/jberggre/Phonix-OS/releases"
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(downloadUrl)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
-            return
+            context.startActivity(intent)
+        } catch (_: Exception) {
         }
+    }
 
-        val manifest = UpdateManifest(
-            versionCode = info.latestVersionCode,
-            versionName = info.latestVersionName,
-            apkUrl = info.apkDownloadUrl,
-            sha256 = info.sha256,
-            notes = info.releaseNotes,
-            published = info.publishedDate
-        )
+    private fun isNewerVersion(candidate: String, current: String): Boolean {
+        return VersionComparator.isNewer(candidate, current)
+    }
 
-        _uiState.update {
-            it.copy(
-                updateState = UpdateCheckState.DOWNLOADING,
-                updateInfo = info.copy(releaseNotes = "Downloading ${info.latestVersionName}...")
-            )
-        }
+    private fun extractJsonString(json: String, key: String): String? {
+        val pattern = "\"$key\"\\s*:\\s*\"([^\"]*)\"".toRegex()
+        return pattern.find(json)?.groups?.get(1)?.value?.replace("\\r\\n", "\n")?.replace("\\n", "\n")
+    }
 
-        viewModelScope.launch {
-            try {
-                val installer = UpdateInstaller(getApplication())
-                val apk = withContext(Dispatchers.IO) {
-                    installer.download(
-                        manifest,
-                        onProgress = { line ->
-                            _uiState.update { state ->
-                                state.updateInfo?.let { current ->
-                                    state.copy(updateInfo = current.copy(releaseNotes = line))
-                                } ?: state
-                            }
-                        },
-                        onBytes = { written, total ->
-                            if (total > 0) {
-                                val percent = (written * 100 / total).toInt()
-                                val megabytes = written / (1024 * 1024)
-                                val totalMegabytes = total / (1024 * 1024)
-                                _uiState.update { state ->
-                                    state.updateInfo?.let { current ->
-                                        state.copy(
-                                            updateInfo = current.copy(
-                                                releaseNotes = "Downloading $percent% ($megabytes of $totalMegabytes MB)..."
-                                            )
-                                        )
-                                    } ?: state
-                                }
-                            }
-                        }
-                    )
-                }
-
-                _uiState.update {
-                    it.copy(
-                        updateState = UpdateCheckState.READY_TO_INSTALL,
-                        updateInfo = info.copy(
-                            releaseNotes = "Downloaded ${apk.length() / (1024 * 1024)} MB and matched the " +
-                                "published SHA-256. Android will ask you to confirm the install."
-                        )
-                    )
-                }
-
-                withContext(Dispatchers.Main) {
-                    installer.install(apk) { installed, message ->
-                        _uiState.update { state ->
-                            state.copy(
-                                updateState = if (installed) UpdateCheckState.IDLE else UpdateCheckState.ERROR,
-                                updateInfo = state.updateInfo?.copy(releaseNotes = message)
-                            )
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        updateState = UpdateCheckState.ERROR,
-                        updateInfo = info.copy(
-                            releaseNotes = "The update was not installed: ${e.message ?: e.javaClass.simpleName}. " +
-                                "Nothing was changed."
-                        )
-                    )
-                }
-            }
-        }
+    private fun extractAssetDownloadUrl(json: String): String? {
+        val pattern = "\"browser_download_url\"\\s*:\\s*\"([^\"]*\\.apk)\"".toRegex()
+        return pattern.find(json)?.groups?.get(1)?.value
     }
 
     // -------------------------------------------------------------
@@ -3467,8 +3393,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Opt-in setup: boot the guest, install a llama.cpp server for the active distro if missing,
-     * download and
+     * Opt-in setup: boot the guest, install Alpine's llama-server if missing, download and
      * verify the GGUF, launch the server, and only then report READY from /health.
      */
     fun setupLocalAi() {
@@ -3485,7 +3410,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
             }
             try {
                 if (!localAi.ensureContainer()) {
-                    failAiSetup("The Linux container did not start. Open Terminal and check its output.")
+                    failAiSetup("The Alpine container did not start. Open Terminal and check its output.")
                     return@launch
                 }
 
@@ -3493,7 +3418,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update {
                         it.copy(
                             aiEngineState = AiEngineState.INSTALLING,
-                            aiEngineMessage = "Installing the llama.cpp server in the active guest..."
+                            aiEngineMessage = "Installing llama-server inside Alpine..."
                         )
                     }
                     val install = localAi.ensureServerPackage(::appendAiSetupLog)
@@ -3651,29 +3576,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Reads the live thermal telemetry and refuses sustained work on a phone that is too hot.
-     *
-     * The guard exists because a 1.5B model at 8-17 tok/s is exactly the load that heats a phone, and
-     * starting it on a phone already at 74 C is how a battery gets cooked. Absent sensors are not
-     * treated as cool: [com.example.model.ThermalPolicy] returns UNKNOWN and the work proceeds, which
-     * is the honest behaviour when nothing answered.
-     */
-    private fun thermalRefusal(activity: String): String? {
-        val telemetry = _uiState.value.telemetry
-        val reading = com.example.model.ThermalReading(
-            hottestC = telemetry.hottestZoneC.takeIf { telemetry.hasReading },
-            isCharging = telemetry.isCharging,
-            hasReading = telemetry.hasReading
-        )
-        return com.example.model.ThermalPolicy.refusal(reading, activity)
-    }
-
     fun sendAiMessage(prompt: String) {
-        thermalRefusal("Local AI")?.let { message ->
-            _uiState.update { state -> state.copy(notificationMessage = message) }
-            return
-        }
         val trimmed = prompt.trim()
         if (trimmed.isEmpty() || _uiState.value.isAiGenerating) return
         val userMsg = AiChatMessage(
@@ -3812,96 +3715,12 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleKnowledgeLibrary() {
-        _uiState.update {
-            it.copy(
-                showKnowledgeLibrary = !it.showKnowledgeLibrary,
-                openKnowledgeDocId = null,
-                // Opening the dialog is the only moment the pack list has to be current.
-                libraryPacks = com.example.model.KnowledgeLibrary.installedPacks()
-            )
-        }
+        _uiState.update { it.copy(showKnowledgeLibrary = !it.showKnowledgeLibrary, openKnowledgeDocId = null) }
     }
 
     fun openKnowledgeDoc(id: String?) {
         _uiState.update { it.copy(openKnowledgeDocId = id) }
     }
-
-    /**
-     * Installs a pack the user picked through the document picker. The bytes are read and parsed
-     * on an IO thread and only written once the whole file has parsed, so a bad pack leaves the
-     * existing library untouched.
-     */
-    fun importLibraryPack(uri: android.net.Uri) {
-        thermalRefusal("Importing a pack")?.let { message ->
-            _uiState.update { state -> state.copy(notificationMessage = message) }
-            return
-        }
-        _uiState.update { it.copy(libraryPackBusy = true) }
-        viewModelScope.launch {
-            val app = getApplication<Application>()
-            val outcome = withContext(Dispatchers.IO) {
-                runCatching {
-                    val name = packDisplayName(uri) ?: "imported-pack"
-                    val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("That file could not be opened.")
-                    if (bytes.size > com.example.model.LibraryPackFormat.MAX_CHARS * 2) {
-                        throw com.example.model.LibraryPackException(
-                            "That pack is ${bytes.size / 1024} KB; the limit is " +
-                                "${com.example.model.LibraryPackFormat.MAX_CHARS / 1024} KB."
-                        )
-                    }
-                    val installed = libraryPackStore().install(name, String(bytes, Charsets.UTF_8))
-                    com.example.model.KnowledgeLibrary.reloadPacks()
-                    installed
-                }
-            }
-            outcome.fold(
-                onSuccess = { pack ->
-                    _uiState.update {
-                        it.copy(
-                            libraryPackBusy = false,
-                            libraryPacks = com.example.model.KnowledgeLibrary.installedPacks(),
-                            notificationMessage = "Imported ${pack.title}: ${pack.docCount} documents, " +
-                                com.example.model.KnowledgeLibrary.bytesLabel(pack.bytes)
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _uiState.update {
-                        it.copy(
-                            libraryPackBusy = false,
-                            notificationMessage = error.message ?: "The pack could not be imported."
-                        )
-                    }
-                }
-            )
-        }
-    }
-
-    fun deleteLibraryPack(id: String) {
-        val removed = libraryPackStore().delete(id)
-        com.example.model.KnowledgeLibrary.reloadPacks()
-        _uiState.update {
-            it.copy(
-                libraryPacks = com.example.model.KnowledgeLibrary.installedPacks(),
-                notificationMessage = if (removed) {
-                    "Deleted pack $id and returned its space"
-                } else {
-                    "No pack named $id"
-                }
-            )
-        }
-    }
-
-    private fun libraryPackStore(): com.example.model.LibraryPackStore =
-        com.example.model.LibraryPackStore(java.io.File(getApplication<Application>().filesDir, "library/packs"))
-
-    /** The file name the picker reports, so the pack keeps a name the owner recognises. */
-    private fun packDisplayName(uri: android.net.Uri): String? = runCatching {
-        getApplication<Application>().contentResolver
-            .query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-    }.getOrNull()
 
     fun copyText(text: String, label: String) {
         val copied = try {
@@ -3928,32 +3747,8 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
     // Shell agent: one command per turn, approved by the user
     // -------------------------------------------------------------
 
-    private val agentSystemPrompt: String
-        get() {
-        val guest = runCatching { LinuxRuntime.container(getApplication<Application>()).activeDistro() }
-            .getOrDefault(DistroCatalog.alpine)
-        val moduleFacts = com.example.model.ModuleFacts(
-            guestInstalled = runCatching {
-                LinuxRuntime.container(getApplication<Application>()).isInstalled
-            }.getOrDefault(false),
-            isDeviceOwner = runCatching {
-                com.example.util.HostDebloat.canRemovePackages(getApplication<Application>())
-            }.getOrDefault(false),
-            verifiedPacks = _uiState.value.verifiedPacks
-        )
-        val moduleList = com.example.model.ModuleRegistry.resolved(moduleFacts, manifests)
-            .joinToString("\n") { resolved ->
-                val module = resolved.module
-                // Empty when no manifest mentions the module, so the prompt is byte-identical to the
-                // one this agent read before manifests existed.
-                val needs = if (resolved.packages.isEmpty()) ""
-                    else " (declared packages: ${resolved.packages.joinToString(", ")})"
-                if (resolved.isAvailable) "  ${module.title}: ${module.subtitle}$needs"
-                else "  ${module.title}: BLOCKED - ${resolved.blockedReason}$needs"
-            }
-        return """
-        You are Phonix Shell, a command-line agent working inside a ${guest.name} guest on this phone.
-        Packages come from ${guest.packageManager}; do not suggest another distro's package manager.
+    private val agentSystemPrompt = """
+        You are Phonix Shell, a command-line agent working inside an Alpine Linux guest on this phone.
         You guide a user through a task by issuing one shell command at a time and reading its output.
         Reply with exactly ONE line, in one of these two forms:
         RUN <command>
@@ -3961,11 +3756,7 @@ class PhonixViewModel(application: Application) : AndroidViewModel(application) 
         Rules: no explanation, no markdown, no code fences, one command per reply. Prefer python3 or sh.
         Use relative paths in the guest home. Never run rm -rf /, mkfs, dd to a device, or anything that
         reboots or wipes the device. Check before you create: use ls and cat first.
-        Windows this app can open on this device (a BLOCKED one cannot be opened at all, so never
-        suggest it; say what is missing instead):
-${moduleList}
     """.trimIndent()
-        }
 
     fun setAgentTask(task: String) {
         _uiState.update { it.copy(agentTask = task) }
@@ -4139,51 +3930,6 @@ ${moduleList}
      * connection to loopback succeeds. The CLI is not in the base Alpine image, so a missing
      * binary now produces a visible failure instead of a green badge over a refused WebView.
      */
-    private val vsCodeInstaller = com.example.engine.VsCodeInstaller { command, timeoutMs ->
-        com.example.engine.LinuxRuntime.run(command, timeoutMs)
-    }
-
-    /**
-     * Installs Microsoft's CLI into the guest.
-     *
-     * The download runs inside the guest with the guest's own curl, and the only success accepted
-     * is the version the binary prints. Without a version line the state keeps saying that nothing
-     * is installed, even if the download looked fine.
-     */
-    fun installVsCode() {
-        if (_uiState.value.vsCodeInstalling) return
-        _uiState.update {
-            it.copy(
-                vsCodeInstalling = true,
-                vsCodeInstallStatus = "Downloading the VS Code CLI into the guest (about 40 MB)..."
-            )
-        }
-        viewModelScope.launch {
-            if (!com.example.engine.LinuxRuntime.isRunning) {
-                _uiState.update {
-                    it.copy(
-                        vsCodeInstalling = false,
-                        vsCodeInstallStatus = "The Linux guest is not running - start it, then install."
-                    )
-                }
-                return@launch
-            }
-            when (val outcome = vsCodeInstaller.install()) {
-                is com.example.engine.VsCodeInstall.Installed -> _uiState.update {
-                    it.copy(
-                        vsCodeInstalling = false,
-                        vsCodeCliVersion = outcome.version,
-                        vsCodeInstallStatus = "CLI " + outcome.version + " installed in the guest (" +
-                            outcome.libc.label + " build)."
-                    )
-                }
-                is com.example.engine.VsCodeInstall.Refused -> _uiState.update {
-                    it.copy(vsCodeInstalling = false, vsCodeInstallStatus = outcome.reason)
-                }
-            }
-        }
-    }
-
     fun startVsCodeServer() {
         if (_uiState.value.vsCodeServerProbing) return
         _uiState.update {
@@ -4215,28 +3961,8 @@ ${moduleList}
                 return@launch
             }
 
-            if (_uiState.value.vsCodeCliVersion == null) {
-                // It may have been installed in an earlier session, so ask the guest before
-                // claiming it is missing - and never read the shell's silence as a yes.
-                val probe = com.example.engine.LinuxRuntime.run(
-                    com.example.model.VsCodeCli.installedVersionProbe(),
-                    20_000L
-                )
-                val known = com.example.model.VsCodeCli.parseVersion(probe.orEmpty())
-                if (known == null) {
-                    _uiState.update {
-                        it.copy(
-                            vsCodeServerProbing = false,
-                            vsCodeServerRunning = false,
-                            vsCodeServerStatus = "No VS Code CLI in the guest - press Install VS Code first."
-                        )
-                    }
-                    return@launch
-                }
-                _uiState.update { it.copy(vsCodeCliVersion = known) }
-            }
-            vsCodeInstaller.serve()
-            val deadline = System.currentTimeMillis() + 20_000L
+            executeTerminalCommand("code serve-web --host 127.0.0.1 --port 8000 --without-connection-token &")
+            val deadline = System.currentTimeMillis() + 12_000L
             var listening = false
             while (System.currentTimeMillis() < deadline && isActive) {
                 if (loopbackAcceptsConnections(8000)) {
@@ -4250,9 +3976,9 @@ ${moduleList}
                     vsCodeServerProbing = false,
                     vsCodeServerRunning = listening,
                     vsCodeServerStatus = if (listening) {
-                        "Listening on 127.0.0.1:8000 - the editor is served by the guest"
+                        "Listening on 127.0.0.1:8000"
                     } else {
-                        "No listener on 127.0.0.1:8000 after 20 s - see \$HOME/.phonix/vscode/phonix-vscode.log in the guest."
+                        "No listener on 127.0.0.1:8000 - the VS Code CLI is missing or failed. See Terminal."
                     }
                 )
             }
@@ -4265,7 +3991,6 @@ ${moduleList}
         // battery and thermal cost the customer did not ask for.
         aiChatJob?.cancel()
         aiSetupJob?.cancel()
-        serviceSupervisor.stopAll()
         localAi.stopServerNow()
         networkWatcher?.close()
         LinuxRuntime.removeListener(linuxOutput)

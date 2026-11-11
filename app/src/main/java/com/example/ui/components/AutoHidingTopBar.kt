@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
@@ -284,6 +285,7 @@ fun AutoHidingTopBar(
                                         AppNavTab.PARTITIONS -> Icons.Default.Storage
                                         AppNavTab.DISTROS -> Icons.Default.Widgets
                                         AppNavTab.APPS -> Icons.Default.Storefront
+                                        AppNavTab.HELP -> Icons.Default.Info
                                     },
                                     contentDescription = null,
                                     tint = if (isSelected) PhonixCyan else Slate400,

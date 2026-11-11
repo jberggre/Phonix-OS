@@ -38,7 +38,6 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.model.ShortcutShape
 import com.example.model.ShortcutBgStyle
 import com.example.model.DesktopContextMenuData
-import com.example.model.DesktopIconGrid
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -132,8 +131,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -175,8 +172,6 @@ import com.example.model.IconSizeMode
 import com.example.model.MonitorDisplayMode
 import com.example.model.TaskbarPosition
 import com.example.model.TaskbarStyle
-import com.example.ui.components.TASKBAR_HEIGHT_DP
-import com.example.ui.components.TASKBAR_WIDTH_DP
 import com.example.model.WindowType
 import com.example.ui.theme.PhonixAmber
 import com.example.ui.theme.PhonixBlue
@@ -202,10 +197,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Work-area insets that match the taskbar's own dimensions, in one place. */
-private val WINDOWS_TASKBAR_HEIGHT = TASKBAR_HEIGHT_DP.dp
-private val WINDOWS_TASKBAR_WIDTH = TASKBAR_WIDTH_DP.dp
-
 @Composable
 fun PhonixDesktopScreen(
     uiState: PhonixUiState,
@@ -227,56 +218,32 @@ fun PhonixDesktopScreen(
         val isWidescreenMonitor = isHardwareLandscape || customization.displayMode.isWidescreen
 
         val desktopWidth = screenWidth
-        // Windows live in the work area the taskbar leaves. Without this the edge of a
-        // full-height window (and its resize grip) disappears under the bar at high densities,
-        // where the window's 180 dp minimum is the whole desktop. The bar can be on any of the
-        // four edges, so the inset follows whichever side it is docked to.
-        val barPosition = customization.taskbarPosition
-        val barThickness = WINDOWS_TASKBAR_HEIGHT
-        val barWidth = WINDOWS_TASKBAR_WIDTH
-        val bounds = remember(screenWidth, screenHeight, barPosition) {
+        // Windows live in the work area above the 50 dp taskbar. Without this the bottom
+        // edge of a full-height window (and its resize grip) disappears under the bar at
+        // high densities, where the window's 180 dp minimum is the whole desktop.
+        val taskbarHeight = 50.dp
+        val bounds = remember(screenWidth, screenHeight) {
             WindowBounds(
-                widthDp = (screenWidth - if (barPosition.isVertical) barWidth else 0.dp)
-                    .coerceAtLeast(1.dp).value,
-                heightDp = (screenHeight - if (barPosition.isVertical) 0.dp else barThickness)
-                    .coerceAtLeast(1.dp).value
+                widthDp = screenWidth.value,
+                heightDp = (screenHeight - taskbarHeight).coerceAtLeast(1.dp).value
             )
         }
         LaunchedEffect(bounds) { viewModel.normalizeWindows(bounds) }
         val unfoldedLayout = uiState.foldPosture == com.example.model.FoldPosture.FLAT || screenWidth >= 600.dp
         val availableGridWidth = if (unfoldedLayout && screenWidth >= 680.dp) screenWidth - 240.dp else screenWidth - 24.dp
-        val iconColumns = DesktopIconGrid.columns(availableGridWidth.value)
+        val iconColumns = (availableGridWidth / 90.dp).toInt().coerceAtLeast(1)
         // Desktop icons are their own list. Pinning an app to the taskbar adds a separate entry
         // there; it never hides the icon or claims its slot.
         val desktopShortcuts = customization.shortcuts
-        val rowStride = DesktopIconGrid.ROW_PITCH_DP.dp
-        val topPadding = if (barPosition == TaskbarPosition.TOP) 54.dp else 10.dp
-        val bottomPadding = if (barPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp
-        // Icons keep clear of a vertical bar too, instead of hiding under it.
-        val startPadding = if (barPosition == TaskbarPosition.LEFT) barWidth + 12.dp else 12.dp
-        val endPadding = if (barPosition == TaskbarPosition.RIGHT) barWidth + 12.dp else 12.dp
+        val rowStride = 88.dp
+        val topPadding = if (customization.taskbarPosition == TaskbarPosition.TOP) 54.dp else 10.dp
+        val bottomPadding = if (customization.taskbarPosition == TaskbarPosition.BOTTOM) 54.dp else 12.dp
         // The default position is the BOTTOM-left quadrant, which is what the align action and
         // the label both promise. This was pinned to 0.dp, so "Align to Bottom-Left" dropped the
         // whole block in the top-left corner.
+        val gridRows = ((desktopShortcuts.size + iconColumns - 1) / iconColumns).coerceAtLeast(1)
         val iconAreaHeight = (screenHeight - topPadding - bottomPadding).coerceAtLeast(rowStride)
-
-        // The view model snaps into this grid, not into a second copy of the numbers. It used to
-        // keep its own 88 x 94 dp pitch measured from the top corner, so "Lock Icons to Grid"
-        // dropped an icon in the middle of the screen and left every other icon untouched.
-        LaunchedEffect(iconColumns, iconAreaHeight) {
-            viewModel.setIconGrid(iconColumns, iconAreaHeight.value)
-        }
-
-        // The icon area grows or shrinks when the bar docks to another edge. Freeform positions are
-        // offsets inside it, so they travel with it instead of being stranded under the bar.
-        var lastIconAreaHeight by remember { mutableStateOf<Float?>(null) }
-        LaunchedEffect(iconAreaHeight) {
-            val previous = lastIconAreaHeight
-            lastIconAreaHeight = iconAreaHeight.value
-            if (previous != null && previous != iconAreaHeight.value) {
-                viewModel.reanchorShortcuts(iconAreaHeight.value - previous, iconAreaHeight.value)
-            }
-        }
+        val gridTop = (iconAreaHeight - (rowStride * gridRows) - 6.dp).coerceAtLeast(0.dp)
 
         Box(
             modifier = Modifier.fillMaxSize()
@@ -313,8 +280,8 @@ fun PhonixDesktopScreen(
                         .padding(
                             top = topPadding,
                             bottom = bottomPadding,
-                            start = startPadding,
-                            end = endPadding
+                            start = 12.dp,
+                            end = 12.dp
                         )
                 ) {
                     // Reflow the grid from the live window width. The inner fold gets several
@@ -324,28 +291,14 @@ fun PhonixDesktopScreen(
                     val iconsByPackage = remember(uiState.installedApps) {
                         uiState.installedApps.associateBy { it.packageName }
                     }
-                    // A freeform icon stores its offset inside this area, and the area changes
-                    // size when the bar moves to another edge. Clamp instead of translating: an
-                    // icon dragged to the very bottom of a right-docked desktop is lifted clear of
-                    // a bottom bar rather than drawn on top of it, and returns to exactly where it
-                    // was when the bar leaves the bottom edge.
-                    val maxIconX = (screenWidth - startPadding - endPadding - 100.dp)
-                        .coerceAtLeast(0.dp).value
-                    val maxIconY = (iconAreaHeight - 96.dp).coerceAtLeast(0.dp).value
                     desktopShortcuts.forEachIndexed { index, shortcut ->
                         val effectiveShortcut = if (!shortcut.hasCustomPosition) {
-                            val (autoX, autoY) = DesktopIconGrid.autoPosition(
-                                index = index,
-                                count = desktopShortcuts.size,
-                                columns = iconColumns,
-                                areaHeightDp = iconAreaHeight.value
-                            )
-                            shortcut.copy(posX = autoX, posY = autoY)
-                        } else {
                             shortcut.copy(
-                                posX = shortcut.posX.coerceIn(0f, maxIconX),
-                                posY = shortcut.posY.coerceIn(0f, maxIconY)
+                                posX = (index % iconColumns) * 90f,
+                                posY = gridTop.value + ((index / iconColumns) * rowStride.value)
                             )
+                        } else {
+                            shortcut
                         }
                         val appIcon = effectiveShortcut.launchPackage
                             ?.let { iconsByPackage[it] }
@@ -439,18 +392,6 @@ fun PhonixDesktopScreen(
                 }
 
                 // 4. Desktop Windows Layer (Toggleable on / off)
-                // Inset by the docked taskbar, so a window can never be dragged under it or
-                // lose its resize grip to it, whichever edge the bar is on.
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(
-                            top = if (barPosition == TaskbarPosition.TOP) barThickness else 0.dp,
-                            bottom = if (barPosition == TaskbarPosition.BOTTOM) barThickness else 0.dp,
-                            start = if (barPosition == TaskbarPosition.LEFT) barWidth else 0.dp,
-                            end = if (barPosition == TaskbarPosition.RIGHT) barWidth else 0.dp
-                        )
-                ) {
                 uiState.windows.filter { !it.isMinimized }.forEach { window ->
                     DesktopWindowFrame(
                         window = window,
@@ -460,8 +401,6 @@ fun PhonixDesktopScreen(
                         viewModel = viewModel,
                         bounds = bounds
                     )
-                }
-
                 }
 
                 // 5. Windows 11 Desktop Context Menu (Shortcut & Wallpaper)
@@ -487,48 +426,22 @@ fun PhonixDesktopScreen(
                     RenameEntryDialog(uiState = uiState, viewModel = viewModel)
                 }
 
-                // 6. Windows 11 Fluent Acrylic Start Menu, anchored to the bar's edge so it
-                // never opens underneath the taskbar.
+                // 6. Windows 11 Fluent Acrylic Start Menu (Centered Floating Card)
                 if (uiState.isStartMenuOpen) {
-                    val menuAlignment = when (barPosition) {
-                        TaskbarPosition.TOP -> Alignment.TopCenter
-                        TaskbarPosition.LEFT -> Alignment.BottomStart
-                        TaskbarPosition.RIGHT -> Alignment.BottomEnd
-                        TaskbarPosition.BOTTOM -> Alignment.BottomCenter
-                    }
-                    val menuOffsetX = when (barPosition) {
-                        TaskbarPosition.LEFT -> barWidth
-                        TaskbarPosition.RIGHT -> -barWidth
-                        else -> 0.dp
-                    }
-                    val menuOffsetY = when (barPosition) {
-                        TaskbarPosition.TOP -> barThickness + 6.dp
-                        TaskbarPosition.BOTTOM -> -(barThickness + 6.dp)
-                        else -> (-8).dp
-                    }
                     Windows11StartMenu(
                         uiState = uiState,
                         viewModel = viewModel,
                         modifier = Modifier
-                            .align(menuAlignment)
-                            .offset(x = menuOffsetX, y = menuOffsetY)
+                            .align(Alignment.BottomCenter)
+                            .offset(y = (-56).dp)
                     )
                 }
 
-                // 7. Taskbar (App Pointers, System Tray & Show Desktop), docked to its edge.
-                // Right-click or long-press on the bar opens the dock menu.
+                // 7. Windows 11 Centered Taskbar (App Pointers, System Tray & Show Desktop)
                 Windows11Taskbar(
                     uiState = uiState,
                     viewModel = viewModel,
-                    position = barPosition,
-                    modifier = Modifier.align(
-                        when (barPosition) {
-                            TaskbarPosition.BOTTOM -> Alignment.BottomCenter
-                            TaskbarPosition.TOP -> Alignment.TopCenter
-                            TaskbarPosition.LEFT -> Alignment.CenterStart
-                            TaskbarPosition.RIGHT -> Alignment.CenterEnd
-                        }
-                    )
+                    modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }
         }
@@ -824,7 +737,7 @@ fun DesktopWallpaperBackground(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "uname -a  ·  cat /etc/os-release  ·  python3",
+                            "uname -a  ·  apk add  ·  python3",
                             color = TerminalGreen.copy(alpha = 0.38f),
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp
@@ -889,15 +802,8 @@ fun DesktopWallpaperBackground(
                 while (x < size.width) {
                     var y = 10.dp.toPx()
                     while (y < size.height) {
-                        // Dark halo under each dot: the grid must stay visible on both a
-                        // near-black and a near-white wallpaper.
                         drawCircle(
-                            color = Color.Black.copy(alpha = 0.45f),
-                            radius = dotRadius + 1.4.dp.toPx(),
-                            center = Offset(x, y)
-                        )
-                        drawCircle(
-                            color = accentColor.copy(alpha = 0.85f),
+                            color = accentColor.copy(alpha = 0.65f),
                             radius = dotRadius,
                             center = Offset(x, y)
                         )
@@ -1155,11 +1061,11 @@ fun DraggableDesktopShortcut(
                 modifier = Modifier
                     .size(sizeDp)
                     .then(
-                        if (showFrames && (phoneIcon != null || artRes != null)) {
+                        if (showFrames && phoneIcon != null && artRes == null) {
                             Modifier
                                 .clip(RoundedCornerShape(shapeRadius))
-                                .background(Color.White.copy(alpha = 0.07f))
-                                .border(1.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(shapeRadius))
+                                .background(iconTint.copy(alpha = 0.16f))
+                                .border(1.dp, iconTint.copy(alpha = 0.55f), RoundedCornerShape(shapeRadius))
                         } else {
                             Modifier
                         }
@@ -1171,7 +1077,7 @@ fun DraggableDesktopShortcut(
                         painter = painterResource(id = artRes),
                         contentDescription = shortcut.title,
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.size(if (showFrames) sizeDp * 0.88f else sizeDp)
+                        modifier = Modifier.size(sizeDp)
                     )
                 } else if (phoneIcon != null) {
                     Image(
@@ -1189,6 +1095,24 @@ fun DraggableDesktopShortcut(
                         tint = iconTint,
                         modifier = Modifier.size(sizeDp * 0.75f)
                     )
+                }
+
+                if (shortcut.linuxCommand != null) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (shortcut.isLinuxGuiApp) PhonixCyan else TerminalGreen)
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = if (shortcut.isLinuxGuiApp) "X11" else "CLI",
+                            color = Slate950,
+                            fontSize = 7.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
                 }
             }
 
@@ -1218,12 +1142,9 @@ fun DesktopQuickDistroWidget(
     viewModel: PhonixViewModel
 ) {
     val context = LocalContext.current
-    // The guest that is actually installed names itself; hardcoding "Alpine Linux" here is how
-    // this card read "Alpine Linux 12.15" while a Debian tree was the active rootfs.
-    val distro = uiState.currentDistro
-    val version = remember(uiState.containerStatus, distro.id) {
+    val version = remember(uiState.containerStatus, uiState.currentDistro) {
         runCatching { com.example.engine.LinuxRuntime.container(context).version() }
-            .getOrDefault(distro.version)
+            .getOrDefault(uiState.currentDistro.version)
     }
     val running = uiState.containerStatus == com.example.viewmodel.ContainerStatus.RUNNING
 
@@ -1263,13 +1184,9 @@ fun DesktopQuickDistroWidget(
             }
 
             Spacer(modifier = Modifier.height(6.dp))
+            Text(text = "${uiState.currentDistro.name} $version", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
             Text(
-                text = if (version.isBlank() || distro.name.contains(version)) distro.name
-                       else distro.name + " · " + version,
-                color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black
-            )
-            Text(
-                text = "proot userspace, no root, no partition",
+                text = "${uiState.currentDistro.packageManager} • X11: ${uiState.activeDesktopEnvironment.shortLabel} • proot userspace",
                 color = Slate400,
                 fontSize = 10.sp,
                 maxLines = 1,
@@ -1470,11 +1387,7 @@ fun DesktopWindowFrame(
                 )
             }
             .then(
-                // The windows layer is already inset by the docked taskbar on every edge, so a
-                // maximized window fills exactly that area. This used to reserve a fixed 50 dp at
-                // the bottom, which double-inset a bottom bar and, with the bar on the left or
-                // right, lifted the window off the bottom edge for no reason at all.
-                if (window.isMaximized) Modifier.fillMaxSize()
+                if (window.isMaximized) Modifier.fillMaxSize().padding(bottom = 50.dp)
                 else Modifier.size(width = window.width.dp, height = window.height.dp)
             )
             .zIndex(window.zIndex)
@@ -1823,7 +1736,7 @@ fun LinuxSystemWindowContent(
                     fontSize = 10.sp,
                     lineHeight = 15.sp
                 )
-                Text("apk add <pkg>  ·  apt-get install <pkg>  ·  pacman -S <pkg>", color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text("apk add <package>   |   apk search <name>", color = PhonixCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
 
@@ -1962,37 +1875,6 @@ fun PersonalizeWindowContent(
                             colors = SwitchDefaults.colors(checkedTrackColor = PhonixGreen)
                         )
                     }
-                }
-            }
-        }
-
-        // Shortcut style. This used to be a right-click item, but that menu had grown past the
-        // screen, so the tile is an opt-in setting here and the menu keeps only desktop actions.
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Slate900)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.GridView, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Shortcut Style", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Icon Tiles", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Rounded plate behind each icon. Off (default) is flat artwork only.", color = Slate400, fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = customization.showIconFrames,
-                        onCheckedChange = { viewModel.toggleIconFrames() },
-                        colors = SwitchDefaults.colors(checkedTrackColor = PhonixCyan)
-                    )
                 }
             }
         }
@@ -2285,6 +2167,141 @@ fun PhonixTaskbar(
 val Slate500 = Color(0xFF64748B)
 
 @Composable
+fun PhonixStartMenu(
+    uiState: PhonixUiState,
+    viewModel: PhonixViewModel,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .width(280.dp)
+            .heightIn(max = 480.dp)
+            .shadow(20.dp, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = Slate900),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.verticalGradient(listOf(PhonixBlue, Slate800)))
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(12.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Image(painter = painterResource(id = R.drawable.img_phoenix_logo), contentDescription = null, modifier = Modifier.size(36.dp).clip(CircleShape))
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text("Phonix Workstation", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Current OS: ${uiState.currentDistro.name}", color = PhonixCyan, fontSize = 10.sp)
+                }
+            }
+
+            OutlinedTextField(
+                value = uiState.startMenuSearchQuery,
+                onValueChange = { viewModel.updateStartMenuSearch(it) },
+                placeholder = { Text("Search apps & tools...", color = Slate400, fontSize = 11.sp) },
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp),
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp),
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Slate400, modifier = Modifier.size(14.dp))
+                },
+                trailingIcon = {
+                    if (uiState.startMenuSearchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.updateStartMenuSearch("") }, modifier = Modifier.size(16.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Slate400, modifier = Modifier.size(12.dp))
+                        }
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF0F172A),
+                    unfocusedContainerColor = Color(0xFF0F172A),
+                    focusedBorderColor = PhonixBlueLight,
+                    unfocusedBorderColor = Slate800
+                )
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Slate800)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            val allMenuItems = listOf(
+                Triple("Linux Desktop (real X11 apps)", Icons.Default.Computer, PhonixGreen) to WindowType.LINUX_DESKTOP,
+                Triple("Web Browser (Chromium/Firefox)", Icons.Default.Language, PhonixBlueLight) to WindowType.BROWSER,
+                Triple("Linux system", Icons.Default.Apps, PhonixAmber) to WindowType.DISTRO_STORE,
+                Triple("Personalize Desktop & Displays", Icons.Default.Palette, Color(0xFFA855F7)) to WindowType.PERSONALIZE,
+                Triple("Terminal", Icons.Default.Terminal, TerminalGreen) to WindowType.TERMINAL,
+                Triple("Server Suite Hub", Icons.Default.Dns, PhonixCyan) to WindowType.SERVER_MANAGER,
+                Triple("Resource Monitor (htop)", Icons.Default.Speed, PhonixGreen) to WindowType.RESOURCE_MONITOR,
+                Triple("VirGL 3D Benchmark", Icons.Default.PlayArrow, Color(0xFFF43F5E)) to WindowType.BENCHMARK,
+                Triple("File Manager", Icons.Default.Folder, Color(0xFFFBBF24)) to WindowType.FILE_EXPLORER,
+                Triple("Notepad Editor", Icons.Default.Code, Slate200) to WindowType.NOTEPAD,
+                Triple("Phone Screen (read-only)", Icons.Default.PhoneAndroid, PhonixCyan) to WindowType.PHONE_MIRROR,
+                Triple("Local AI", Icons.Default.SmartToy, Color(0xFFA855F7)) to WindowType.AI_ASSISTANT,
+                Triple("VS Code Web IDE", Icons.Default.Code, PhonixBlueLight) to WindowType.VS_CODE,
+                Triple("About Phonix OS", Icons.Default.Info, PhonixCyan) to WindowType.ABOUT
+            )
+
+            val query = uiState.startMenuSearchQuery.trim().lowercase(Locale.ROOT)
+            val filteredMenuItems = if (query.isEmpty()) allMenuItems else allMenuItems.filter {
+                it.first.first.lowercase(Locale.ROOT).contains(query)
+            }
+
+            filteredMenuItems.forEach { (meta, winType) ->
+                StartMenuItem(title = meta.first, icon = meta.second, tint = meta.third) {
+                    viewModel.toggleWindow(winType)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Slate800)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Button(
+                    onClick = { viewModel.restartContainer() },
+                    modifier = Modifier.height(28.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Reboot", fontSize = 10.sp)
+                }
+                Button(
+                    onClick = { viewModel.toggleContainerPower() },
+                    modifier = Modifier.height(28.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) {
+                    Icon(Icons.Default.PowerSettingsNew, contentDescription = null, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Shutdown", fontSize = 10.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StartMenuItem(title: String, icon: ImageVector, tint: Color, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(text = title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+// -------------------------------------------------------------
+// TERMINAL WINDOW
+// -------------------------------------------------------------
+@Composable
 fun TerminalWindowContent(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
@@ -2293,7 +2310,7 @@ fun TerminalWindowContent(
 
     // Instant scroll, not animated: shell output arrives line by line, and an animation that is
     // restarted on every line spends frames competing with the output it is trying to follow.
-    LaunchedEffect(uiState.terminalLines.size) {
+    LaunchedEffect(uiState.terminalLines.size, uiState.activeTerminalTabId) {
         if (uiState.terminalLines.isNotEmpty()) {
             listState.scrollToItem(uiState.terminalLines.size - 1)
         }
@@ -2305,12 +2322,167 @@ fun TerminalWindowContent(
             .background(TerminalBlack)
             .padding(8.dp)
     ) {
-        val quickCmds = listOf("uname -a", "cat /etc/os-release", "df -h", "free -m", "ls /", "uptime", "clear")
-        val scrollState = rememberScrollState()
+        // 1. Multi-Tab Workspace Bar + Distro Status
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(scrollState)
+                .padding(bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                uiState.terminalTabs.forEach { tab ->
+                    val isActiveTab = tab.id == uiState.activeTerminalTabId
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isActiveTab) Color(0xFF0C3256) else Slate900)
+                            .border(
+                                width = 1.dp,
+                                color = if (isActiveTab) PhonixCyan else Slate800,
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .clickable { viewModel.selectTerminalTab(tab.id) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = tab.title,
+                            color = if (isActiveTab) Color.White else Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = if (isActiveTab) FontWeight.Bold else FontWeight.Medium
+                        )
+                        if (uiState.terminalTabs.size > 1) {
+                            Text(
+                                text = "×",
+                                color = Slate400,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { viewModel.closeTerminalTab(tab.id) }
+                                    .padding(start = 2.dp)
+                            )
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Slate800)
+                        .clickable { viewModel.addTerminalTab() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "+ Tab",
+                        color = PhonixCyan,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "${uiState.currentDistro.name} (${uiState.currentDistro.packageManager})",
+                    color = PhonixAmber,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        // 2. 1-Click "Pin to Phonix Desktop" Banner for newly installed packages
+        if (uiState.recentPinCandidates.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF0F261C))
+                    .border(1.dp, PhonixGreen.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Pin installed to Desktop:",
+                    color = PhonixGreen,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                uiState.recentPinCandidates.forEach { candidate ->
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Slate900)
+                            .border(1.dp, PhonixCyan.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "+ Pin ${candidate.title} (${if (candidate.isGui) "X11" else "CLI"})",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable {
+                                viewModel.pinLinuxCommandToDesktop(
+                                    title = candidate.title,
+                                    command = candidate.command,
+                                    isGui = candidate.isGui
+                                )
+                            }
+                        )
+                        Text(
+                            text = "×",
+                            color = Slate400,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { viewModel.dismissPinCandidate(candidate.command) }
+                                .padding(start = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Distro-Aware Quick Commands Row
+        val pkgQueryCmd = when (uiState.currentDistro.packageManager) {
+            "apt" -> "dpkg -l | tail -n 15"
+            "pacman" -> "pacman -Q"
+            else -> "apk info"
+        }
+        val quickCmds = listOf(
+            "uname -a",
+            pkgQueryCmd,
+            "phonix-pin --help",
+            "df -h",
+            "free -m",
+            "ps",
+            "ls -la",
+            "clear"
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(bottom = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -2325,7 +2497,7 @@ fun TerminalWindowContent(
                     Text(
                         text = cmd,
                         color = PhonixBlueLight,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium
                     )
@@ -2333,6 +2505,7 @@ fun TerminalWindowContent(
             }
         }
 
+        // 4. Terminal Output Scrollback
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
             items(uiState.terminalLines) { line ->
                 val textColor = when (line.type) {
@@ -2353,13 +2526,58 @@ fun TerminalWindowContent(
             }
         }
 
+        // 5. Termux-Style Extra Keys Row (History, Tab Completion, SIGINT, Shell Tokens)
+        val extraKeys = listOf(
+            "↑" to "UP",
+            "↓" to "DOWN",
+            "TAB" to "TAB",
+            "Ctrl+C" to "CTRL_C",
+            "Ctrl+D" to "CTRL_D",
+            "~" to "~",
+            "/" to "/",
+            "-" to "-",
+            "|" to "|",
+            "&&" to "&&",
+            ">" to ">"
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            extraKeys.forEach { (label, keyId) ->
+                val isSignal = keyId == "CTRL_C" || keyId == "CTRL_D"
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isSignal) Color(0xFF2A1215) else Slate900)
+                        .border(
+                            width = 1.dp,
+                            color = if (isSignal) PhonixRed.copy(alpha = 0.5f) else Slate700,
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                        .clickable { viewModel.onTerminalExtraKey(keyId) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = label,
+                        color = if (isSignal) PhonixRed else PhonixCyan,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // 6. Command Input Row
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                // The prompt names the guest that is actually running; it used to say
-                // "root@alpine" even after switching to Debian.
                 text = "root@${uiState.currentDistro.id}:~# ",
                 color = TerminalGreen,
                 fontSize = 11.sp,
@@ -2403,72 +2621,7 @@ fun ServerManagerWindowContent(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
-    LaunchedEffect(Unit) {
-        // This window is what DeX actually draws, so it asks the guest and re-reads the manifests
-        // itself: a declaration dropped in while the app runs still appears here.
-        viewModel.refreshServerStates()
-        viewModel.reloadModuleManifests()
-    }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (uiState.manifests.manifests.isNotEmpty() || uiState.manifests.issues.isNotEmpty()) {
-            item {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                    Text(
-                        text = "Module manifests: ${uiState.manifests.manifests.size} accepted, " +
-                            "${uiState.manifests.issues.size} rejected",
-                        color = if (uiState.manifests.issues.isEmpty()) PhonixCyan
-                        else androidx.compose.ui.graphics.Color(0xFFF59E0B),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    uiState.manifests.issues.forEach { issue ->
-                        Text(
-                            text = issue.toString(),
-                            color = Slate400,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-            }
-        }
-        val packIds = uiState.manifests.packs()
-        if (packIds.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Packs (${uiState.verifiedPacks.size} verified)",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-            }
-            items(packIds) { id ->
-                val state = uiState.packStates[id]
-                    ?: if (id in uiState.verifiedPacks) "Verified and installed" else "Not downloaded"
-                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Text(id, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        // The state is the last measured outcome, never a spinner that turns green.
-                        Text(
-                            text = state,
-                            color = if (id in uiState.verifiedPacks) PhonixCyan else Slate400,
-                            fontSize = 10.sp
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Button(
-                            onClick = { viewModel.downloadPack(id) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Slate800),
-                            modifier = Modifier.height(28.dp)
-                        ) {
-                            Text(
-                                text = if (id in uiState.verifiedPacks) "Verify again" else "Download",
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
         items(uiState.serverServices) { service ->
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
                 Row(
@@ -2482,30 +2635,10 @@ fun ServerManagerWindowContent(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(service.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
-                        Text(
-                            text = if (service.port > 0) "Port :${service.port} • ${service.category}"
-                            else "Process-only probe • ${service.category}",
-                            color = Slate400,
-                            fontSize = 10.sp
-                        )
+                        Text("Port :${service.port} • ${service.category}", color = Slate400, fontSize = 10.sp)
                     }
                     Switch(checked = service.isRunning, onCheckedChange = { viewModel.toggleServerService(service.id) })
                 }
-                // Probe-derived, never assumed. The state the supervisor observed is shown next to
-                // the service, and tapping this line is what starts or stops supervising it.
-                val supervisionLine = uiState.supervision[service.id]
-                Text(
-                    text = supervisionLine?.let { "$it - tap to stop supervising" }
-                        ?: "Not supervised - tap to keep it running",
-                    color = if (supervisionLine == null) Slate400 else PhonixCyan,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { viewModel.toggleServiceSupervision(service.id) }
-                        .padding(horizontal = 10.dp)
-                        .padding(bottom = 10.dp)
-                )
             }
         }
     }
@@ -2621,8 +2754,8 @@ fun FileExplorerWindowContent() {
     Column(modifier = Modifier.fillMaxSize().padding(10.dp)) {
         Text("Guest filesystem", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         Text(
-            "These paths exist inside the active Linux guest. Browsing happens in the Terminal, " +
-                "or install a file manager with the guest's own package manager.",
+            "These paths exist inside the Alpine container. Browsing happens in the Terminal (busybox ls), " +
+                "or install a file manager with apk add.",
             color = Slate400,
             fontSize = 10.sp,
             lineHeight = 14.sp
@@ -2676,7 +2809,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
             val pi = context.packageManager.getPackageInfo(context.packageName, 0)
             val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
             "${pi.versionName} (build $code)"
-        }.getOrDefault("1.5 (build 6)")
+        }.getOrDefault("1.2 (build 3)")
     }
     Column(
         modifier = Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState()),
@@ -2724,10 +2857,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                     color = Slate400,
                     fontSize = 10.sp
                 )
-                val feedHost = runCatching {
-                    android.net.Uri.parse(com.example.BuildConfig.UPDATE_FEED_URL).host
-                }.getOrNull()
-                AboutRow("Update feed", feedHost ?: "not configured in this build")
+                AboutRow("Repository", "jberggre/Phonix-OS")
 
                 when (uiState.updateState) {
                     UpdateCheckState.IDLE -> {
@@ -2750,7 +2880,7 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PhonixCyan, strokeWidth = 2.dp)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Checking the update feed...", color = Slate300, fontSize = 11.sp)
+                            Text("Checking GitHub Releases...", color = Slate300, fontSize = 11.sp)
                         }
                     }
                     UpdateCheckState.UP_TO_DATE -> {
@@ -2795,32 +2925,8 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
                             ) {
                                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Download & Install", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Open Download Page", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
-                            Text(
-                                "The APK is checked against the feed's SHA-256 and must carry this " +
-                                    "app's signing certificate. Android asks before installing.",
-                                color = Slate400,
-                                fontSize = 9.sp
-                            )
-                        }
-                    }
-                    UpdateCheckState.DOWNLOADING, UpdateCheckState.READY_TO_INSTALL -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().background(Slate950, RoundedCornerShape(6.dp)).padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (uiState.updateState == UpdateCheckState.DOWNLOADING) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = PhonixCyan, strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(14.dp))
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                uiState.updateInfo?.releaseNotes ?: "Preparing the update...",
-                                color = Slate200,
-                                fontSize = 10.sp
-                            )
                         }
                     }
                     else -> {
@@ -2846,17 +2952,35 @@ fun AboutWindowContent(uiState: PhonixUiState, viewModel: PhonixViewModel) {
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Linux guest", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                // The active guest, not a hardcoded Alpine: a switch to Debian must change this line.
                 AboutRow(
-                    "Distribution",
-                    uiState.currentDistro.name + if (guest != null) " · " + guest else " · not running"
+                    "Active Distro",
+                    "${uiState.currentDistro.name} (${uiState.currentDistro.version})"
                 )
+                AboutRow(
+                    "Rootfs Status",
+                    if (guest != null) "Extracted ($guest)" else "Not extracted yet"
+                )
+                AboutRow("Package Manager", uiState.currentDistro.packageManager)
+                AboutRow("X11 Desktop (:1)", uiState.activeDesktopEnvironment.title)
                 AboutRow(
                     "Container",
                     if (uiState.containerStatus == com.example.viewmodel.ContainerStatus.RUNNING) "running" else "stopped"
                 )
-                AboutRow("Method", "proot, unrooted")
+                AboutRow("Method", "proot, unrooted (ptrace syscall translation)")
             }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedButton(
+            onClick = { viewModel.setActiveTab(com.example.viewmodel.AppNavTab.HELP) },
+            modifier = Modifier.fillMaxWidth().testTag("about_open_help_tab_btn"),
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, PhonixCyan)
+        ) {
+            Icon(Icons.Default.Info, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Open Full Help & Technical Guide", color = PhonixCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -2949,24 +3073,6 @@ fun VsCodeWindowContent(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (uiState.vsCodeCliVersion == null) {
-                    Button(
-                        onClick = { viewModel.installVsCode() },
-                        enabled = !uiState.vsCodeInstalling,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = PhonixGreen.copy(alpha = if (uiState.vsCodeInstalling) 0.35f else 1f)
-                        ),
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.height(28.dp)
-                    ) {
-                        Text(
-                            if (uiState.vsCodeInstalling) "Installing..." else "Install VS Code",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0B1F12)
-                        )
-                    }
-                }
                 if (!uiState.vsCodeServerRunning && !uiState.vsCodeServerProbing) {
                     Button(
                         onClick = { viewModel.startVsCodeServer() },
@@ -3010,20 +3116,6 @@ fun VsCodeWindowContent(
             )
         }
 
-        // The install is a long download; say what it is doing rather than leave a dead button.
-        if (uiState.vsCodeInstallStatus.isNotBlank()) {
-            Text(
-                uiState.vsCodeInstallStatus,
-                color = if (uiState.vsCodeCliVersion != null) PhonixGreen else Color(0xFFE5E7EB),
-                fontSize = 9.sp,
-                lineHeight = 12.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF14251A))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            )
-        }
-
         // Web View IDE Content
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             AndroidView(
@@ -3047,9 +3139,6 @@ fun OfflineKnowledgeWindowContent(
     val lastMessageLength = uiState.aiChatMessages.lastOrNull()?.text?.length ?: 0
     val ready = uiState.aiEngineState == AiEngineState.READY
     var agentMode by remember { mutableStateOf(false) }
-    // The notes and replies render at 8-13sp, which is unreadable on a 1080p monitor from couch
-    // distance. Zoom is a real scale of the content, not just the font, so taps stay proportional.
-    var zoom by remember { mutableStateOf(1f) }
 
     // Same reason as the terminal: the reply streams a token at a time, so an animated scroll
     // would restart dozens of times a second. A jump per update is cheaper and steadier.
@@ -3060,21 +3149,9 @@ fun OfflineKnowledgeWindowContent(
     }
     LaunchedEffect(Unit) { viewModel.refreshLocalAi() }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Slate950)
-            .clipToBounds()
-    ) {
     Column(
         modifier = Modifier
-            .fillMaxWidth(1f / zoom)
-            .fillMaxHeight(1f / zoom)
-            .graphicsLayer {
-                scaleX = zoom
-                scaleY = zoom
-                transformOrigin = TransformOrigin(0f, 0f)
-            }
+            .fillMaxSize()
             .background(Slate950)
             .padding(10.dp)
     ) {
@@ -3101,36 +3178,6 @@ fun OfflineKnowledgeWindowContent(
                         fontSize = 8.sp
                     )
                 }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    "A-",
-                    color = Slate300,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable { zoom = (zoom - 0.15f).coerceAtLeast(0.75f) }
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                )
-                Text(
-                    "${(zoom * 100).toInt()}%",
-                    color = Slate400,
-                    fontSize = 9.sp,
-                    modifier = Modifier
-                        .clickable { zoom = 1f }
-                        .padding(horizontal = 2.dp, vertical = 3.dp)
-                )
-                Text(
-                    "A+",
-                    color = Slate300,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable { zoom = (zoom + 0.15f).coerceAtMost(2f) }
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                )
             }
             AiStatePill(uiState.aiEngineState)
         }
@@ -3381,7 +3428,6 @@ fun OfflineKnowledgeWindowContent(
             KnowledgeLibraryDialog(uiState, viewModel)
         }
     }
-    }
 }
 
 // -------------------------------------------------------------
@@ -3630,7 +3676,7 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    "${tier.title} (${com.example.model.KnowledgeLibrary.sizeLabel(tier)})",
+                                    "${tier.title} (${tier.approxSize})",
                                     color = if (isSel) PhonixCyan else Slate400,
                                     fontSize = 9.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
@@ -3639,70 +3685,11 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                         }
                     }
                     Text(
-                        "Everything here works with no model, no network and no second device. ${KnowledgeLibrary.docsFor(null, selectedTier).size} active documents on ${KnowledgeCategory.entries.size} shelves. Imported packs are saved on the phone, never fetched from a server.",
+                        "Everything here works with no model, no network and no second device. ${KnowledgeLibrary.docsFor(null, selectedTier).size} active documents on ${KnowledgeCategory.entries.size} shelves.",
                         color = Slate400,
                         fontSize = 9.sp,
                         lineHeight = 13.sp
                     )
-                    val packImporter = rememberLauncherForActivityResult(
-                        ActivityResultContracts.OpenDocument()
-                    ) { picked: android.net.Uri? ->
-                        if (picked != null) viewModel.importLibraryPack(picked)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "Packs (${uiState.libraryPacks.size})",
-                            color = PhonixAmber,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Slate900)
-                                .border(1.dp, Slate800, RoundedCornerShape(6.dp))
-                                .clickable {
-                                    // Any text file: the picker's MIME filter is unreliable on
-                                    // Android 12 for .pack, so the format check happens on parse.
-                                    packImporter.launch(
-                                        arrayOf("text/plain", "text/markdown", "application/octet-stream")
-                                    )
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text("Import .pack", color = PhonixCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    if (uiState.libraryPackBusy) {
-                        Text("Reading the pack...", color = Slate400, fontSize = 9.sp)
-                    }
-                    uiState.libraryPacks.forEach { pack ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                "${pack.title} - ${pack.docCount} docs - ${com.example.model.KnowledgeLibrary.bytesLabel(pack.bytes)}",
-                                color = Slate200,
-                                fontSize = 9.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                "Delete",
-                                color = PhonixAmber,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .clickable { viewModel.deleteLibraryPack(pack.id) }
-                                    .padding(start = 8.dp)
-                            )
-                        }
-                    }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         KnowledgeCategory.entries.forEach { category ->
                             val shelfDocs = KnowledgeLibrary.docsFor(category, selectedTier)

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
@@ -239,6 +240,7 @@ fun PhonixTopBar(
                         AppNavTab.PARTITIONS -> Icons.Default.Storage
                         AppNavTab.DISTROS -> Icons.Default.Widgets
                         AppNavTab.APPS -> Icons.Default.Storefront
+                        AppNavTab.HELP -> Icons.Default.Info
                     }
 
                     Box(

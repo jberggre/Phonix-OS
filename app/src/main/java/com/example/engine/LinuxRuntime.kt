@@ -96,28 +96,21 @@ object LinuxRuntime {
         context: Context,
         distro: com.example.model.LinuxDistro,
         debloatPrevious: Boolean = true,
-        onBytes: (Long, Long) -> Unit = { _, _ -> },
         onProgress: (String) -> Unit = {}
     ) {
         stop()
         state = State.INSTALLING
         val guest = container(context)
         try {
-            guest.switchDistro(
-                distro = distro,
-                debloatPrevious = debloatPrevious,
-                onProgress = { msg ->
-                    emit(msg, true)
-                    onProgress(msg)
-                },
-                onBytes = onBytes
-            )
+            guest.switchDistro(distro, debloatPrevious) { msg ->
+                emit(msg, true)
+                onProgress(msg)
+            }
         } finally {
-            // A failed switch must not leave the runtime in INSTALLING: the previous rootfs is
-            // still on disk, so boot it again and let the caller report what went wrong.
             state = State.STOPPED
-            start(context)
         }
+        runCatching { start(context) }
+            .onFailure { emit("[container] rootfs installed, but shell could not start: ${it.message}", true) }
     }
 
     /**
@@ -161,6 +154,17 @@ object LinuxRuntime {
             true
         } catch (e: Exception) {
             emit("[container] shell is gone (${e.message})", true)
+            false
+        }
+    }
+
+    /** Sends raw control characters (e.g. Ctrl+C) to the live shell. */
+    fun sendRaw(raw: String): Boolean {
+        val live = session ?: return false
+        return try {
+            live.sendRaw(raw)
+            true
+        } catch (e: Exception) {
             false
         }
     }

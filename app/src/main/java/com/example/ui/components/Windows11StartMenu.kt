@@ -11,8 +11,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +29,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -55,7 +55,6 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Store
@@ -86,18 +85,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.horizontalScroll
 import com.example.model.DesktopShortcut
-import com.example.model.PhonixApps
 import com.example.model.InstalledAppInfo
 import com.example.model.WindowType
 import com.example.ui.theme.PhonixAmber
@@ -125,66 +119,10 @@ private data class StartMenuItem(
     val id: String,
     val title: String,
     val subtitle: String,
-    val windowType: WindowType? = null,
-    val fallbackIcon: ImageVector? = null,
-    val iconTint: Color = PhonixCyan,
+    val icon: ImageVector,
+    val iconTint: Color,
     val onClick: () -> Unit
 )
-
-/** Five icons per Start row; the menu scrolls, so every catalog entry is laid out. */
-private const val START_GRID_COLUMNS = 5
-
-/** One pinned tile. Kept separate so the pinned view can lay out whole rows. */
-@Composable
-private fun StartTile(item: StartMenuItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Card(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .testTag("start_item_${item.id}"),
-        colors = CardDefaults.cardColors(containerColor = Slate800.copy(alpha = 0.45f)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Slate700.copy(alpha = 0.3f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 10.dp, horizontal = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
-            Box(
-                modifier = Modifier.size(36.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (art != null) {
-                    Image(
-                        painter = painterResource(id = art),
-                        contentDescription = item.title,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.size(30.dp)
-                    )
-                } else {
-                    Icon(
-                        imageVector = item.fallbackIcon ?: Icons.Default.Widgets,
-                        contentDescription = item.title,
-                        tint = item.iconTint,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = item.title,
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
 
 enum class AppViewMode(val label: String) {
     CATEGORIES("Category Tabs"),
@@ -205,40 +143,114 @@ fun Windows11StartMenu(
     var appViewMode by remember { mutableStateOf(AppViewMode.CATEGORIES) }
     var selectedCategoryTab by remember { mutableStateOf("All") }
 
-    // Every Start entry comes from the shared catalog, so removing a desktop icon and dropping the
-    // bar pin cannot make an app disappear: the catalog owns it, the layouts only place it.
     val allMenuItems = remember(uiState.customization.shortcuts) {
-        val shipped = PhonixApps.all.map { app ->
+        listOf(
             StartMenuItem(
-                id = app.id,
-                title = app.title,
-                subtitle = app.subtitle,
-                windowType = app.windowType
+                "app_store", "App Store", "Google Play / F-Droid",
+                Icons.Default.Store, PhonixCyan
             ) {
-                when (app.windowType) {
-                    WindowType.APP_STORE -> viewModel.openAppStore(context)
-                    WindowType.SETTINGS -> AppLaunchHelper.launchSettings(context)
-                    null -> viewModel.openInstallationWizard()
-                    else -> viewModel.toggleWindow(app.windowType)
-                }
+                viewModel.openAppStore(context)
+            },
+            StartMenuItem(
+                "app_chrome", "Google Chrome / Web", "Native Web Browser",
+                Icons.Default.Language, PhonixBlueLight
+            ) {
+                val sc = uiState.customization.shortcuts.find { it.id == "sc_browser" }
+                if (sc != null) viewModel.launchShortcutOrHostApp(context, sc)
+                else AppLaunchHelper.launchWebBrowser(context)
+            },
+            StartMenuItem(
+                "app_files", "File Explorer", "Native Files & USB Storage",
+                Icons.Default.Folder, Color(0xFFFBBF24)
+            ) {
+                val sc = uiState.customization.shortcuts.find { it.id == "sc_files" }
+                if (sc != null) viewModel.launchShortcutOrHostApp(context, sc)
+                else AppLaunchHelper.launchFileManager(context)
+            },
+            StartMenuItem(
+                "app_photos", "Photos & Media", "Native Gallery & Player",
+                Icons.Default.Image, Color(0xFFA855F7)
+            ) {
+                AppLaunchHelper.launchPhotos(context)
+            },
+            StartMenuItem(
+                "app_distro", "Linux System", "Multi-distro runtime & packages",
+                Icons.Default.Widgets, PhonixAmber
+            ) {
+                viewModel.toggleWindow(WindowType.DISTRO_STORE)
+            },
+            StartMenuItem(
+                "app_terminal", "Terminal", "Linux shell, proot, no root",
+                Icons.Default.Terminal, PhonixGreen
+            ) {
+                viewModel.toggleWindow(WindowType.TERMINAL)
+            },
+            StartMenuItem(
+                "app_linux_desktop", "Linux Desktop", "Real X11 apps in a window",
+                Icons.Default.Computer, PhonixGreen
+            ) {
+                viewModel.toggleWindow(WindowType.LINUX_DESKTOP)
+            },
+            StartMenuItem(
+                "app_server", "Server Hub", "Nginx, SSH & Samba NAS",
+                Icons.Default.Dns, Color(0xFFA855F7)
+            ) {
+                viewModel.toggleWindow(WindowType.SERVER_MANAGER)
+            },
+            StartMenuItem(
+                "app_privacy", "Privacy Hub", "Ad blocking & Pi-hole guide",
+                Icons.Default.Security, PhonixGreen
+            ) {
+                viewModel.toggleWindow(WindowType.PRIVACY)
+            },
+            StartMenuItem(
+                "app_monitor", "Resource Monitor", "Live battery & CPU readings",
+                Icons.Default.Speed, PhonixCyan
+            ) {
+                viewModel.toggleWindow(WindowType.RESOURCE_MONITOR)
+            },
+            StartMenuItem(
+                "app_settings", "Settings", "Android System Settings",
+                Icons.Default.Settings, Slate300
+            ) {
+                AppLaunchHelper.launchSettings(context)
+            },
+            StartMenuItem(
+                "app_debloat", "System Debloater", "Walkthrough preloads to recover RAM & disk",
+                Icons.Default.Security, PhonixBlueLight
+            ) {
+                viewModel.toggleWindow(WindowType.DEBLOAT_MANAGER)
+            },
+            StartMenuItem(
+                "app_personalize", "Personalize", "Wallpapers, Icons & Shapes",
+                Icons.Default.Palette, Color(0xFFEC4899)
+            ) {
+                viewModel.toggleWindow(WindowType.PERSONALIZE)
+            },
+            StartMenuItem(
+                "app_notepad", "Notepad Editor", "Quick Notes & Scripts",
+                Icons.Default.Code, Slate300
+            ) {
+                viewModel.toggleWindow(WindowType.NOTEPAD)
+            },
+            StartMenuItem(
+                "app_device_setup", "Device & Display Setup", "Daily driver, mini-PC choices and compatibility check",
+                Icons.Default.Settings, PhonixCyan
+            ) {
+                viewModel.openInstallationWizard()
+            },
+            StartMenuItem(
+                "app_help", "Help & Docs", "Terminal guide, distros, phonix-pin & system FAQ",
+                Icons.Default.Info, PhonixGreen
+            ) {
+                viewModel.setActiveTab(com.example.viewmodel.AppNavTab.HELP)
+            },
+            StartMenuItem(
+                "app_about", "About Phonix OS", "Version, updates & device info",
+                Icons.Default.Info, PhonixCyan
+            ) {
+                viewModel.openWindow(WindowType.ABOUT)
             }
-        }
-        // Phone apps that have no Phonix window of their own still belong in Start.
-        shipped + listOf(
-            StartMenuItem(
-                id = "app_chrome",
-                title = "Google Chrome / Web",
-                subtitle = "The phone's own browser",
-                fallbackIcon = Icons.Default.Language,
-                iconTint = PhonixBlueLight
-            ) { AppLaunchHelper.launchWebBrowser(context) },
-            StartMenuItem(
-                id = "app_photos",
-                title = "Photos & Media",
-                subtitle = "Native gallery and player",
-                fallbackIcon = Icons.Default.Image,
-                iconTint = Color(0xFFA855F7)
-            ) { AppLaunchHelper.launchPhotos(context) }
         )
     }
 
@@ -259,26 +271,17 @@ fun Windows11StartMenu(
     }
 
     // App categories
-    // The seven functional domains from the spec; Android exposes no reliable category for
-    // preinstalled apps, so matching is on package and label keywords.
-    val categoryTabs = listOf(
-        "All", "Internet", "Media & Graphics", "System & Tools",
-        "Development & Terminal", "Games", "Communication", "Office"
-    )
+    val categoryTabs = listOf("All", "Tools & System", "Browsers & Web", "Media", "Debloat Candidates")
 
     fun matchesCategory(app: InstalledAppInfo, tab: String): Boolean {
         if (tab == "All") return true
         val pkg = app.packageName.lowercase()
         val lbl = app.label.lowercase()
-        fun has(vararg words: String) = words.any { pkg.contains(it) || lbl.contains(it) }
         return when (tab) {
-            "Internet" -> has("chrome", "browser", "firefox", "web", "duckduckgo", "opera", "brave")
-            "Media & Graphics" -> has("camera", "gallery", "photo", "media", "music", "player", "video", "youtube", "spotify", "netflix", "film")
-            "System & Tools" -> has("settings", "files", "file", "tool", "android", "system", "storage", "clock", "calculator", "weather", "calendar")
-            "Development & Terminal" -> has("termux", "terminal", "code", "dev", "git", "adb", "shell", "linux")
-            "Games" -> has("game", "play", "xbox", "steam", "arcade", "puzzle", "minecraft")
-            "Communication" -> has("message", "sms", "phone", "dialer", "mail", "gmail", "chat", "whatsapp", "telegram", "signal", "contacts", "meet", "duo")
-            "Office" -> has("office", "docs", "sheets", "slides", "note", "drive", "pdf", "word", "excel", "onenote", "keep")
+            "Tools & System" -> pkg.contains("settings") || pkg.contains("file") || pkg.contains("tool") || pkg.contains("android") || lbl.contains("files") || lbl.contains("settings")
+            "Browsers & Web" -> pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("firefox") || pkg.contains("web") || lbl.contains("chrome") || lbl.contains("browser")
+            "Media" -> pkg.contains("camera") || pkg.contains("gallery") || pkg.contains("photo") || pkg.contains("media") || pkg.contains("music") || pkg.contains("player")
+            "Debloat Candidates" -> pkg.contains("samsung") || pkg.contains("facebook") || pkg.contains("bixby") || pkg.contains("carrier") || pkg.contains("telemetry") || pkg.contains("diag")
             else -> true
         }
     }
@@ -293,16 +296,10 @@ fun Windows11StartMenu(
         }
     }
 
-    // The panel used to be capped at 560 dp on every screen, which on a 1080p monitor left the
-    // Android-app list with a single clipped row under the Phonix grid. The cap follows the screen
-    // now: a phone still gets a floating card, a monitor gets the height it actually has.
-    val screenHeightDp = LocalConfiguration.current.screenHeightDp
-    val maxPanelHeight = minOf(720.dp, (screenHeightDp * 0.82f).dp)
-
     Surface(
         modifier = modifier
             .widthIn(min = 320.dp, max = 560.dp)
-            .heightIn(max = maxPanelHeight)
+            .heightIn(max = 560.dp)
             .shadow(24.dp, RoundedCornerShape(16.dp))
             .border(1.dp, Slate700.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             .testTag("windows_11_start_menu"),
@@ -341,177 +338,6 @@ fun Windows11StartMenu(
 
             Spacer(Modifier.height(14.dp))
 
-            // Command palette. The start menu's own search field drives it: this app has no key
-            // event handling anywhere, so a DeX keyboard reaches commands by typing here. Modules
-            // that cannot open are listed with their reason rather than hidden, so a missing guest
-            // reads as a requirement instead of a broken tile.
-            if (searchQuery.isNotBlank()) {
-                val facts = remember(uiState.currentDistro.id, uiState.canRemoveHostPackages) {
-                    com.example.model.ModuleFacts(
-                        guestInstalled = runCatching {
-                            com.example.engine.LinuxRuntime.container(context).isInstalled
-                        }.getOrDefault(false),
-                        isDeviceOwner = uiState.canRemoveHostPackages,
-                        verifiedPacks = uiState.verifiedPacks
-                    )
-                }
-                // One pass with manifests applied. Availability still comes from the measured facts;
-                // a manifest can only add the packages a module says it needs.
-                val resolved = remember(searchQuery, facts, uiState.manifests) {
-                    com.example.model.ModuleRegistry.resolved(facts, uiState.manifests)
-                        .filter { com.example.model.ModuleRegistry.matches(searchQuery, it.module) }
-                }
-                val hits = resolved.filter { it.isAvailable }.map { it.module }
-                val blockedHits = resolved.filter { !it.isAvailable }.map { it.module }
-                if (hits.isNotEmpty() || blockedHits.isNotEmpty()) {
-                    Text(
-                        text = "Commands (${hits.size})",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    hits.forEach { module ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable {
-                                    when (module.windowType) {
-                                        WindowType.APP_STORE -> viewModel.openAppStore(context)
-                                        WindowType.SETTINGS -> AppLaunchHelper.launchSettings(context)
-                                        else -> viewModel.toggleWindow(module.windowType)
-                                    }
-                                }
-                                .padding(horizontal = 8.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = ">", color = PhonixCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.width(8.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = module.title,
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                val needs = uiState.manifests.packagesFor(module.id)
-                                Text(
-                                    text = (module.caveat ?: module.subtitle) +
-                                        if (needs.isEmpty()) "" else " - needs " + needs.joinToString(", "),
-                                    color = Slate400,
-                                    fontSize = 9.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                    blockedHits.forEach { module ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(text = module.title, color = Slate500, fontSize = 11.sp)
-                            Text(
-                                text = module.blockedReason(facts).orEmpty(),
-                                color = Color(0xFFF59E0B),
-                                fontSize = 9.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                }
-            }
-
-            // Deck layouts. Three arrangements, sized to whatever display is in front of the phone;
-            // they are reachable by typing, because the menu has no room for nine more tiles.
-            val deckHits = remember(searchQuery) {
-                val query = searchQuery.trim().lowercase()
-                if (query.isBlank()) emptyList()
-                else com.example.model.DeckPreset.entries.filter { preset ->
-                    preset.title.lowercase().contains(query) ||
-                        preset.subtitle.lowercase().contains(query) ||
-                        query in setOf("deck", "decks", "layout", "layouts")
-                }
-            }
-            if (deckHits.isNotEmpty()) {
-                Text(
-                    text = "Deck layouts (${deckHits.size})",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
-                Spacer(Modifier.height(4.dp))
-                deckHits.forEach { preset ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { viewModel.applyDeckPreset(preset) }
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "#", color = PhonixCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = preset.title,
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = preset.subtitle,
-                                color = Slate400,
-                                fontSize = 9.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-                val rememberedPreset = com.example.model.DeckPreset.entries
-                    .firstOrNull { it.name == uiState.desktopDeckPreset }
-                if (uiState.desktopDisplayLabel.isNotBlank()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (rememberedPreset == null) {
-                                "No deck remembered for ${uiState.desktopDisplayLabel}"
-                            } else {
-                                "${rememberedPreset.title} is remembered for ${uiState.desktopDisplayLabel}"
-                            },
-                            color = Slate400,
-                            fontSize = 9.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (rememberedPreset != null) {
-                            Text(
-                                text = "Forget",
-                                color = Color(0xFFF59E0B),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .clickable { viewModel.forgetDeckForCurrentDisplay() }
-                                    .padding(start = 8.dp)
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-            }
-
             // 2. Section Header: Pinned vs All Apps Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -547,68 +373,6 @@ fun Windows11StartMenu(
 
             // View Mode Selectors (When viewing All Apps)
             if (showAllApps) {
-                Spacer(Modifier.height(6.dp))
-                // Read from the catalog, not the layout: an app stays here after its desktop icon
-                // is removed and its bar pin dropped.
-                Text("Phonix OS apps", color = Slate300, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                // Plain rows inside the menu's own scroller, not a lazy grid. The grid was
-                // capped at 132 dp with scrolling switched off, which left eight of the
-                // catalog's entries unreachable on the S10 (VERIFICATION §14). A fixed
-                // five-column grid is small enough to lay out in full.
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    allMenuItems.chunked(START_GRID_COLUMNS).forEach { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            rowItems.forEach { item ->
-                                val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            item.onClick()
-                                            viewModel.closeStartMenu()
-                                        }
-                                        .padding(vertical = 2.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    if (art != null) {
-                                        Image(
-                                            painter = painterResource(id = art),
-                                            contentDescription = item.title,
-                                            contentScale = ContentScale.Fit,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = item.fallbackIcon ?: Icons.Default.Widgets,
-                                            contentDescription = item.title,
-                                            tint = item.iconTint,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        text = item.title,
-                                        color = Color.White,
-                                        fontSize = 8.sp,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                            repeat(START_GRID_COLUMNS - rowItems.size) {
-                                Spacer(Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text("Android apps", color = Slate300, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier
@@ -782,22 +546,6 @@ fun Windows11StartMenu(
 
                                         Spacer(Modifier.width(6.dp))
 
-                                        // Manage: the storage view is where bloat is identified, so it
-                                        // opens the debloat walkthrough rather than only App Info.
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(PhonixCyan.copy(alpha = 0.18f))
-                                                .clickable {
-                                                    viewModel.closeStartMenu()
-                                                    viewModel.toggleWindow(WindowType.DEBLOAT_MANAGER)
-                                                }
-                                                .padding(horizontal = 5.dp, vertical = 3.dp)
-                                        ) {
-                                            Text("Debloat", color = PhonixCyan, fontSize = 8.sp)
-                                        }
-                                        Spacer(Modifier.width(4.dp))
-
                                         // App Settings / Disable
                                         Box(
                                             modifier = Modifier
@@ -915,27 +663,60 @@ fun Windows11StartMenu(
                         }
                     }
                 } else {
-                    // Pinned apps, laid out as plain rows in the menu's own scroller. The lazy
-                    // grid was capped at 240 dp, so its third row was cut in half on the S10's
-                    // desktop and the rest of the pins could only be reached by scrolling inside
-                    // a card that gave no hint it scrolled.
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
+                    // Pinned Apps Grid (Windows 11 3-column / 4-column layout)
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 90.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp),
+
+                        contentPadding = PaddingValues(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        filteredItems.chunked(START_GRID_COLUMNS).forEach { rowItems ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                rowItems.forEach { item ->
-                                    StartTile(item = item, modifier = Modifier.weight(1f)) {
+                        items(filteredItems) { item ->
+                            Card(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
                                         item.onClick()
                                         viewModel.closeStartMenu()
                                     }
-                                }
-                                repeat(START_GRID_COLUMNS - rowItems.size) {
-                                    Spacer(Modifier.weight(1f))
+                                    .testTag("start_item_${item.id}"),
+                                colors = CardDefaults.cardColors(containerColor = Slate800.copy(alpha = 0.45f)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Slate700.copy(alpha = 0.3f))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(item.iconTint.copy(alpha = 0.15f))
+                                            .border(1.dp, item.iconTint.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = item.icon,
+                                            contentDescription = item.title,
+                                            tint = item.iconTint,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = item.title,
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }

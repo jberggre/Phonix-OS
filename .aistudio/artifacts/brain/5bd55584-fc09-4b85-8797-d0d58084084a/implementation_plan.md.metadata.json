@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for expanding Phonix's Termux-style PRoot Linux workstation capabilities: multi-distro switcher in the Setup Wizard and Distro Hub, enhanced multi-tab interactive terminal with hotkeys and package detection, automatic and manual Phonix desktop shortcuts for Linux CLI/X11 and Android apps, and multi-DE X11 desktop environment switcher (IceWM, XFCE4, Openbox, LXQt).",
+  "updatedAt":  "2026-11-09T06:40:51.497885672Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

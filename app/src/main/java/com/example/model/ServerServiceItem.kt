@@ -28,16 +28,21 @@ data class ServerServiceItem(
      */
     val declaredLaunch: String? = null
 ) {
-    /** Exact command to start it, shown to the user instead of silently flipping a switch. */
+    /** Exact command to start it, shown to the user and executable with 1 click. */
     val startHint: String
         get() = declaredLaunch ?: when (id) {
             "nginx_web" -> "nginx"
-            "openssh" -> "ssh-keygen -A && /usr/sbin/sshd"
+            "openssh" -> "ssh-keygen -A && /usr/sbin/sshd -p 2222"
+            "samba_smb" -> "phonix-smb start"
+            "dnsmasq_adblock" -> "phonix-adblock start"
             else -> apkPackage
         }
 
-    fun endpoint(ipAddress: String): String =
-        if (protocol == "HTTP" || protocol == "HTTPS") "http://$ipAddress:$port" else "$ipAddress:$port"
+    fun endpoint(ipAddress: String): String = when (protocol) {
+        "HTTP", "HTTPS" -> "http://$ipAddress:$port"
+        "SMB" -> "smb://$ipAddress:$port/phonix"
+        else -> "$ipAddress:$port"
+    }
 }
 
 object DefaultServerCatalog {
@@ -62,12 +67,30 @@ object DefaultServerCatalog {
             protocol = "SSH",
             apkPackage = "openssh",
             processName = "sshd",
-            description = "Encrypted shell from your laptop. Needs a key generated inside the guest first.",
+            description = "Encrypted shell from your laptop on port 2222. Generates host keys inside the guest on first start.",
             internalPath = "/etc/ssh"
         ),
-        // SMB (445) and DNS (53) are not listed here on purpose: both need a privileged port,
-        // and Android's kernel refuses to let this app's UID bind anything below 1024 even
-        // inside the container. Adding the package is easy; making it reachable is impossible
-        // without root. The Privacy Hub explains the Pi-hole path that actually works.
+        ServerServiceItem(
+            id = "samba_smb",
+            name = "Samba SMB File Server",
+            category = "File Sharing",
+            port = 4445,
+            protocol = "SMB",
+            apkPackage = "samba",
+            processName = "smbd",
+            description = "Real Samba (smbd) network file share at /root/shared bound to unprivileged port 4445 (smb://<IP>:4445/phonix) via phonix-smb.",
+            internalPath = "/root/shared"
+        ),
+        ServerServiceItem(
+            id = "dnsmasq_adblock",
+            name = "Adblock DNS Sinkhole (Pi-hole Engine)",
+            category = "DNS & Adblock",
+            port = 5353,
+            protocol = "DNS",
+            apkPackage = "dnsmasq",
+            processName = "dnsmasq",
+            description = "Pi-hole's underlying dnsmasq sinkhole engine on unprivileged port 5353 with StevenBlack hosts blocklist support via phonix-adblock.",
+            internalPath = "/etc/phonix-adblock.hosts"
+        )
     )
 }

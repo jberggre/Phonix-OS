@@ -94,7 +94,9 @@ data class DesktopShortcut(
     val customBackground: ShortcutBgStyle = ShortcutBgStyle.FROSTED_GLASS,
     val launchPackage: String? = null,
     val isNativeApp: Boolean = false,
-    val isAppStore: Boolean = false
+    val isAppStore: Boolean = false,
+    val linuxCommand: String? = null,
+    val isLinuxGuiApp: Boolean = false
 ) {
     companion object {
         fun createFromInstalledApp(
@@ -112,6 +114,28 @@ data class DesktopShortcut(
             isNativeApp = true,
             customShape = ShortcutShape.SQUIRCLE
         )
+
+        fun createFromLinuxCommand(
+            title: String,
+            command: String,
+            isGuiApp: Boolean,
+            gridCol: Int,
+            gridRow: Int
+        ): DesktopShortcut {
+            val slug = command.trim().lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').take(24)
+            return DesktopShortcut(
+                id = "sc_linux_${slug}_${System.currentTimeMillis() % 10000}",
+                title = title,
+                windowType = if (isGuiApp) WindowType.LINUX_DESKTOP else WindowType.TERMINAL,
+                gridCol = gridCol,
+                gridRow = gridRow,
+                posX = 24f + (gridCol * 96f),
+                posY = 20f + (gridRow * 88f),
+                customColor = if (isGuiApp) DesktopAccentColor.ELECTRIC_BLUE else DesktopAccentColor.EMERALD_LINUX,
+                linuxCommand = command.trim(),
+                isLinuxGuiApp = isGuiApp
+            )
+        }
 
         // Default shortcut layout placed strictly in the BOTTOM-LEFT QUADRANT.
         // Leaves the top half of the screen clear for the Phoenix wallpaper emblem,

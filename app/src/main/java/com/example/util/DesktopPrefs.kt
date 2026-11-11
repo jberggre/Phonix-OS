@@ -231,6 +231,8 @@ object DesktopPrefs {
                 s.launchPackage?.let { put("launchPackage", it) }
                 put("isNativeApp", s.isNativeApp)
                 put("isAppStore", s.isAppStore)
+                s.linuxCommand?.let { put("linuxCommand", it) }
+                put("isLinuxGuiApp", s.isLinuxGuiApp)
                 put("gridCol", s.gridCol)
                 put("gridRow", s.gridRow)
                 put("posX", s.posX.toDouble())
@@ -264,7 +266,9 @@ object DesktopPrefs {
                 customBackground = enumOr(o.optString("customBackground"), ShortcutBgStyle.FROSTED_GLASS),
                 launchPackage = o.optString("launchPackage").takeIf { it.isNotBlank() && it != "null" },
                 isNativeApp = o.optBoolean("isNativeApp", false),
-                isAppStore = o.optBoolean("isAppStore", false)
+                isAppStore = o.optBoolean("isAppStore", false),
+                linuxCommand = o.optString("linuxCommand").takeIf { it.isNotBlank() && it != "null" },
+                isLinuxGuiApp = o.optBoolean("isLinuxGuiApp", false)
             )
         }
         return parsed

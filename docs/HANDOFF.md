@@ -1,9 +1,19 @@
 # Phonix OS — handoff for the next session
 
-Written 2026-10-29, after the round that replaced the local-AI placeholder and restored
-Phone Screen as a real view. This page is the **work queue**. Read
-[VERIFICATION.md](VERIFICATION.md) for the evidence behind every claim, [ROADMAP.md](ROADMAP.md)
-for the research and sources, and [PROVISIONING.md](PROVISIONING.md) before touching the unit.
+Updated 2026-11-09 (following the 2026-10-29 / 2026-10-30 hardware bench rounds). This page is the
+**work queue**. Read [VERIFICATION.md](VERIFICATION.md) for the evidence behind every claim,
+[ROADMAP.md](ROADMAP.md) for the research and sources, and [PROVISIONING.md](PROVISIONING.md)
+before touching the unit.
+
+## Multi-Distro Workstation & Help Tab Round (2026-11-09)
+
+- **Multi-Distro PRoot Engine (`apk`, `apt-get`, `pacman`):** Alpine 3.24 remains the bundled offline default (`assets/alpine-rootfs.tgz`). Users can also select **Debian 12 (Bookworm)**, **Ubuntu 24.04 LTS (Noble)**, **Arch Linux ARM**, or **Kali Linux** in the Setup Wizard (Step 3) or the **Linux System** tab (`DistroHubScreen.kt`). `LinuxContainer.ensureRootfsForDistro` downloads official ARM64 rootfs tarballs over HTTPS into `filesDir/linux/<distroId>` and extracts `.tar.gz` via `TarGzExtractor` or `.tar.xz` via the bundled Alpine `proot` + `busybox tar -xJf` helper.
+- **Distro-Aware Package Management:** `LinuxContainer` provides `installPackagesCommand`, `removePackageCommand`, and `isPackageInstalledCommand` across `apk`, `apt-get`/`dpkg`, and `pacman`.
+- **Live X11 Desktop Environment Switcher (`DISPLAY=:1`):** `LinuxDesktop.kt` and `LinuxDesktopWindow.kt` support live switching between **IceWM** (~35 MB RAM), **XFCE4** (`xfce4-session`, ~140 MB RAM), **Openbox** (~25 MB RAM), and **LXQt** (`startlxqt`, ~110 MB RAM), auto-installing missing window manager packages on selection.
+- **1-Click Desktop Shortcuts & `/usr/local/bin/phonix-pin`:** Every provisioned rootfs receives `/usr/local/bin/phonix-pin`. Running `phonix-pin "<Title>" "<cmd>" [--gui]` emits a `PHONIX_PIN:` protocol line intercepted by `PhonixViewModel` to pin shortcuts onto the Phonix Desktop. Terminal package installs (`apk add`, `apt install`, `pacman -S`) also surface an automatic 1-click **Pin to Desktop** banner, and the desktop context menu includes **+ Pin App to Desktop** (`DesktopAppPickerDialog.kt`) with tabs for Android Apps, Linux GUI (X11), and Custom CLI Commands.
+- **Multi-Tab Terminal & Termux-Style Extra Keys:** Independent terminal tabs (`+` / `×`), per-tab command history (`↑` / `↓`), live guest `TAB` completion, `Ctrl+C` (`pkill` active child processes), and `Ctrl+D`.
+- **In-App Help & Technical Guide Tab (`HelpDocsScreen.kt`):** Added `AppNavTab.HELP` ("Help & Docs") in the top navigation bar, Start menu, and About window, alongside updated `KnowledgeLibrary.kt` and `AiChatMessage.kt` offline reference notes.
+- **Verification:** `compile_applet` (`assembleDebug`) and JVM unit tests (`ExampleUnitTest`, `DeviceCompatibilityTest` — 18 tests) pass with 0 failures. Physical device testing of non-Alpine rootfs downloads and XFCE4/Openbox/LXQt sessions on the SM-G973U / SM-G975U1 remains in the hardware verification queue.
 
 ## Phone Screen round (2026-11-01, S10 over wireless adb + HDMI monitor)
 

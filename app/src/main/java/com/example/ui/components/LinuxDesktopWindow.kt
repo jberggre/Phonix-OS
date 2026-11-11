@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,8 +70,10 @@ import kotlin.coroutines.resume
 @Composable
 fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
     val context = LocalContext.current
+    val uiState by viewModel.uiState.collectAsState()
     var connected by remember { mutableStateOf(false) }
     var reconnectToken by remember { mutableIntStateOf(0) }
+    var switchingDeBanner by remember { mutableStateOf<String?>(null) }
 
     val webView = remember {
         WebView(context).apply {
@@ -115,6 +118,13 @@ fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
         onDispose { webView.destroy() }
     }
 
+    LaunchedEffect(switchingDeBanner) {
+        if (switchingDeBanner != null) {
+            delay(5_000)
+            switchingDeBanner = null
+        }
+    }
+
     // "Page loaded" is not "VNC connected": the page reports the real state itself and
     // reconnects on its own. This loop mirrors that state, and only touches the guest when the
     // page says it cannot connect (or as an occasional health check) - re-running the launcher
@@ -138,13 +148,15 @@ fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
                 lastLoad = now
             }
             val sinceRepair = now - lastRepair
-            val repairDue = if (connected) sinceRepair > 120_000 else sinceRepair > 10_000
-            if (repairDue) {
+            val repairDue = if (connected) sinceRepair > 120_000 else sinceRepair > 12_000
+            if (repairDue && switchingDeBanner == null) {
                 LinuxDesktop.ensureStarted(context)
                 lastRepair = now
             }
         }
     }
+
+    val activeDe = uiState.activeDesktopEnvironment
 
     Column(modifier = Modifier.fillMaxSize().background(Slate950)) {
         Row(
@@ -155,7 +167,7 @@ fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Box(
                     modifier = Modifier
                         .size(8.dp)
@@ -163,21 +175,70 @@ fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (connected) "Linux desktop — display :1, 1280×720" else "Starting X11 on :1…",
-                    color = Slate200,
+                    text = when {
+                        switchingDeBanner != null -> switchingDeBanner!!
+                        connected -> "X11 (${activeDe.title}) — :1 (1280×720)"
+                        else -> "Starting ${activeDe.title} on :1…"
+                    },
+                    color = if (switchingDeBanner != null) PhonixCyan else Slate200,
                     fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Button(
                     onClick = {
-                        reconnectToken++
+                        LinuxDesktop.launchGuiApp(
+                            context,
+                            "xterm -fa 'DejaVu Sans Mono' -fs 10 -bg '#0B1220' -fg '#DBEAFE' -cr '#F59E0B'"
+                        )
+                    },
+                    modifier = Modifier.height(24.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Slate800,
+                        contentColor = PhonixCyan
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text("+ xterm", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = {
+                        LinuxDesktop.launchGuiApp(
+                            context,
+                            "sh -c \"thunar /root 2>/dev/null || pcmanfm-qt /root 2>/dev/null || pcmanfm /root 2>/dev/null || xterm -fa 'DejaVu Sans Mono' -fs 10 -bg '#0B1220' -fg '#DBEAFE' -e sh -c 'ls -la /root; exec /bin/sh'\""
+                        )
+                    },
+                    modifier = Modifier.height(24.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Slate800,
+                        contentColor = Slate200
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text("+ Files", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = {
+                        switchingDeBanner = "Restoring ${activeDe.shortLabel} taskbar & window manager…"
                         LinuxDesktop.restart(context)
                     },
                     modifier = Modifier.height(24.dp),
-                    // The default content colour is the theme's primary, which is close to the
-                    // header background and left the label almost unreadable.
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Slate800,
+                        contentColor = PhonixAmber
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text("Restore WM/Bar", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = {
+                        LinuxDesktop.restart(context)
+                        reconnectToken++
+                    },
+                    modifier = Modifier.height(24.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Slate800,
                         contentColor = Slate200
@@ -187,6 +248,53 @@ fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Reconnect", fontSize = 10.sp)
+                }
+            }
+        }
+
+        // X11 Desktop Environment Selector Strip
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0B1220))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "DE:",
+                color = Slate400,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+            )
+            com.example.model.LinuxDesktopEnvironment.entries.forEach { de ->
+                val selected = activeDe == de
+                Button(
+                    onClick = {
+                        if (activeDe != de) {
+                            switchingDeBanner = "Switching to ${de.title} on :1 (keeping windows & VNC live)…"
+                            viewModel.switchDesktopEnvironment(de)
+                            if (!connected) {
+                                reconnectToken++
+                            }
+                        } else {
+                            // Tapping the already-selected DE re-asserts its WM & taskbar in place
+                            switchingDeBanner = "Refreshing ${de.title} window manager & panel…"
+                            LinuxDesktop.restart(context)
+                        }
+                    },
+                    modifier = Modifier.height(22.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selected) PhonixCyan.copy(alpha = 0.22f) else Slate800.copy(alpha = 0.65f),
+                        contentColor = if (selected) PhonixCyan else Slate200
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = de.id.uppercase(),
+                        fontSize = 9.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    )
                 }
             }
         }
@@ -210,15 +318,15 @@ fun LinuxDesktopWindowContent(viewModel: PhonixViewModel) {
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Starting the Linux desktop",
+                        text = "Starting ${activeDe.title} on X11 (:1)",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "First run installs X11, VNC and noVNC inside the container.\n" +
-                            "Watch the Terminal window for progress.",
+                        text = "First run installs ${activeDe.title}, VNC and noVNC inside the container.\n" +
+                            "Watch the Terminal window for live package progress.",
                         color = Slate400,
                         fontSize = 10.sp
                     )

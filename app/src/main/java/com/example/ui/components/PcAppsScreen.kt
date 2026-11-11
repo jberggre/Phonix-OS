@@ -64,7 +64,7 @@ import com.example.viewmodel.PhonixViewModel
  * from Alpine's repositories, installed into the proot guest and run on the X11 desktop. No, for
  * x86-64 Windows installers — the guest is aarch64 and has no emulation layer installed.
  *
- * The install button runs the live guest's own package manager and prints its output. "Installed" is only
+ * The install button runs `apk add` in the live guest and prints its output. "Installed" is only
  * shown after the package manager confirms it, and the download size is the real compressed size
  * from the Alpine 3.24 index.
  */
@@ -104,20 +104,19 @@ fun PcAppsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Info, contentDescription = null, tint = PhonixCyan, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("What these are", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("What these are (${uiState.currentDistro.name})", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
                 Text(
-                    text = "Native ARM64 Linux builds from Alpine 3.24, installed with apk inside the " +
-                        "container and shown on the Linux desktop window. They share the phone's CPU and " +
-                        "use software rendering.",
+                    text = "Native ARM64 Linux builds installed via ${uiState.currentDistro.packageManager} inside the " +
+                        "active ${uiState.currentDistro.name} container and shown on the Linux desktop window (DISPLAY=:1) or terminal. " +
+                        "You can also pin any app directly to the Phonix Desktop.",
                     color = Slate300,
                     fontSize = 10.sp,
                     lineHeight = 15.sp
                 )
                 Text(
                     text = "x86-64 Windows .exe programs are not supported: the guest is aarch64 and has " +
-                        "no Windows or x86 emulation layer installed. Sizes below are the real compressed " +
-                        "download from Alpine's index.",
+                        "no Windows or x86 emulation layer installed.",
                     color = Slate400,
                     fontSize = 10.sp,
                     lineHeight = 15.sp
@@ -176,11 +175,16 @@ fun PcAppsScreen(
         }
 
         uiState.linuxApps.forEach { status ->
+            val isPinned = uiState.customization.shortcuts.any {
+                it.linuxCommand?.equals(status.entry.packageName, ignoreCase = true) == true
+            }
             PcAppCard(
                 status = status,
                 busy = uiState.linuxAppBusyPackage == status.entry.packageName,
                 anyBusy = uiState.linuxAppBusyPackage != null,
-                onInstall = { viewModel.installLinuxApp(status.entry) }
+                isPinned = isPinned,
+                onInstall = { viewModel.installLinuxApp(status.entry) },
+                onPin = { viewModel.pinLinuxAppEntry(status.entry) }
             )
         }
 
@@ -193,7 +197,7 @@ fun PcAppsScreen(
                     .border(1.dp, Slate800, RoundedCornerShape(10.dp))
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("package manager output", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("${uiState.currentDistro.packageManager} output", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     uiState.linuxAppLog.forEach { line ->
                         Text(
                             text = line,
@@ -220,7 +224,9 @@ private fun PcAppCard(
     status: LinuxAppStatus,
     busy: Boolean,
     anyBusy: Boolean,
-    onInstall: () -> Unit
+    isPinned: Boolean,
+    onInstall: () -> Unit,
+    onPin: () -> Unit
 ) {
     val entry: LinuxAppEntry = status.entry
     Card(
@@ -242,41 +248,59 @@ private fun PcAppCard(
                 }
                 Text(entry.blurb, color = Slate300, fontSize = 10.sp, lineHeight = 14.sp)
                 Text(
-                    text = "${entry.packageName} • ${entry.downloadMb} MB download",
+                    text = "${entry.packageName} • ~${entry.downloadMb} MB download",
                     color = Slate400,
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace
                 )
             }
-            Spacer(Modifier.width(10.dp))
-            when (status.installed) {
-                true -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text("Installed", color = PhonixGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-
-                else -> Button(
-                    onClick = onInstall,
-                    enabled = !anyBusy,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Slate800,
-                        contentColor = Slate300
-                    ),
+            Spacer(Modifier.width(8.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onPin,
+                    enabled = !isPinned,
                     shape = RoundedCornerShape(8.dp),
-                    // A 30dp button with Material's default 8dp vertical padding clips its label
-                    // at this font size, so the padding is set explicitly.
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                     modifier = Modifier.height(32.dp)
                 ) {
-                    if (busy) {
-                        CircularProgressIndicator(color = PhonixCyan, strokeWidth = 2.dp, modifier = Modifier.size(12.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Installing", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    } else {
-                        Icon(Icons.Default.Download, contentDescription = null, tint = Slate300, modifier = Modifier.size(12.dp))
+                    Text(
+                        text = if (isPinned) "Pinned" else "+ Pin",
+                        color = if (isPinned) Slate400 else PhonixCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                when (status.installed) {
+                    true -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = PhonixGreen, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Install", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Installed", color = PhonixGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    else -> Button(
+                        onClick = onInstall,
+                        enabled = !anyBusy,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Slate800,
+                            contentColor = Slate300
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        if (busy) {
+                            CircularProgressIndicator(color = PhonixCyan, strokeWidth = 2.dp, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Installing", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Icon(Icons.Default.Download, contentDescription = null, tint = Slate300, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Install", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
