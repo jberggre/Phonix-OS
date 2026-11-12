@@ -43,6 +43,8 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
@@ -121,6 +123,8 @@ private data class StartMenuItem(
     val subtitle: String,
     val icon: ImageVector,
     val iconTint: Color,
+    /** Resolves the shared Phonix artwork; null entries keep their Material glyph. */
+    val windowType: WindowType? = null,
     val onClick: () -> Unit
 )
 
@@ -147,7 +151,8 @@ fun Windows11StartMenu(
         listOf(
             StartMenuItem(
                 "app_store", "App Store", "Google Play / F-Droid",
-                Icons.Default.Store, PhonixCyan
+                Icons.Default.Store, PhonixCyan,
+                windowType = WindowType.APP_STORE
             ) {
                 viewModel.openAppStore(context)
             },
@@ -161,7 +166,8 @@ fun Windows11StartMenu(
             },
             StartMenuItem(
                 "app_files", "File Explorer", "Native Files & USB Storage",
-                Icons.Default.Folder, Color(0xFFFBBF24)
+                Icons.Default.Folder, Color(0xFFFBBF24),
+                windowType = WindowType.FILE_EXPLORER
             ) {
                 val sc = uiState.customization.shortcuts.find { it.id == "sc_files" }
                 if (sc != null) viewModel.launchShortcutOrHostApp(context, sc)
@@ -175,61 +181,71 @@ fun Windows11StartMenu(
             },
             StartMenuItem(
                 "app_distro", "Linux System", "Multi-distro runtime & packages",
-                Icons.Default.Widgets, PhonixAmber
+                Icons.Default.Widgets, PhonixAmber,
+                windowType = WindowType.DISTRO_STORE
             ) {
                 viewModel.toggleWindow(WindowType.DISTRO_STORE)
             },
             StartMenuItem(
                 "app_terminal", "Terminal", "Linux shell, proot, no root",
-                Icons.Default.Terminal, PhonixGreen
+                Icons.Default.Terminal, PhonixGreen,
+                windowType = WindowType.TERMINAL
             ) {
                 viewModel.toggleWindow(WindowType.TERMINAL)
             },
             StartMenuItem(
                 "app_linux_desktop", "Linux Desktop", "Real X11 apps in a window",
-                Icons.Default.Computer, PhonixGreen
+                Icons.Default.Computer, PhonixGreen,
+                windowType = WindowType.LINUX_DESKTOP
             ) {
                 viewModel.toggleWindow(WindowType.LINUX_DESKTOP)
             },
             StartMenuItem(
                 "app_server", "Server Hub", "Nginx, SSH & Samba NAS",
-                Icons.Default.Dns, Color(0xFFA855F7)
+                Icons.Default.Dns, Color(0xFFA855F7),
+                windowType = WindowType.SERVER_MANAGER
             ) {
                 viewModel.toggleWindow(WindowType.SERVER_MANAGER)
             },
             StartMenuItem(
                 "app_privacy", "Privacy Hub", "Ad blocking & Pi-hole guide",
-                Icons.Default.Security, PhonixGreen
+                Icons.Default.Security, PhonixGreen,
+                windowType = WindowType.PRIVACY
             ) {
                 viewModel.toggleWindow(WindowType.PRIVACY)
             },
             StartMenuItem(
                 "app_monitor", "Resource Monitor", "Live battery & CPU readings",
-                Icons.Default.Speed, PhonixCyan
+                Icons.Default.Speed, PhonixCyan,
+                windowType = WindowType.RESOURCE_MONITOR
             ) {
                 viewModel.toggleWindow(WindowType.RESOURCE_MONITOR)
             },
             StartMenuItem(
                 "app_settings", "Settings", "Android System Settings",
-                Icons.Default.Settings, Slate300
+                Icons.Default.Settings, Slate300,
+                windowType = WindowType.SETTINGS
             ) {
                 AppLaunchHelper.launchSettings(context)
             },
             StartMenuItem(
                 "app_debloat", "System Debloater", "Walkthrough preloads to recover RAM & disk",
-                Icons.Default.Security, PhonixBlueLight
+                Icons.Default.Security, PhonixBlueLight,
+                windowType = WindowType.DEBLOAT_MANAGER
             ) {
                 viewModel.toggleWindow(WindowType.DEBLOAT_MANAGER)
             },
             StartMenuItem(
                 "app_personalize", "Personalize", "Wallpapers, Icons & Shapes",
-                Icons.Default.Palette, Color(0xFFEC4899)
+                Icons.Default.Palette, Color(0xFFEC4899),
+                windowType = WindowType.PERSONALIZE
             ) {
                 viewModel.toggleWindow(WindowType.PERSONALIZE)
             },
             StartMenuItem(
                 "app_notepad", "Notepad Editor", "Quick Notes & Scripts",
-                Icons.Default.Code, Slate300
+                Icons.Default.Code, Slate300,
+                windowType = WindowType.NOTEPAD
             ) {
                 viewModel.toggleWindow(WindowType.NOTEPAD)
             },
@@ -247,7 +263,8 @@ fun Windows11StartMenu(
             },
             StartMenuItem(
                 "app_about", "About Phonix OS", "Version, updates & device info",
-                Icons.Default.Info, PhonixCyan
+                Icons.Default.Info, PhonixCyan,
+                windowType = WindowType.ABOUT
             ) {
                 viewModel.openWindow(WindowType.ABOUT)
             }
@@ -701,12 +718,22 @@ fun Windows11StartMenu(
                                             .border(1.dp, item.iconTint.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(
-                                            imageVector = item.icon,
-                                            contentDescription = item.title,
-                                            tint = item.iconTint,
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                                        val art = item.windowType?.let { AppIconGlyphs.artFor(it) }
+                                        if (art != null) {
+                                            Image(
+                                                painter = painterResource(id = art),
+                                                contentDescription = item.title,
+                                                contentScale = ContentScale.Fit,
+                                                modifier = Modifier.size(30.dp)
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = item.icon,
+                                                contentDescription = item.title,
+                                                tint = item.iconTint,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                     Spacer(Modifier.height(6.dp))
                                     Text(
