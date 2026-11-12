@@ -32,7 +32,7 @@ data class ServerServiceItem(
     val startHint: String
         get() = declaredLaunch ?: when (id) {
             "nginx_web" -> "nginx"
-            "openssh" -> "ssh-keygen -A && /usr/sbin/sshd -p 2222"
+            "openssh" -> "ssh-keygen -A && /usr/sbin/sshd"
             "samba_smb" -> "phonix-smb start"
             "dnsmasq_adblock" -> "phonix-adblock start"
             else -> apkPackage
