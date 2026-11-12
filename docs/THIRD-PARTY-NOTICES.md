@@ -19,10 +19,9 @@ what a feature is compatible with; the interface does not reproduce their artwor
 | Robolectric (tests only) | 4.16.1 | MIT | `app/src/test` |
 | PRoot | bundled `libproot.so` | **GPL-2.0** | `app/src/main/jniLibs` |
 | Alpine Linux minirootfs | 3.24.3, aarch64 | packages under their own licences (predominantly MIT, GPL-2.0, BSD); the full list is inside the guest at `/lib/apk/db/installed` | `app/src/main/assets/alpine-rootfs.tgz` |
-| Debian / Ubuntu / Arch Linux ARM rootfs | Debian 12 / Ubuntu 24.04 / Arch aarch64 | DFSG / GPL / MIT / BSD per package (`/usr/share/doc/*/copyright` inside guest); downloaded by user on demand, not bundled in APK | `filesDir/linux/<distroId>` |
-| musl libc | shipped by Alpine | MIT | inside the Alpine guest |
-| BusyBox | shipped by Alpine | GPL-2.0 | inside the Alpine guest |
-| X.Org / Xvfb / x11vnc / IceWM / XFCE4 / Openbox / LXQt | installed from guest package manager on demand | MIT-style / GPL-2.0 / LGPL | guest, not in the APK |
+| musl libc | shipped by Alpine | MIT | inside the guest |
+| BusyBox | shipped by Alpine | GPL-2.0 | inside the guest |
+| X.Org / Xvfb / x11vnc | installed from Alpine on demand | MIT-style / GPL-2.0 | guest, not in the APK |
 | llama.cpp and `llama-server` | built for Alpine, installed on demand | MIT | guest, not in the APK |
 | Qwen2.5-1.5B-Instruct (Q4_K_M GGUF) | downloaded by the user, not bundled | Apache-2.0 | guest, user's storage |
 

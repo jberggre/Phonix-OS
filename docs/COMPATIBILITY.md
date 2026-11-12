@@ -270,14 +270,3 @@ wizard, the Phone Screen consent flow, and the 24-hour soak.
 - Pixel 11 external-display support: no authoritative model-specific confirmation was found.
 - Any vendor-supported way to make a third-party app the desktop shell. None of the four
   platforms documents one.
-
-## Linux Distribution & X11 Desktop RAM Sizing by Device Tier (2026-11-09)
-
-Because Android, the system UI / DeX compositor, and the Phonix Compose shell share physical RAM with the `proot` guest, choose the Linux distribution and X11 window manager according to the phone's total memory:
-
-| Device RAM Tier | Recommended Distro | Recommended X11 Desktop (`DISPLAY=:1`) | Local AI (Qwen2.5 1.5B) |
-|---|---|---|---|
-| **3–4 GB RAM** (e.g., Galaxy S8 / S9 base) | **Alpine Linux 3.24** (bundled offline, musl) | **Openbox** (~25 MB) or **IceWM** (~35 MB) | Use built-in Offline Knowledge Vault (avoid loading 1.3 GB model while X11 is running) |
-| **6–8 GB RAM** (e.g., Galaxy S10 / S10+ / S20) | **Alpine 3.24** (fast default), **Debian 12**, or **Ubuntu 24.04 LTS** | **IceWM** (~35 MB), **LXQt** (~110 MB), or **XFCE4** (~140 MB) | Comfortable with Qwen2.5 1.5B Q4_K_M (~1.3 GB RAM) |
-| **12–16 GB RAM** (e.g., Pixel 9 Pro Fold / S10+ Performance / Ultra) | Any supported distro (**Alpine**, **Debian 12**, **Ubuntu 24.04**, **Arch Linux ARM**, **Kali**) | **XFCE4** or **LXQt** with concurrent browser/IDE workloads | Can run Qwen2.5 1.5B alongside X11 desktop and local servers |
-

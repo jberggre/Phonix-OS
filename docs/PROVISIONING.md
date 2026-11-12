@@ -208,8 +208,6 @@ with. A keyboard works too (Tab, Enter).
 After the one click, in this order:
 
 1. Finish the setup wizard (skip the Samsung account and the restore prompt).
-   - Inside Phonix's own **Setup Wizard**, Step 3 now includes the **Linux Distro Switcher** (`Alpine 3.24` bundled offline default, or on-demand HTTPS rootfs download for `Debian 12`, `Ubuntu 24.04 LTS`, `Arch Linux ARM`, or `Kali Linux`). For offline bench provisioning, keep **Alpine 3.24** selected so rootfs extraction completes in ~2 seconds without network traffic.
-   - Any time after setup, technicians or users can open the **Help & Docs** tab from the top navigation pill (`Phonix Mini PC` → `Help & Docs`) or the Start menu to inspect live runtime status and run diagnostic terminal commands.
 2. Turn on DeX auto-start, so the prompt never returns:
    Settings → Advanced features → Samsung DeX → *Auto start when HDMI is connected*
    (One UI 5 and newer: Settings → Connected devices → Samsung DeX).

@@ -1,7 +1,6 @@
 # Research notes for the next round of Phonix
 
-Written 2026-10-29, updated 2026-11-09 after the multi-distro workstation, X11 DE switcher,
-`phonix-pin`, and Help & Docs tab expansion. Each section answers a
+Written 2026-10-29, updated after the 1.1 bench session on the same day. Each section answers a
 question the owner asked, records what is **verified**, what is **folklore**, and what should
 **not** be promised. Sources are listed at the end. Where a section says “measured”, it was
 executed on the SM-G973U; the current work queue lives in [HANDOFF.md](HANDOFF.md) and the
@@ -16,10 +15,10 @@ behind those items.
 | Question | Verdict | Effort |
 |---|---|---|
 | Hide DeX's caption bar by making the display "taller" | **No supported path.** Overscan is gone from Android 11+; `wm size` rescales, it does not crop; apps cannot place their own DeX window at negative y. | — |
-| VS Code | **Window exists, server is socket-probed.** Microsoft ships an Alpine arm64 CLI with `serve-web`; the P0 build probes `127.0.0.1:8000` and stays red without a listener. Full CLI device run remains open. | 1 day + a device test |
-| Update shipped units without Play | **Feasible and supported**: device owner + `PackageInstaller.Session`, self-hosted signed manifest. About is reachable and `VersionComparator` is numeric (`1.10 > 1.9`); hosted manifest endpoint remains next. | 2–3 days |
+| VS Code | **Window exists, server does not.** Microsoft ships an Alpine arm64 CLI with `serve-web`; 1.1 never installed it yet reported “Server Running :8000” (measured). The P0 build now probes `127.0.0.1:8000` and stays red without a listener. The CLI experiment below is still unrun. | 1 day + a device test |
+| Update shipped units without Play | **Feasible and supported**: device owner + `PackageInstaller.Session`, self-hosted signed manifest. About is **reachable** since the P0 fix, but the configured endpoint still 404s and the version compare is wrong; fix B8 before building the manifest flow. | 2–3 days |
 | Stop customers escaping to the launcher | **Not together with DeX.** Samsung documents DeX as unsupported in lock-task/kiosk mode. In-app PIN is the realistic option. | 1–2 days (PIN) |
-| Other distros & X11 desktops | **Implemented in code (2026-11-09):** Alpine 3.24 ships bundled; Debian 12, Ubuntu 24.04 LTS, Arch Linux ARM, and Kali stream over HTTPS into `filesDir/linux/<distroId>`. Live X11 DE switcher supports `IceWM`, `XFCE4`, `Openbox`, and `LXQt`. Hardware soak remains next. | shipped in code; device test next |
+| Other distros (Mint, postmarketOS) | **No for both as shipped options**; Debian and Ubuntu are the honest additions. | 3–5 days |
 | Local AI | **Implemented and measured 2026-10-29**: Qwen2.5 1.5B Q4_K_M through Alpine’s `llama-server`, 8.2–17.2 tok/s on the S10, CPU only. Thermal soak and 3B comparison remain open. | done; soak next |
 
 ---
@@ -145,25 +144,28 @@ the DeX product.
 
 ---
 
-## 5. Other distributions & X11 desktop environments
+## 5. Other distributions
 
 The guest is a **proot userland on Android's kernel**; it is not a booted Linux. That limits what
 "choose a distro" can mean.
 
-| Candidate | Status (2026-11-09) | Notes |
+| Candidate | Status | Notes |
 |---|---|---|
-| Alpine 3.24 | **Shipping (Bundled Default)** | musl, ~3.4 MB compressed in APK (`assets/alpine-rootfs.tgz`), extracts offline |
-| Debian 12 (Bookworm) | **Implemented (On-Demand HTTPS)** | Official arm64 rootfs (`images.linuxcontainers.org`), glibc, `apt-get`, `.tar.xz` extracted via bundled Alpine `proot` + `busybox tar -xJf` |
-| Ubuntu 24.04 LTS (Noble) | **Implemented (On-Demand HTTPS)** | Official arm64 `ubuntu-base` (`cdimage.ubuntu.com`), glibc, `apt-get` |
-| Arch Linux ARM | **Implemented (On-Demand HTTPS)** | Official `ArchLinuxARM-aarch64-latest.tar.gz`, `pacman`; labeled as rolling-release |
-| Kali Linux Rolling | **Implemented (On-Demand HTTPS)** | Uses official Debian arm64 rootfs base + `apt-get` |
+| Alpine | Shipping | musl, 11 MB base, already integrated |
+| Debian | Viable next | Official arm64 minbase rootfs, glibc, apt |
+| Ubuntu | Viable next | Official arm64 rootfs, glibc, apt |
+| Void | Advanced | aarch64 rootfs, glibc or musl |
+| Arch Linux ARM | Advanced | Separate project from Arch; label carefully |
+| Fedora | Advanced | AArch64 container base tarball |
 | Linux Mint | **No** | No official ARM64 image; Mint forum says no current ARM plans. Cinnamon on top of an Ubuntu arm64 base is not "Mint". |
 | postmarketOS | **No** | A device port, not a rootfs; needs an unlocked bootloader. SM-G973U is the US Snapdragon model and is not a supported port (the Exynos `beyond1lte` port is a different phone). |
 
 Disclose for every guest: shared Android kernel; **no systemd/OpenRC as init**; no Docker Engine
 or kernel modules; service-starting package scripts may need manual handling; musl vs glibc;
-X11 is Phonix's own integration (`Xvfb :1` + `x11vnc` + `websockify`), supporting live switching
-between **IceWM**, **XFCE4**, **Openbox**, and **LXQt**.
+X11 is Phonix's own integration, not part of the distro image.
+
+**Recommendation:** ship Alpine (default) + Debian + Ubuntu, each as a separate rootfs with its
+own X11 stack. Keep the others behind "experimental" or out.
 
 ---
 
@@ -223,18 +225,19 @@ performance.
 1. **Stop the shipping UI from lying — done 2026-10-29.** Phone Screen was removed as a mock and
    then restored as a real read-only capture; the AI window was relabelled and then given a real
    model; VS Code is probe-gated (B3); About is in the live Start menu (B13). The device checks are
-   in `VERIFICATION.md` §10 and §11.
-2. **Window and grid geometry — done 2026-10-30 (`13d4f9b`, `ce94f4b`).** Container-based clamps,
-   resize grip, `normalizeLayout` across size/display changes, and `DesktopPrefs` persistence (B4, B5, B6).
-3. **Multi-distro picker, X11 DE switcher, `phonix-pin` shortcuts, multi-tab terminal & Help tab — done in code 2026-11-09.**
-   Alpine ships bundled; Debian 12, Ubuntu 24.04 LTS, Arch Linux ARM, and Kali stream over HTTPS on demand;
-   X11 supports switching between IceWM, XFCE4, Openbox, and LXQt; `phonix-pin` and terminal auto-detection pin shortcuts to the desktop; and `HelpDocsScreen.kt` provides an interactive Help & Docs tab.
-4. **Prove the Wi-Fi join path** on a spare unit (the remaining unverified shipping step).
-5. **VS Code experiment** (one day) → install the Alpine CLI, probe loopback, then show the
+   in `VERIFICATION.md` §10 and §11. The remaining work starts at window geometry, and the
+   ordered queue is in [HANDOFF.md](HANDOFF.md).
+2. **Window and grid geometry.** One unit (dp), container-based clamps, a resize grip, and a
+   `normalizeLayout` pass across size/display changes; compute the shortcut grid from the
+   container so landscape stops clipping (B4, B5). Persist `DesktopCustomization` next (B6).
+3. **Prove the Wi-Fi join path** on a spare unit (the remaining unverified shipping step).
+4. **VS Code experiment** (one day) → install the Alpine CLI, probe loopback, then show the
    editor; only then call it a Developer card (ROADMAP §2).
-6. **Self-hosted update channel** — About is reachable and `VersionComparator` is fixed; next is hosting the signed manifest + `PackageInstaller` flow.
-7. **Local AI — done 2026-10-29** with `llama-server`, a pinned 1.5B GGUF and a health probe. The
+5. **Self-hosted update channel** — make About reachable and fix the version compare first; then
+   the signed manifest + `PackageInstaller` flow.
+6. **Local AI — done 2026-10-29** with `llama-server`, a pinned 1.5B GGUF and a health probe. The
    follow-up is a thermal soak, a 3B comparison, and safe-answer handling for water/medical topics.
+7. **Distro picker: Debian + Ubuntu** behind the existing hub, with the disclosure list above.
 8. **Supervisor PIN** (in-app) once the owner decides DeX vs kiosk.
 9. **Thermal soak** to replace every performance claim with measurements.
 
