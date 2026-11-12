@@ -245,6 +245,24 @@ fun PhonixDesktopScreen(
         val iconAreaHeight = (screenHeight - topPadding - bottomPadding).coerceAtLeast(rowStride)
         val gridTop = (iconAreaHeight - (rowStride * gridRows) - 6.dp).coerceAtLeast(0.dp)
 
+        // The view model snaps into this grid, not into a second copy of the numbers. It used to
+        // keep its own 88 x 94 dp pitch measured from the top corner, so "Lock Icons to Grid"
+        // dropped an icon in the middle of the screen and left every other icon untouched.
+        LaunchedEffect(iconColumns, iconAreaHeight) {
+            viewModel.setIconGrid(iconColumns, iconAreaHeight.value)
+        }
+
+        // The icon area grows or shrinks when the bar docks to another edge. Freeform positions are
+        // offsets inside it, so they travel with it instead of being stranded under the bar.
+        var lastIconAreaHeight by remember { mutableStateOf<Float?>(null) }
+        LaunchedEffect(iconAreaHeight) {
+            val previous = lastIconAreaHeight
+            lastIconAreaHeight = iconAreaHeight.value
+            if (previous != null && previous != iconAreaHeight.value) {
+                viewModel.reanchorShortcuts(iconAreaHeight.value - previous, iconAreaHeight.value)
+            }
+        }
+
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
@@ -2621,7 +2639,72 @@ fun ServerManagerWindowContent(
     uiState: PhonixUiState,
     viewModel: PhonixViewModel
 ) {
+    LaunchedEffect(Unit) {
+        // This window is what DeX actually draws, so it asks the guest and re-reads the manifests
+        // itself: a declaration dropped in while the app runs still appears here.
+        viewModel.refreshServerStates()
+        viewModel.reloadModuleManifests()
+    }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (uiState.manifests.manifests.isNotEmpty() || uiState.manifests.issues.isNotEmpty()) {
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    Text(
+                        text = "Module manifests: ${uiState.manifests.manifests.size} accepted, " +
+                            "${uiState.manifests.issues.size} rejected",
+                        color = if (uiState.manifests.issues.isEmpty()) PhonixCyan
+                        else androidx.compose.ui.graphics.Color(0xFFF59E0B),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    uiState.manifests.issues.forEach { issue ->
+                        Text(
+                            text = issue.toString(),
+                            color = Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+        val packIds = uiState.manifests.packs()
+        if (packIds.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Packs (${uiState.verifiedPacks.size} verified)",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+            items(packIds) { id ->
+                val state = uiState.packStates[id]
+                    ?: if (id in uiState.verifiedPacks) "Verified and installed" else "Not downloaded"
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(id, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        // The state is the last measured outcome, never a spinner that turns green.
+                        Text(
+                            text = state,
+                            color = if (id in uiState.verifiedPacks) PhonixCyan else Slate400,
+                            fontSize = 10.sp
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Button(
+                            onClick = { viewModel.downloadPack(id) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text(
+                                text = if (id in uiState.verifiedPacks) "Verify again" else "Download",
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
         items(uiState.serverServices) { service ->
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate900)) {
                 Row(
@@ -2635,10 +2718,30 @@ fun ServerManagerWindowContent(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(service.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
-                        Text("Port :${service.port} • ${service.category}", color = Slate400, fontSize = 10.sp)
+                        Text(
+                            text = if (service.port > 0) "Port :${service.port} • ${service.category}"
+                            else "Process-only probe • ${service.category}",
+                            color = Slate400,
+                            fontSize = 10.sp
+                        )
                     }
                     Switch(checked = service.isRunning, onCheckedChange = { viewModel.toggleServerService(service.id) })
                 }
+                // Probe-derived, never assumed. The state the supervisor observed is shown next to
+                // the service, and tapping this line is what starts or stops supervising it.
+                val supervisionLine = uiState.supervision[service.id]
+                Text(
+                    text = supervisionLine?.let { "$it - tap to stop supervising" }
+                        ?: "Not supervised - tap to keep it running",
+                    color = if (supervisionLine == null) Slate400 else PhonixCyan,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.toggleServiceSupervision(service.id) }
+                        .padding(horizontal = 10.dp)
+                        .padding(bottom = 10.dp)
+                )
             }
         }
     }
@@ -3073,6 +3176,24 @@ fun VsCodeWindowContent(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (uiState.vsCodeCliVersion == null) {
+                    Button(
+                        onClick = { viewModel.installVsCode() },
+                        enabled = !uiState.vsCodeInstalling,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PhonixGreen.copy(alpha = if (uiState.vsCodeInstalling) 0.35f else 1f)
+                        ),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text(
+                            if (uiState.vsCodeInstalling) "Installing..." else "Install VS Code",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0B1F12)
+                        )
+                    }
+                }
                 if (!uiState.vsCodeServerRunning && !uiState.vsCodeServerProbing) {
                     Button(
                         onClick = { viewModel.startVsCodeServer() },
@@ -3676,7 +3797,7 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    "${tier.title} (${tier.approxSize})",
+                                    "${tier.title} (${KnowledgeLibrary.sizeLabel(tier)})",
                                     color = if (isSel) PhonixCyan else Slate400,
                                     fontSize = 9.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
@@ -3685,11 +3806,70 @@ private fun KnowledgeLibraryDialog(uiState: PhonixUiState, viewModel: PhonixView
                         }
                     }
                     Text(
-                        "Everything here works with no model, no network and no second device. ${KnowledgeLibrary.docsFor(null, selectedTier).size} active documents on ${KnowledgeCategory.entries.size} shelves.",
+                        "Everything here works with no model, no network and no second device. ${KnowledgeLibrary.docsFor(null, selectedTier).size} active documents on ${KnowledgeCategory.entries.size} shelves. Imported packs are saved on the phone, never fetched from a server.",
                         color = Slate400,
                         fontSize = 9.sp,
                         lineHeight = 13.sp
                     )
+                    val packImporter = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocument()
+                    ) { picked: android.net.Uri? ->
+                        if (picked != null) viewModel.importLibraryPack(picked)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "Packs (${uiState.libraryPacks.size})",
+                            color = PhonixAmber,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Slate900)
+                                .border(1.dp, Slate800, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    // Any text file: the picker's MIME filter is unreliable on
+                                    // Android 12 for .pack, so the format check happens on parse.
+                                    packImporter.launch(
+                                        arrayOf("text/plain", "text/markdown", "application/octet-stream")
+                                    )
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Import .pack", color = PhonixCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (uiState.libraryPackBusy) {
+                        Text("Reading the pack...", color = Slate400, fontSize = 9.sp)
+                    }
+                    uiState.libraryPacks.forEach { pack ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "${pack.title} - ${pack.docCount} docs - ${com.example.model.KnowledgeLibrary.bytesLabel(pack.bytes)}",
+                                color = Slate200,
+                                fontSize = 9.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "Delete",
+                                color = PhonixAmber,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { viewModel.deleteLibraryPack(pack.id) }
+                                    .padding(start = 8.dp)
+                            )
+                        }
+                    }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         KnowledgeCategory.entries.forEach { category ->
                             val shelfDocs = KnowledgeLibrary.docsFor(category, selectedTier)

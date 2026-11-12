@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -204,6 +205,19 @@ fun ServerCenterScreen(
                         )
                     }
                     Text(service.description, color = Slate300, fontSize = 11.sp, lineHeight = 15.sp)
+                    // Probe-derived, never assumed. The state the supervisor observed is shown next to
+                    // the service, and tapping this line is what starts or stops supervising it.
+                    val supervisionLine = uiState.supervision[service.id]
+                    Text(
+                        text = supervisionLine?.let { "$it - tap to stop supervising" }
+                            ?: "Not supervised - tap to keep it running",
+                        color = if (supervisionLine == null) Slate400 else PhonixCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.toggleServiceSupervision(service.id) }
+                    )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(

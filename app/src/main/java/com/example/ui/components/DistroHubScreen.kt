@@ -72,6 +72,8 @@ import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import com.example.viewmodel.PhonixUiState
 import com.example.viewmodel.PhonixViewModel
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -102,6 +104,8 @@ fun DistroHubScreen(
     var pendingSwitchDistro by remember { mutableStateOf<LinuxDistro?>(null) }
     var isSwitching by remember { mutableStateOf(false) }
     var switchProgressMessage by remember { mutableStateOf("") }
+    var downloadWritten by remember { mutableStateOf(0L) }
+    var downloadTotal by remember { mutableStateOf(0L) }
     var switchErrorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { viewModel.refreshStorage() }
@@ -200,7 +204,26 @@ fun DistroHubScreen(
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Distro Migration in Progress...", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Text(switchProgressMessage, color = PhonixCyan, fontSize = 11.sp)
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp), color = PhonixCyan, trackColor = Slate800)
+                    if (downloadTotal > 0L) {
+                        LinearProgressIndicator(
+                            progress = (downloadWritten.toFloat() / downloadTotal.toFloat()).coerceIn(0f, 1f),
+                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                            color = PhonixCyan,
+                            trackColor = Slate800
+                        )
+                        Text(
+                            "${formatMb(downloadWritten)} of ${formatMb(downloadTotal)} downloaded",
+                            color = Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                            color = PhonixCyan,
+                            trackColor = Slate800
+                        )
+                    }
                 }
             }
         }
@@ -450,13 +473,23 @@ fun DistroHubScreen(
                         switchErrorMessage = null
                         switchProgressMessage = "Stopping active Linux services..."
                         scope.launch {
+                            downloadWritten = 0L
+                            downloadTotal = 0L
                             viewModel.stopContainer()
                             val result = runCatching {
-                                container.switchDistro(
-                                    distro = toInstall,
-                                    debloatPrevious = true,
-                                    onProgress = { progress -> switchProgressMessage = progress }
-                                )
+                                // switchDistro downloads over HTTP and then blocks on proot for the
+                                // in-guest unpack, so it must not run on the main dispatcher.
+                                withContext(Dispatchers.IO) {
+                                    container.switchDistro(
+                                        distro = toInstall,
+                                        debloatPrevious = true,
+                                        onProgress = { progress -> switchProgressMessage = progress },
+                                        onBytes = { written, total ->
+                                            downloadWritten = written
+                                            downloadTotal = total
+                                        }
+                                    )
+                                }
                             }
                             result.onSuccess {
                                 viewModel.selectDistro(toInstall)
